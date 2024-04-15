@@ -121,6 +121,16 @@ class EnvWithGoal(object):
             'desired_goal': self.desired_goal,
         }
         return next_obs, reward, done or self.count >= 500, info
+    
+    def get_maze(self):
+        structure = self.base_env.MAZE_STRUCTURE
+        size_scaling = self.base_env.MAZE_SIZE_SCALING
+        #coords = []
+        #for i in range(len(structure)):
+        #    for j in range(len(structure[0])):
+        #        if structure[i][j] == 'O':
+        #            coords.append((j * size_scaling, i * size_scaling))
+        return structure
 
     def render(self):
         self.base_env.render()

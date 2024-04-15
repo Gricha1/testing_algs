@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=5e3, type=float)
+    parser.add_argument("--eval_freq", default=1e5, type=float) # 5e3
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", action="store_true")
     parser.add_argument("--env_name", default="AntMaze", type=str)
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--no_correction", action="store_true")
     parser.add_argument("--inner_dones", action="store_true")
-    parser.add_argument("--absolute_goal", action="store_true")
+    parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 

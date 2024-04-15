@@ -2,11 +2,13 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from stable_baselines3.common.logger import Video
 
 import os
 import numpy as np
 import pandas as pd
 from math import ceil
+import matplotlib.pylab as plt
 
 import hrac.utils as utils
 import hrac.hrac as hrac
@@ -21,10 +23,110 @@ HIRO part adapted from
 https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro.py
 """
 
+class CustomVideoRendered:
+    def __init__(self, env):
+        self.render_info = {}
+        self.render_info["fig"] = None
+        self.render_info["ax_states"] = None
+        self.add_subgoal_values = False
+        self.add_mesurements = False
+        self.env = env
+        if self.add_subgoal_values or self.add_mesurements:
+            assert 1 == 0, "didnt implement"
+
+    def custom_render(self, current_step_info, positions_render=False, 
+                      plot_goal=True, dubug_info={}, shape=(600, 600)):    
+        assert "robot_pos" in current_step_info and \
+               "subgoal_pos" in current_step_info and \
+               "goal_pos" in current_step_info and \
+               "robot_radius" in current_step_info and \
+               "obstacle_radius" in current_step_info and \
+               "hazards_pos" in current_step_info
+
+        shift_x, shift_y = -8, -8
+        env_min_x, env_max_x = -20, 20
+        env_min_y, env_max_y = -20, 20
+        if self.render_info["fig"] is None:
+            if self.add_subgoal_values:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_subgoal_values"] = self.render_info["fig"].add_subplot(122)
+            else:
+                self.render_info["fig"] = plt.figure(figsize=[6.4, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(111)
+        self.render_info["ax_states"].set_ylim(bottom=env_min_y, top=env_max_y)
+        self.render_info["ax_states"].set_xlim(left=env_min_x, right=env_max_x)
+        # robot pose
+        x = current_step_info["robot_pos"][0] + shift_x
+        y = current_step_info["robot_pos"][1] + shift_y
+        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="g", alpha=0.5)
+        self.render_info["ax_states"].add_patch(circle_robot) 
+        self.render_info["ax_states"].scatter(x, y, color="red")
+        self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
+
+        # subgoal
+        x = current_step_info["subgoal_pos"][0] + shift_x
+        y = current_step_info["subgoal_pos"][1] + shift_y
+        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+        self.render_info["ax_states"].add_patch(circle_robot)
+        self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
+        if self.add_subgoal_values:
+            self.render_info["ax_subgoal_values"].plot(range(len(dubug_info["v_s_sg"])), dubug_info["v_s_sg"])
+            self.render_info["ax_subgoal_values"].plot(range(len(dubug_info["v_sg_g"])), dubug_info["v_sg_g"])
+
+        # goal
+        if plot_goal:
+            x = current_step_info["goal_pos"][0] + shift_x
+            y = current_step_info["goal_pos"][1] + shift_y
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="y", alpha=0.5)
+            self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")
+            
+        # add obstacles
+        obstacles = [plt.Circle([obs[0] + shift_x, obs[1] + shift_y], radius=current_step_info["obstacle_radius"],  # noqa
+                    color="b", alpha=0.5) for obs in current_step_info["hazards_pos"]]
+        for obs in obstacles:
+            self.render_info["ax_states"].add_patch(obs)
+        if self.add_mesurements:    
+            # debug info
+            if len(dubug_info) != 0:
+                a0 = dubug_info["a0"]
+                a1 = dubug_info["a1"]
+                acc_reward = dubug_info["acc_reward"]
+                t = dubug_info["t"]
+                acc_cost = dubug_info["acc_cost"]
+                self.render_info["ax_states"].text(env_max_x - 4.5, env_max_y - 0.3, f"a0:{int(a0*100)/100}")
+                self.render_info["ax_states"].text(env_max_x - 3.5, env_max_y - 0.3, f"a1:{int(a1*100)/100}")
+                self.render_info["ax_states"].text(env_max_x - 2.5, env_max_y - 0.3, f"R:{int(acc_reward*10)/10}")
+                self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 0.3, f"C:{int(acc_cost*10)/10}")
+                self.render_info["ax_states"].text(env_max_x - 0.5, env_max_y - 0.3, f"t:{t}")
+        
+        # print maze
+        env_map = self.env.get_maze()
+        for i in env_map:
+            for indx, val in enumerate(i):
+                if val == 'r':
+                    i[indx] = 2
+        
+        self.render_info["ax_states"].imshow(env_map, cmap='viridis', 
+                                             interpolation='nearest', 
+                                             extent=[env_min_x, env_max_x, env_min_y, env_max_y])
+
+        # render img
+        # self.render_info["fig"].savefig("example.png")
+        self.render_info["fig"].canvas.draw()
+        data = np.frombuffer(self.render_info["fig"].canvas.tostring_rgb(), dtype=np.uint8)
+        data = data.reshape(self.render_info["fig"].canvas.get_width_height()[::-1] + (3,))
+        self.render_info["ax_states"].clear()
+        if self.add_subgoal_values:
+            self.render_info["ax_subgoal_values"].clear()
+        return data
+
 
 def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     calculate_controller_reward, ctrl_rew_scale,
-                    manager_propose_frequency=10, eval_idx=0, eval_episodes=5):
+                    manager_propose_frequency=10, eval_idx=0, eval_episodes=5, 
+                    renderer=None, writer=None, total_timesteps=0):
     print("Starting evaluation number {}...".format(eval_idx))
     env.evaluate = True
 
@@ -38,6 +140,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
             goal = obs["desired_goal"]
             state = obs["observation"]
+
+            # render
+            if eval_ep == 0:
+                positions_screens = []
 
             done = False
             step_count = 0
@@ -55,6 +161,21 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     goals_achieved += 1
                     done = True
 
+                # render env
+                if not (renderer is None) and eval_ep == 0:
+                    current_step_info = {}
+                    current_step_info["robot_pos"] = state[:2]
+                    if env_name != "AntGather":
+                        current_step_info["goal_pos"] = goal[:2]
+                    else:
+                        current_step_info["goal_pos"] = None
+                    current_step_info["subgoal_pos"] = subgoal[:2]
+                    current_step_info["robot_radius"] = 1.5
+                    current_step_info["obstacle_radius"] = 0.3
+                    current_step_info["hazards_pos"] = []
+                    screen = renderer.custom_render(current_step_info, plot_goal=(env_name!="AntGather"))
+                    positions_screens.append(screen.transpose(2, 0, 1))
+
                 goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
 
@@ -65,6 +186,16 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
                 state = new_state
 
+        if not (renderer is None) and not (writer is None):
+            writer.add_video(
+                "eval/pos_video",
+                #Video(torch.ByteTensor([positions_screens]), fps=40),
+                torch.ByteTensor([positions_screens]),
+                total_timesteps,
+                #exclude=("stdout", "log", "json", "csv"),
+            )
+            del positions_screens
+            
         avg_reward /= eval_episodes
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
@@ -152,15 +283,24 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
 
 
 def run_hrac(args):
+    print("args:", args)
+    
     if not os.path.exists("./results"):
         os.makedirs("./results")
     if args.save_models and not os.path.exists("./models"):
         os.makedirs("./models")
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
-    if not os.path.exists(os.path.join(args.log_dir, args.algo)):
-        os.makedirs(os.path.join(args.log_dir, args.algo))
     output_dir = os.path.join(args.log_dir, args.algo)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    output_dir += "/" + args.env_name
+    output_dir += "_1"
+    # output_dir = "logs/hrac/AntGather_1"
+    while os.path.exists(output_dir):
+        run_number = int(output_dir.split("_")[-1])
+        output_dir = "_".join(output_dir.split("_")[:-1])
+        output_dir = output_dir + "_" + str(run_number + 1)
     print("Logging in {}".format(output_dir))
 
     if args.env_name == "AntGather":
@@ -171,7 +311,10 @@ def run_hrac(args):
         env.seed(args.seed)
     else:
         raise NotImplementedError
-
+    
+    # render
+    renderer = CustomVideoRendered(env)
+    
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
     max_action = float(env.action_space.high[0])
@@ -196,7 +339,7 @@ def run_hrac(args):
     goal = obs["desired_goal"]
     state = obs["observation"]
 
-    writer = SummaryWriter(log_dir=os.path.join(args.log_dir, args.algo))
+    writer = SummaryWriter(log_dir=output_dir)
     torch.cuda.set_device(args.gid)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -331,8 +474,9 @@ def run_hrac(args):
                     timesteps_since_eval = 0
                     avg_ep_rew, avg_controller_rew, avg_steps, avg_env_finish =\
                         evaluate_policy(env, args.env_name, manager_policy, controller_policy,
-                            calculate_controller_reward, args.ctrl_rew_scale, args.manager_propose_freq,
-                            len(evaluations))
+                            calculate_controller_reward, args.ctrl_rew_scale, 
+                            args.manager_propose_freq, len(evaluations), 
+                            renderer=renderer, writer=writer, total_timesteps=total_timesteps)
 
                     writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
                     writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
@@ -440,7 +584,8 @@ def run_hrac(args):
     # Final evaluation
     avg_ep_rew, avg_controller_rew, avg_steps, avg_env_finish = evaluate_policy(
         env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
-        args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations))
+        args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
+        renderer=renderer, writer=writer, total_timesteps=total_timesteps)
     evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
     output_data["frames"].append(total_timesteps)
     if args.env_name == 'AntGather':
