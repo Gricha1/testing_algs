@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic
+    ManagerActor, ManagerCritic, PPOAgent
 
 
 """
@@ -249,8 +249,9 @@ class Manager(object):
 class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
-                 absolute_goal=False
+                 absolute_goal=False, PPO=False, ppo_lr=None
     ):
+        self.PPO = PPO
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
@@ -262,19 +263,24 @@ class Controller(object):
         self.criterion = nn.SmoothL1Loss()    
         # self.criterion = nn.MSELoss()
 
-        self.actor = ControllerActor(state_dim, goal_dim, action_dim,
-                                     scale=max_action).to(device)
-        self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
-                                            scale=max_action).to(device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
-            lr=actor_lr)
+        if self.PPO:
+            self.agent = PPOAgent(state_dim, goal_dim, action_dim,
+                                     scale=max_action).to(device)  
+            self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5)  
+        else:
+            self.actor = ControllerActor(state_dim, goal_dim, action_dim,
+                                        scale=max_action).to(device)
+            self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
+                                                scale=max_action).to(device)
+            self.actor_target.load_state_dict(self.actor.state_dict())
+            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
+                lr=actor_lr)
 
-        self.critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
-        self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-            lr=critic_lr, weight_decay=0.0001)
+            self.critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+            self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+            self.critic_target.load_state_dict(self.critic.state_dict())
+            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
+                lr=critic_lr, weight_decay=0.0001)
 
 
     def clean_obs(self, state, dims=2):
@@ -292,18 +298,27 @@ class Controller(object):
         else:
             return state
 
+    def select_action_logprob_value(self, state, sg, evaluation=False):
+        assert not sg is None
+        state = self.clean_obs(get_tensor(state))
+        sg = get_tensor(sg)
+        return self.agent.get_action_and_value(state, sg)
+
     def select_action(self, state, sg, evaluation=False):
+        if self.PPO: assert 1 == 0
         state = self.clean_obs(get_tensor(state))
         sg = get_tensor(sg)
         return self.actor(state, sg).cpu().data.numpy().squeeze()
 
     def value_estimate(self, state, sg, action):
+        if self.PPO: assert 1 == 0
         state = self.clean_obs(get_tensor(state))
         sg = get_tensor(sg)
         action = get_tensor(action)
         return self.critic(state, sg, action)
 
     def actor_loss(self, state, sg):
+        if self.PPO: assert 1 == 0
         return -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
 
     def subgoal_transition(self, state, subgoal, next_state):
@@ -321,58 +336,129 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
 
-    def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005):
+    def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, 
+              minibatch_size=None, clip_coef=None, clip_vloss=None,
+              norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None):
         avg_act_loss, avg_crit_loss = 0., 0.
+        if self.PPO:
+            clipfracs = []
+            b_inds = np.arange(batch_size)
         for it in range(iterations):
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
-            next_g = get_tensor(self.subgoal_transition(x, sg, y))
-            state = self.clean_obs(get_tensor(x))
-            action = get_tensor(u)
-            sg = get_tensor(sg)
-            done = get_tensor(1 - d)
-            reward = get_tensor(r)
-            next_state = self.clean_obs(get_tensor(y))
+            if self.PPO:
+                x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
+                b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
+                b_goals = torch.FloatTensor(sg).to(device)
+                b_logprobs = torch.FloatTensor(l).to(device)
+                b_actions = torch.FloatTensor(u).to(device)
+                b_advantages = torch.FloatTensor(replay_buffer.advantages).to(device)
+                b_returns = torch.FloatTensor(replay_buffer.returns).to(device)
+                b_values = torch.FloatTensor(v).to(device)
+            else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+                next_g = get_tensor(self.subgoal_transition(x, sg, y))
+                state = self.clean_obs(get_tensor(x))
+                action = get_tensor(u)
+                sg = get_tensor(sg)
+                done = get_tensor(1 - d)
+                reward = get_tensor(r)
+                next_state = self.clean_obs(get_tensor(y))
 
-            noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
-            noise = noise.clamp(-self.noise_clip, self.noise_clip)
-            next_action = (self.actor_target(next_state, next_g) + noise)
-            next_action = torch.min(next_action, self.actor.scale)
-            next_action = torch.max(next_action, -self.actor.scale)
+            if self.PPO:
+                 # Optimizing the policy and value network
+                np.random.shuffle(b_inds)
+                for start in range(0, batch_size, minibatch_size):
+                    end = start + minibatch_size
+                    mb_inds = b_inds[start:end]
 
-            target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
-            target_Q = torch.min(target_Q1, target_Q2)
-            target_Q = reward + (done * discount * target_Q)
-            target_Q_no_grad = target_Q.detach()
+                    _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], b_goals[mb_inds], b_actions[mb_inds])
+                    logratio = newlogprob - b_logprobs[mb_inds]
+                    ratio = logratio.exp()
 
-            # Get current Q estimate
-            current_Q1, current_Q2 = self.critic(state, sg, action)
+                    with torch.no_grad():
+                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                        old_approx_kl = (-logratio).mean()
+                        approx_kl = ((ratio - 1) - logratio).mean()
+                        clipfracs += [((ratio - 1.0).abs() > clip_coef).float().mean().item()]
 
-            # Compute critic loss
-            critic_loss = self.criterion(current_Q1, target_Q_no_grad) +\
-                          self.criterion(current_Q2, target_Q_no_grad)
+                    mb_advantages = b_advantages[mb_inds]
+                    if norm_adv:
+                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
-            # Optimize the critic
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            self.critic_optimizer.step()
+                    # Policy loss
+                    pg_loss1 = -mb_advantages * ratio
+                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
+                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-            # Compute actor loss
-            actor_loss = self.actor_loss(state, sg)
+                    # Value loss
+                    newvalue = newvalue.view(-1)
+                    if clip_vloss:
+                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                        v_clipped = b_values[mb_inds] + torch.clamp(
+                            newvalue - b_values[mb_inds],
+                            -clip_coef,
+                            clip_coef,
+                        )
+                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                        v_loss = 0.5 * v_loss_max.mean()
+                    else:
+                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-            # Optimize the actor
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            self.actor_optimizer.step()
+                    entropy_loss = entropy.mean()
+                    loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
 
-            avg_act_loss += actor_loss
-            avg_crit_loss += critic_loss
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
+                    self.optimizer.step()
 
-            # Update the target models
-            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-                target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+                    avg_act_loss += pg_loss
+                    avg_crit_loss += vf_coef
 
-            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+                if target_kl is not None and approx_kl > target_kl:
+                    break
+            else:
+                noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
+                noise = noise.clamp(-self.noise_clip, self.noise_clip)
+                next_action = (self.actor_target(next_state, next_g) + noise)
+                next_action = torch.min(next_action, self.actor.scale)
+                next_action = torch.max(next_action, -self.actor.scale)
+
+                target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
+                target_Q = torch.min(target_Q1, target_Q2)
+                target_Q = reward + (done * discount * target_Q)
+                target_Q_no_grad = target_Q.detach()
+
+                # Get current Q estimate
+                current_Q1, current_Q2 = self.critic(state, sg, action)
+
+                # Compute critic loss
+                critic_loss = self.criterion(current_Q1, target_Q_no_grad) +\
+                            self.criterion(current_Q2, target_Q_no_grad)
+
+                # Optimize the critic
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic_optimizer.step()
+
+                # Compute actor loss
+                actor_loss = self.actor_loss(state, sg)
+
+                # Optimize the actor
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                self.actor_optimizer.step()
+
+                avg_act_loss += actor_loss
+                avg_crit_loss += critic_loss
+
+            if not self.PPO:
+                # Update the target models
+                for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+                for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
         return avg_act_loss / iterations, avg_crit_loss / iterations
 
