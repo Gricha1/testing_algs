@@ -14,18 +14,18 @@ class PPOAgent(nn.Module):
     def __init__(self, state_dim, goal_dim, action_dim, scale=1):
         super().__init__()
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(state_dim + goal_dim, 64)),
+            layer_init(nn.Linear(state_dim + goal_dim, 300)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(300, 300)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(300, 1), std=1.0),
         )
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(state_dim + goal_dim, 64)),
+            layer_init(nn.Linear(state_dim + goal_dim, 300)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(300, 300)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, action_dim), std=0.01),
+            layer_init(nn.Linear(300, action_dim), std=0.01),
         )
         self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
 

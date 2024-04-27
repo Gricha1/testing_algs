@@ -70,6 +70,9 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_noise_sigma", default=1., type=float)
     parser.add_argument("--man_noise_sigma", default=1., type=float)
 
+    # logger
+    parser.add_argument("--use_wandb", default=True, type=bool)
+
     # Run the algorithm
     args = parser.parse_args()
 

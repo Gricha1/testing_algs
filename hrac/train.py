@@ -10,6 +10,9 @@ import pandas as pd
 from math import ceil
 import matplotlib.pylab as plt
 
+
+import wandb
+
 import hrac.utils as utils
 import hrac.hrac as hrac
 from hrac.models import ANet
@@ -327,6 +330,13 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
 
 def run_hrac(args):
     print("args:", args)
+
+    if args.use_wandb:
+        run = wandb.init(
+            project="safe_subgoal_model_based",
+            sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+            name=f"HRAC_{args.env_name}"
+        )
     
     if not os.path.exists("./results"):
         os.makedirs("./results")

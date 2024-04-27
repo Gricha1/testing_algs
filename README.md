@@ -65,6 +65,13 @@ If you find this work useful in your research, please cite:
 
 # Docker
 
+# get image
+docker build -t hrac_img .
+
+# docker run
+docker run -it --gpus "device=0" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace hrac_img bash
+
+
 ## docker setup
 docker run -it --gpus "device=0" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace continuumio/miniconda3 /bin/bash -c "conda install python=3.8.5 -y && bash"
 
