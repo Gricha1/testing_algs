@@ -30,7 +30,7 @@ if __name__ == "__main__":
     parser.add_argument("--r_embedding_dim", default=32, type=int)
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
 
-    parser.add_argument("--manager_propose_freq", default=20, type=int)
+    parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
     parser.add_argument("--train_manager_freq", default=10, type=int)
     parser.add_argument("--man_discount", default=0.99, type=float)
     parser.add_argument("--ctrl_discount", default=0.95, type=float)
@@ -46,19 +46,19 @@ if __name__ == "__main__":
 
     # Controller Parameters
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
-    parser.add_argument("--ctrl_batch_size", default=2048, type=int) # 128
-    parser.add_argument("--ctrl_buffer_size", default=2048, type=int) # 2e5
+    parser.add_argument("--ctrl_batch_size", default=2048, type=int) # TD3=128, PPO=2048
+    parser.add_argument("--ctrl_buffer_size", default=2e5, type=int) # TD3=2e5, PPO=2048
     parser.add_argument("--ctrl_rew_scale", default=1.0, type=float)
     parser.add_argument("--ctrl_act_lr", default=1e-4, type=float) # 1e-4
     parser.add_argument("--ctrl_crit_lr", default=1e-3, type=float) # 1e-3
     # PPO controller parameters
-    parser.add_argument("--PPO", default=True, type=bool)
+    parser.add_argument("--PPO", action='store_true', default=False)
     parser.add_argument("--gae_lambda", default=0.95, type=float)
     parser.add_argument("--minibatch_size", default=32, type=int)
     parser.add_argument("--clip_coef", default=0.2, type=float)
     parser.add_argument("--clip_vloss", default=True, type=bool)
     parser.add_argument("--norm_adv", default=True, type=bool)
-    parser.add_argument("--max_grad_norm", default=0.5, type=float)
+    parser.add_argument("--max_grad_norm", default=0.1, type=float) # 0.5
     parser.add_argument("--vf_coef", default=0.5, type=float)
     parser.add_argument("--ent_coef", default=0.0, type=float)
     parser.add_argument("--target_kl", default=None, type=float)

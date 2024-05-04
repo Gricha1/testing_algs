@@ -110,3 +110,7 @@ cd /usr/home/workspace
 
 # tensorboard
 tensorboard --logdir logs --bind_all
+
+
+# train
+python main.py --env_name AntMaze
