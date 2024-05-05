@@ -40,3 +40,45 @@ If you are using this in your work, please cite using :
  volume = {35},
  year = {2022}
 }
+
+
+
+# Docker
+docker run -it --name mbppol --gpus "device=0" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace continuumio/miniconda3 /bin/bash -c "conda install python=3.8.5 -y && bash"
+
+
+## install mujoco
+apt-get update
+apt-get install build-essential --yes
+cd /root
+mkdir .mujoco
+wget https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz
+tar -xf mujoco210-linux-x86_64.tar.gz -C .mujoco
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/.mujoco/mujoco210/bin
+
+## install mujoco_py & safety gym
+apt-get install -y \
+    libgl1-mesa-dev \
+    libgl1-mesa-glx \
+    libglew-dev \
+    libosmesa6-dev \
+    software-properties-common \
+    patchelf
+pip install onnxruntime free-mujoco-py
+// comment mujoco_py 
+cd /usr/home/workspace/safety-gym
+pip install -e .
+
+## install torch with cuda
+pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113
+pip install tensorflow
+
+## install wandb
+pip install wandb moviepy opencv-python
+
+
+# tensorboard
+tensorboard --logdir data/ --bind_all
+
+# Train
+python3 mbppo_lagrangian.py --exp_name=test_point_1 --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02

@@ -97,7 +97,8 @@ def obs_lidar_pseudo(robot_matrix,robot_pos,positions):
         pos = np.asarray(pos)
         if pos.shape == (3,):
             pos = pos[:2]  # Truncate Z coordinate
-        z = np.complex(*ego_xy(robot_matrix, robot_pos, pos))  # X, Y as real, imaginary components
+        #z = np.complex(*ego_xy(robot_matrix, robot_pos, pos))  # X, Y as real, imaginary components
+        z = ego_xy(robot_matrix, robot_pos, pos)[0] + ego_xy(robot_matrix, robot_pos, pos)[1] * 1j
         dist = np.abs(z)
         angle = np.angle(z) % (np.pi * 2)
         bin_size = (np.pi * 2) / lidar_num_bins

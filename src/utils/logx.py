@@ -16,6 +16,8 @@ import warnings
 from .mpi_tools import proc_id, mpi_statistics_scalar
 from .serialization_utils import convert_json
 
+import wandb
+
 color2num = dict(
     gray=30,
     red=31,
@@ -111,6 +113,16 @@ class Logger:
         self.log_headers = []
         self.log_current_row = {}
         self.exp_name = exp_name
+        # add wandb logging
+        self.use_wandb = True
+        if self.use_wandb:
+            self.custom_video = None
+            self.run_wandb = wandb.init(
+                project="safe_subgoal_model_based",
+                #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                name=f"MBPPOL_"
+            )
+            self.wandb_dict = {}
 
     def log(self, msg, color='green'):
         """Print a colorized message to stdout."""
@@ -132,6 +144,9 @@ class Logger:
             assert key in self.log_headers, "Trying to introduce a new key %s that you didn't include in the first iteration"%key
         assert key not in self.log_current_row, "You already set %s this iteration. Maybe you forgot to call dump_tabular()"%key
         self.log_current_row[key] = val
+        if self.use_wandb:
+            self.wandb_dict[key] = val
+
 
     def save_config(self, config):
         """
@@ -299,6 +314,10 @@ class Logger:
                 self.output_file.flush()
         self.log_current_row.clear()
         self.first_row=False
+        if self.use_wandb:
+            self.run_wandb.log(self.wandb_dict)
+            del self.custom_video
+            self.wandb_dict = {}
 
 class EpochLogger(Logger):
     """

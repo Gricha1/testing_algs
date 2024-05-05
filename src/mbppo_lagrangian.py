@@ -1,6 +1,7 @@
 #This code is modified for research purpose from Open AI Spinning Up implementation of PPO https://github.com/openai/spinningup (MIT LICENSE which allows for private use, attached  in ./src folder)
 import numpy as np
 import torch
+import wandb
 from torch.optim import Adam
 import safety_gym
 import gym
@@ -240,7 +241,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
     # Set up logger and save configuration
     logger = EpochLogger(**logger_kwargs)
-    logger.save_config(locals())
+    if not logger.use_wandb:
+        logger.save_config(locals())
 
     # Random seed
     seed += 10000 * proc_id()
@@ -290,8 +292,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         loss_rpi = (torch.min(ratio * adv, clip_adv)).mean()
 
         clip_cadv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * cadv
-        #loss_cpi = (torch.max(ratio * cadv, clip_cadv)).mean()
-        loss_cpi = ratio*cadv
+        loss_cpi = (torch.max(ratio * cadv, clip_cadv)).mean()
+        #loss_cpi = ratio*cadv
         loss_cpi = loss_cpi.mean()
 
         p = softplus(penalty_param)
@@ -305,10 +307,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         #to tackle underestimation of cost due to truncated horizon we use 'beta_safety' hyperparameter
         beta_safety = beta
         cost_deviation = (cur_cost - cost_limit*beta_safety)
-
-
-
-
 
 
         # Useful extra info
@@ -330,7 +328,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
 
     # Set up optimizers for policy and value function
-    pi_lr = 3e-4
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
     penalty_param = torch.tensor(0.5, device=cpudevice,requires_grad=True).float()
     penalty = softplus(penalty_param)
@@ -338,7 +335,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
     penalty_lr = 5e-2
     penalty_optimizer = Adam([penalty_param], lr=penalty_lr)
-    vf_lr = 1e-3
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
     cvf_optimizer = Adam(ac.vc.parameters(),lr=vf_lr)
     # Set up model saving
@@ -437,6 +433,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
         #wandb.log({'losspi':pi_l_old,'kl':kl})
         logger.store(LossPi=pi_l_old, LossV=v_l_old,
+                     LossCV=cv_l_old,
+                     Lambda=penalty_param,
                      KL=kl, Entropy=ent, ClipFrac=cf,
                      DeltaLossPi=(loss_pi.item() - pi_l_old),
                      DeltaLossV=(loss_v.item() - v_l_old))
@@ -453,7 +451,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
         labels = delta_state
 
-        predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+        epoch, loss = predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+        logger.store(LossModel=loss)
         del state, action, reward, next_state, done
 #-----------------------------------------------------------------------------------------------
         #return cost_clf
@@ -468,10 +467,19 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     #------------------Collecting data from real environment----------------------------
     max_training_steps = int(10000/num_procs())
     outer_loop_epochs = int(num_steps/max_training_steps)
+    # custom validation
+    validation_episode = 1
+    validate_each_epoch = 5
+    validate_world_model = True
     #-----------------------------------------------------------------------------------
 
     for epoch in range(outer_loop_epochs):
         o, static = env.reset()
+
+        # custom validation
+        train_episode = 0
+        logger.custom_video = None
+        screens = []
 
         goal_pos = static['goal']
         hazards_pos = static['hazards']
@@ -493,9 +501,18 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
             ot = torch.as_tensor(obs_vec,device=cpudevice, dtype=torch.float32)
             a, v, vc, logp = ac.step(ot)
+            if validate_world_model:
+                with torch.no_grad():
+                    pass
+                #print("obs shape:", ot.shape)
+                #assert 1 == 0
             del ot
 
             next_o, r, d, info = env.step(a)
+            # custom validation
+            if train_episode == validation_episode and (epoch % validate_each_epoch) == 0:
+                screen = env.custom_render(positions_render=True)
+                screens.append(screen)
 
             if not d and not info['goal_met']:
                 env_pool.push(o, a, r, info['cost'], next_o, d)
@@ -547,9 +564,14 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 ep_ret, ep_len =  0, 0
                 pep_ret,pep_cost  = 0,0
                 ep_cost = 0
+                # custom validation
+                train_episode += 1
 
 
-
+        # custom validation
+        if (epoch % validate_each_epoch) == 0:
+            logger.custom_video = screens
+            logger.custom_video = np.transpose(np.array(logger.custom_video), axes=[0, 3, 1, 2])
         #------------------------Train model dynamics--------------------------
 
         train_predict_model(env_pool, predict_env)
@@ -599,6 +621,11 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 del otensor
 
                 #--------USING LEARNED MODEL OF ENVIRONMENT TO GENERATE ROLLOUTS-----------------
+                #print("*********")
+                #print("obs:", o.shape)
+                #print("act:", a.shape)
+                #print("*********")
+                #assert 1 == 0
                 next_o = predict_env2.step(o,a)
                 r,c,ld,goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
 
@@ -709,6 +736,11 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 megaiter+=1
                 update()
 
+        # custom validation
+        if (epoch % validate_each_epoch) == 0:
+            video = wandb.Video(logger.custom_video, fps=10, format="gif", caption=f"epoch: {epoch}")
+            logger.wandb_dict["video"] = video
+            
         logger.store(Megaiter=megaiter)
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
@@ -725,6 +757,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         logger.log_tabular('Megaiter', with_min_and_max=True)
         logger.log_tabular('LossPi', average_only=True)
         logger.log_tabular('LossV', average_only=True)
+        logger.log_tabular('LossModel', average_only=True)
+        logger.log_tabular('LossCV', average_only=True)
         logger.log_tabular('DeltaLossPi', average_only=True)
         logger.log_tabular('DeltaLossV', average_only=True)
         logger.log_tabular('Entropy', average_only=True)
@@ -750,7 +784,7 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--exp_name', type=str, default='ppo')
-    parser.add_argument('--cost_limit', type=int, default=18)
+    parser.add_argument('--cost_limit', type=int, default=40) # 18
     parser.add_argument('--beta', type=float, default=1)
 
     args = parser.parse_args()

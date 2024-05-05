@@ -282,6 +282,8 @@ class EnsembleDynamicsModel():
             print('epoch: {}, train mse losses: {}'.format(epoch, np.mean(train_mse_losses,axis=0)))
             print('epoch: {}, holdout mse losses: {}'.format(epoch, holdout_mse_losses))
 
+            return epoch, np.mean(np.mean(train_mse_losses,axis=0))
+
     def _save_best(self, epoch, holdout_losses):
         updated = False
         for i in range(len(holdout_losses)):
