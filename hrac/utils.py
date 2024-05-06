@@ -37,7 +37,7 @@ class ReplayBuffer(object):
             [array.append(datapoint) for array, datapoint in zip(self.storage, data)]
         else:
             if self.ppo_memory:
-                pass
+                assert 1 == 0, "imposible to add more data when PPO buffer size"
             else:
                 [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
 
@@ -47,6 +47,8 @@ class ReplayBuffer(object):
         if len(self.storage[0]) <= batch_size:
             ind = np.arange(len(self.storage[0]))
         else:
+            if self.ppo_memory:
+                assert 1 == 0, "batch_size == storage size"
             ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
 
         if self.ppo_memory:

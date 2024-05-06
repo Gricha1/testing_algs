@@ -249,7 +249,7 @@ class Manager(object):
 class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
-                 absolute_goal=False, PPO=False, ppo_lr=None
+                 absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -265,7 +265,7 @@ class Controller(object):
 
         if self.PPO:
             self.agent = PPOAgent(state_dim, goal_dim, action_dim,
-                                     scale=max_action).to(device)  
+                                  hidden_dim=hidden_dim_ppo, scale=max_action).to(device)  
             self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5)  
         else:
             self.actor = ControllerActor(state_dim, goal_dim, action_dim,
@@ -297,6 +297,12 @@ class Controller(object):
                 return state*mask
         else:
             return state
+
+    def get_value(self, state, sg):
+        assert not sg is None
+        state = self.clean_obs(get_tensor(state))
+        sg = get_tensor(sg)
+        return self.agent.get_value(state, sg)
 
     def select_action_logprob_value(self, state, sg, evaluation=False):
         assert not sg is None
@@ -341,19 +347,19 @@ class Controller(object):
               norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         if self.PPO:
-            clipfracs = []
+            x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
+            b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
+            b_goals = torch.FloatTensor(sg).to(device)
+            b_logprobs = torch.FloatTensor(l).to(device)
+            b_actions = torch.FloatTensor(u).to(device)
+            b_advantages = torch.FloatTensor(replay_buffer.advantages).to(device)
+            b_returns = torch.FloatTensor(replay_buffer.returns).to(device)
+            b_values = torch.FloatTensor(v).to(device)
+
             b_inds = np.arange(batch_size)
+            clipfracs = []
         for it in range(iterations):
-            if self.PPO:
-                x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
-                b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
-                b_goals = torch.FloatTensor(sg).to(device)
-                b_logprobs = torch.FloatTensor(l).to(device)
-                b_actions = torch.FloatTensor(u).to(device)
-                b_advantages = torch.FloatTensor(replay_buffer.advantages).to(device)
-                b_returns = torch.FloatTensor(replay_buffer.returns).to(device)
-                b_values = torch.FloatTensor(v).to(device)
-            else:
+            if not self.PPO:
                 x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
                 next_g = get_tensor(self.subgoal_transition(x, sg, y))
                 state = self.clean_obs(get_tensor(x))

@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
     parser.add_argument("--train_manager_freq", default=10, type=int)
     parser.add_argument("--man_discount", default=0.99, type=float)
-    parser.add_argument("--ctrl_discount", default=0.95, type=float)
+    parser.add_argument("--ctrl_discount", default=0.95, type=float) # TD3=0.95, PPO=0.99
 
     # Manager Parameters
     parser.add_argument("--man_soft_sync_rate", default=0.005, type=float)
@@ -54,16 +54,17 @@ if __name__ == "__main__":
     # PPO controller parameters
     parser.add_argument("--PPO", action='store_true', default=False)
     parser.add_argument("--gae_lambda", default=0.95, type=float)
-    parser.add_argument("--minibatch_size", default=32, type=int)
+    parser.add_argument("--num_minibatches", default=32, type=int)
     parser.add_argument("--clip_coef", default=0.2, type=float)
     parser.add_argument("--clip_vloss", default=True, type=bool)
     parser.add_argument("--norm_adv", default=True, type=bool)
-    parser.add_argument("--max_grad_norm", default=0.1, type=float) # 0.5
+    parser.add_argument("--max_grad_norm", default=0.5, type=float) # 0.5
     parser.add_argument("--vf_coef", default=0.5, type=float)
     parser.add_argument("--ent_coef", default=0.0, type=float)
     parser.add_argument("--target_kl", default=None, type=float)
     parser.add_argument("--update_epochs", default=10, type=int)
     parser.add_argument("--ppo_lr", default=3e-4, type=float)
+    parser.add_argument("--hidden_dim_ppo", default=300, type=int)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)
@@ -75,6 +76,9 @@ if __name__ == "__main__":
 
     # Run the algorithm
     args = parser.parse_args()
+
+    # PPO
+    args.minibatch_size = int(args.ctrl_batch_size // args.num_minibatches)
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
         args.man_rew_scale = 1.0

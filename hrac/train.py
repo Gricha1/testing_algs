@@ -332,10 +332,13 @@ def run_hrac(args):
     print("args:", args)
 
     if args.use_wandb:
+        wandb_run_name = f"HRAC_{args.env_name}"
+        if args.PPO:
+            wandb_run_name = f"HRAC_PPO_{args.env_name}"
         run = wandb.init(
             project="safe_subgoal_model_based",
             sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-            name=f"HRAC_{args.env_name}"
+            name=wandb_run_name
         )
     
     if not os.path.exists("./results"):
@@ -443,7 +446,8 @@ def run_hrac(args):
         absolute_goal=args.absolute_goal,
         policy_noise=policy_noise,
         noise_clip=noise_clip,
-        PPO=args.PPO
+        PPO=args.PPO,
+        hidden_dim_ppo=args.hidden_dim_ppo,
     )
 
     manager_policy = hrac.Manager(
@@ -474,6 +478,48 @@ def run_hrac(args):
         args.ctrl_batch_size == args.ctrl_buffer_size
     manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, ppo_memory=args.PPO)
+
+
+    # Train HRAC or PPO controller
+    def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
+                         episode_reward, manager_transition, total_timesteps):
+        if PPO:
+            assert len(controller_buffer) == args.ctrl_batch_size
+            # controller_buffer: 
+            # 0 - x, 1 - y, 2 - g, 3 - u, 4 - r, 5 - d, 6 - l, 7 - v, 8 - x_seq, 9 - a_seq
+            with torch.no_grad():
+                next_value = controller_policy.get_value(next_state, subgoal).cpu().numpy().squeeze(axis=0)
+                advantages = np.zeros_like(np.array(controller_buffer.storage[4]))
+                lastgaelam = 0
+                for t in reversed(range(args.ctrl_batch_size)):
+                    if t == args.ctrl_batch_size - 1:
+                        nextnonterminal = 1.0 - next_done
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - controller_buffer.storage[5][t + 1]
+                        nextvalues = controller_buffer.storage[7][t + 1]
+                    delta = controller_buffer.storage[4][t] + args.ctrl_discount * nextvalues * nextnonterminal - controller_buffer.storage[7][t]
+                    advantages[t] = lastgaelam = delta + args.ctrl_discount * args.gae_lambda * nextnonterminal * lastgaelam
+                returns = advantages + np.array(controller_buffer.storage[7]).squeeze(1)
+            controller_buffer.advantages = advantages
+            controller_buffer.returns = returns
+        ctrl_act_loss, ctrl_crit_loss = controller_policy.train(controller_buffer, 
+            episode_timesteps if not PPO else args.update_epochs,
+            batch_size=args.ctrl_batch_size, discount=args.ctrl_discount, tau=args.ctrl_soft_sync_rate,
+            minibatch_size=args.minibatch_size, clip_coef=args.clip_coef, 
+            clip_vloss=args.clip_vloss, norm_adv=args.norm_adv, 
+            max_grad_norm=args.max_grad_norm, vf_coef=args.vf_coef, 
+            ent_coef=args.ent_coef, target_kl=args.target_kl)
+        if PPO:
+            controller_buffer.clear()
+        if episode_num % 10 == 0:
+            print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
+            print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
+        writer.add_scalar("data/controller_actor_loss", ctrl_act_loss, total_timesteps)
+        writer.add_scalar("data/controller_critic_loss", ctrl_crit_loss, total_timesteps)
+
+        writer.add_scalar("data/controller_ep_rew", episode_reward, total_timesteps)
+        writer.add_scalar("data/manager_ep_rew", manager_transition[4], total_timesteps)
 
     # Initialize adjacency matrix and adjacency network
     n_states = 0
@@ -516,43 +562,10 @@ def run_hrac(args):
             if total_timesteps != 0 and not just_loaded:
                 if episode_num % 10 == 0:
                     print("Episode {}".format(episode_num))
-                # Train controller
-                if not controller_policy.PPO or (controller_policy.PPO and len(controller_buffer) == args.ctrl_batch_size):
-                    if controller_policy.PPO:
-                        with torch.no_grad():
-                            #next_value = controller_policy.agent.get_value(next_obs).reshape(1, -1)
-                            advantages = np.zeros_like(np.array(controller_buffer.storage[4]))
-                            lastgaelam = 0
-                            for t in reversed(range(args.ctrl_batch_size)):
-                                if t == args.ctrl_batch_size - 1:
-                                    nextnonterminal = 1.0 - done
-                                    nextvalues = value
-                                else:
-                                    nextnonterminal = 1.0 - controller_buffer.storage[5][t + 1]
-                                    nextvalues = controller_buffer.storage[7][t + 1]
-                                delta = controller_buffer.storage[4][t] + args.ctrl_discount * nextvalues * nextnonterminal - controller_buffer.storage[7][t]
-                                advantages[t] = lastgaelam = delta + args.ctrl_discount * args.gae_lambda * nextnonterminal * lastgaelam
-                            returns = advantages + np.array(controller_buffer.storage[7]).squeeze(1)
-                        controller_buffer.advantages = advantages
-                        controller_buffer.returns = returns
-                    ctrl_act_loss, ctrl_crit_loss = controller_policy.train(controller_buffer, 
-                        episode_timesteps if not controller_policy.PPO else args.update_epochs,
-                        batch_size=args.ctrl_batch_size, discount=args.ctrl_discount, tau=args.ctrl_soft_sync_rate,
-                        minibatch_size=args.minibatch_size, clip_coef=args.clip_coef, 
-                        clip_vloss=args.clip_vloss, norm_adv=args.norm_adv, 
-                        max_grad_norm=args.max_grad_norm, vf_coef=args.vf_coef, 
-                        ent_coef=args.ent_coef, target_kl=args.target_kl)
-                    if controller_policy.PPO:
-                        controller_buffer.clear()
-                    if episode_num % 10 == 0:
-                        print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
-                        print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
-                    writer.add_scalar("data/controller_actor_loss", ctrl_act_loss, total_timesteps)
-                    writer.add_scalar("data/controller_critic_loss", ctrl_crit_loss, total_timesteps)
-
-                    writer.add_scalar("data/controller_ep_rew", episode_reward, total_timesteps)
-                    writer.add_scalar("data/manager_ep_rew", manager_transition[4], total_timesteps)
-
+                # Train HRAC controller
+                if not controller_policy.PPO:
+                    train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
+                                     episode_reward, manager_transition, total_timesteps)
                 # Train manager
                 if timesteps_since_manager >= args.train_manager_freq:
                     timesteps_since_manager = 0
@@ -696,6 +709,11 @@ def run_hrac(args):
 
             timesteps_since_subgoal = 0
             manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+        
+        # Train PPO controller
+        if controller_policy.PPO and len(controller_buffer) == args.ctrl_batch_size:
+            train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
+                                episode_reward, manager_transition, total_timesteps)
 
     # Final evaluation
     avg_ep_rew, avg_controller_rew, avg_steps, avg_env_finish = evaluate_policy(
