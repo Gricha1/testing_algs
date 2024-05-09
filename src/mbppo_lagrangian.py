@@ -790,8 +790,15 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     parser.add_argument('--cost_limit', type=int, default=40) # 18
     parser.add_argument('--beta', type=float, default=1)
+    # world model
+    parser.add_argument('--num_networks', default=8, type=int)
+    parser.add_argument('--num_elites', default=6, type=int)
+    # actor critic
+    parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
+    parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
 
     args = parser.parse_args()
+    print("config:", args)
     mpilist = []
     comm = MPI.COMM_WORLD
     mpi_fork(args.cpu)  # run parallel code with mpi
@@ -803,6 +810,7 @@ if __name__ == '__main__':
 
     from utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+    logger_kwargs["config"] = args
     #=================safety gym benchmarks defaults==============================
     num_steps = 4.5e5
     steps_per_epoch = 30000
@@ -834,8 +842,8 @@ if __name__ == '__main__':
     state_dim, action_dim = env.observation_size, env.action_size
 
     if proc_id()==0:
-        num_networks = 8
-        num_elites = 6
+        num_networks = args.num_networks
+        num_elites = args.num_elites
         pred_hidden_size = 200
         use_decay = True
         replay_size = 1000000
@@ -848,9 +856,12 @@ if __name__ == '__main__':
                                           use_decay=use_decay)
         env_pool = ReplayMemory(replay_size)
         predict_env = PredictEnv(env_model, env_name, model_type)
+    else:
+        assert 1 == 0
     #-----------------------------------------------------------------------------
 
     ppo(lambda : env, args.cost_limit, actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs,max_ep_len=750,
-        logger_kwargs=logger_kwargs,exp_name=args.exp_name,beta=args.beta)
+        logger_kwargs=logger_kwargs,exp_name=args.exp_name,beta=args.beta,
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr)

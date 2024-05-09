@@ -78,7 +78,7 @@ class Logger:
     state of a training run, and the trained model.
     """
 
-    def __init__(self, output_dir=None, output_fname='progress.txt', exp_name=None):
+    def __init__(self, output_dir=None, output_fname='progress.txt', exp_name=None, config=None):
         """
         Initialize a Logger.
 
@@ -117,11 +117,19 @@ class Logger:
         self.use_wandb = True
         if self.use_wandb:
             self.custom_video = None
-            self.run_wandb = wandb.init(
-                project="safe_subgoal_model_based",
-                #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-                name=f"MBPPOL_"
-            )
+            if config:
+                self.run_wandb = wandb.init(
+                    project="safe_subgoal_model_based",
+                    #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                    name=f"MBPPOL_",
+                    config=config,
+                )
+            else:
+                self.run_wandb = wandb.init(
+                    project="safe_subgoal_model_based",
+                    #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                    name=f"MBPPOL_",
+                )
             self.wandb_dict = {}
 
     def log(self, msg, color='green'):
