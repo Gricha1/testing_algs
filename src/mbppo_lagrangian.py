@@ -509,10 +509,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             del ot
 
             next_o, r, d, info = env.step(a)
-            # custom validation
-            if train_episode == validation_episode and (epoch % validate_each_epoch) == 0:
-                screen = env.custom_render(positions_render=True)
-                screens.append(screen)
 
             if not d and not info['goal_met']:
                 env_pool.push(o, a, r, info['cost'], next_o, d)
@@ -523,6 +519,14 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             ep_ret += r
             ep_cost += c
             ep_len += 1
+
+            # custom validation
+            if train_episode == validation_episode and (epoch % validate_each_epoch) == 0:
+                dubug_info = {"acc_reward": ep_ret,
+                              "acc_cost": ep_cost,
+                              "t": ep_len}
+                screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+                screens.append(screen)
 
             #Mixing some real environment samples
             if t<=mix_real-1:
