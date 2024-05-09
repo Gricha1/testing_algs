@@ -3,6 +3,16 @@ FROM continuumio/miniconda3
 # install python 3.8.5
 RUN conda install python=3.8.5
 
+RUN echo '\
+   Acquire::Retries "100";\
+   Acquire::https::Timeout "240";\
+   Acquire::http::Timeout "240";\
+   APT::Get::Assume-Yes "true";\
+   APT::Install-Recommends "false";\
+   APT::Install-Suggests "false";\
+   Debug::Acquire::https "true";\
+   ' > /etc/apt/apt.conf.d/99custom
+
 # install mujoco
 RUN apt-get update
 RUN apt-get install build-essential --yes
