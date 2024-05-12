@@ -132,7 +132,8 @@ class PPOBuffer:
 def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=dict(), save_freq=1,exp_name='default',beta=1):
+        target_kl=0.01, logger_kwargs=dict(), save_freq=1,exp_name='default',beta=1,
+        args=None):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -504,8 +505,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             if validate_world_model:
                 with torch.no_grad():
                     pass
-                #print("obs shape:", ot.shape)
-                #assert 1 == 0
             del ot
 
             next_o, r, d, info = env.step(a)
@@ -592,7 +591,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         while perf_flag:
             if megaiter==0:
                 last_dynaret = 0
-                last_valid_rets = [0]*6
+                #last_valid_rets = [0]*6
+                last_valid_rets = [0]*args.num_elites
 
             env_model2 = torch.load(exp_name+"env_model.pkl")
 
@@ -684,7 +684,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 old_params_vc = get_param_values(ac.vc)
                 update()
                 # 6 ELITE MODELS OUT OF 8
-                valid_rets = [0]*6
+                #valid_rets = [0]*6
+                valid_rets = [0]*args.num_elites
                 winner=0
                 print("validating............")
                 for va in tqdm(range(len(valid_rets))):
@@ -712,7 +713,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     if valid_rets[va]>last_valid_rets[va]:
                         winner+=1
                 print(valid_rets,last_valid_rets)
-                performance_ratio = winner/6
+                #performance_ratio = winner/6
+                performance_ratio = winner/args.num_elites
                 print("Performance ratio=",performance_ratio)
                 thresh = 4/6  #BETTER THAN 50%
                 if performance_ratio < thresh :
@@ -791,6 +793,7 @@ if __name__ == '__main__':
     parser.add_argument('--cost_limit', type=int, default=40) # 18
     parser.add_argument('--beta', type=float, default=1)
     # world model
+    parser.add_argument('--pred_hidden_size', default=200, type=int)
     parser.add_argument('--num_networks', default=8, type=int)
     parser.add_argument('--num_elites', default=6, type=int)
     # actor critic
@@ -844,7 +847,7 @@ if __name__ == '__main__':
     if proc_id()==0:
         num_networks = args.num_networks
         num_elites = args.num_elites
-        pred_hidden_size = 200
+        pred_hidden_size = args.pred_hidden_size
         use_decay = True
         replay_size = 1000000
         env_name = 'safepg2'
@@ -864,4 +867,4 @@ if __name__ == '__main__':
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs,max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name=args.exp_name,beta=args.beta,
-        pi_lr=args.pi_lr, vf_lr=args.vf_lr)
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args)

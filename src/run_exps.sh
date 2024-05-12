@@ -24,11 +24,11 @@ next_folder=$(generate_next_index)
 echo "Следующая папка для экспериментов: $next_folder"
 
 
-python3 mbppo_lagrangian.py --vf_lr=3e-4 --exp_name=$next_folder --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02
+python3 mbppo_lagrangian.py --pred_hidden_size 100 --exp_name=$next_folder --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02
 
 
 # Вызов функции для получения следующего индекса
 next_folder=$(generate_next_index)
 echo "Следующая папка для экспериментов: $next_folder"
 
-python3 mbppo_lagrangian.py --num_networks 4 --num_elites 2 --exp_name=$next_folder --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02
+python3 mbppo_lagrangian.py --num_networks 7 --num_elites 5 --exp_name=$next_folder --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02
