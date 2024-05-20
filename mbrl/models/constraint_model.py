@@ -98,6 +98,8 @@ class CostModel:
 
         self.max_ratio = config["max_ratio"]
         self.batch = int(config["batch"])
+
+        self.logger = None
         
         self.model = self.load_data(config["load_folder"]) if config["load"] else None
         if self.model is None:
@@ -191,6 +193,8 @@ class CostModel:
             y_pred=self.model.predict(x1)
             acc1=np.equal(y1, y_pred)
             print("unsafe data accuracy: %.2f%%, safe data accuracy: %.2f%%"%(100*acc1.mean(), 100*acc0.mean()) )
+            if self.logger:
+                self.logger.store(CostPredUnSafeAcc=acc1, CostPredSafeAcc=acc0)
         if self.save:
             self.save_data()
 

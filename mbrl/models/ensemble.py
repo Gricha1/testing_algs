@@ -55,6 +55,8 @@ class RegressionModelEnsemble:
         self.label_sigma = torch.tensor(1.0)
         self.eps = 1e-3
 
+        self.logger = None
+
         self.save = config["save"]
         if self.save:
             self.folder = config["save_folder"]
@@ -186,6 +188,7 @@ class RegressionModelEnsemble:
         patience = 5
         best_loss = 1e3
         loss_increase = 0
+        total_train_loss = 0
 
         if use_data_buf:
             x, y = self.data_buf.get_all()
@@ -227,11 +230,16 @@ class RegressionModelEnsemble:
                     loss_increase = 0
                 else:
                     loss_increase += 1
+                
+                total_train_loss += train_loss_mean
 
                 if loss_increase > patience:
                     break
         if self.save:
             self.save_data()
+
+        if self.logger:
+            self.logger.store(LossDyna=total_train_loss)
 
     def evaluate_rollout(self, states, actions, labels, eval_dim = None, debug=False):
         '''

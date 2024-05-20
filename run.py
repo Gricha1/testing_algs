@@ -10,6 +10,7 @@ from mbrl import SafeMPC, RegressionModelEnsemble, CostModel
 from utils.logx import EpochLogger
 from utils.run_utils import setup_logger_kwargs, combined_shape, load_config, seed_torch
 from utils.env_utils import SafetyGymEnv
+import wandb
 
 
 DEFAULT_ENV_CONFIG_POINT = dict(
@@ -48,7 +49,8 @@ def run(logger, config, args):
         cost_config["save_folder"] = logger.output_dir
 
     config["arguments"] = vars(args)
-    logger.save_config(config)
+    if not logger.use_wandb:
+        logger.save_config(config)
 
     state_dim, action_dim = env.observation_size, env.action_size
     if args.ensemble>0:
@@ -57,6 +59,10 @@ def run(logger, config, args):
     cost_model = CostModel(env, cost_config)
     mpc_controller = SafeMPC(env, mpc_config, cost_model=cost_model, n_ensembles=dynamic_config["n_ensembles"])
 
+    # custom logging
+    dynamic_model.logger = logger
+    cost_model.logger = logger
+    
     # Prepare random collected dataset
     start_time = time.time()
     pretrain_episodes = 1000 if args.load is None else 10
@@ -91,11 +97,18 @@ def run(logger, config, args):
     total_len = 0 # total interactions
     total_epi = 0
     for epoch in tqdm(range(args.epoch)): # update models per epoch
+        # custom validation
+        validation_epoch = (epoch % 5) == 0
         for test_episode in range(args.episode): # collect data for episodes length
             obs, ep_ret, ep_cost, done = env.reset(), 0, 0, False
             mpc_controller.reset()
+            ep_len = 0
             if args.render:
-                    env.render()
+                env.render()
+            # custom validation
+            if validation_epoch and test_episode == 0:
+                screens = []
+                logger.custom_video = None
             while not done:    
                 action = np.squeeze(np.array([mpc_controller.act(model=dynamic_model, state=obs)]))
                 obs_next, reward, done, info = env.step(action)
@@ -104,6 +117,16 @@ def run(logger, config, args):
                 ep_ret += reward
                 total_len += 1
                 ep_cost += info["cost"]
+                ep_len += 1 
+                
+                # custom validation
+                if validation_epoch and test_episode == 0:
+                    dubug_info = {"acc_reward": ep_ret,
+                                  "acc_cost": ep_cost,
+                                  "t": ep_len}
+                    screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+                    screens.append(screen)
+
                 if not info["goal_met"] and not done:
                     x = np.concatenate((obs, action))
                     y = obs_next #- obs
@@ -111,6 +134,12 @@ def run(logger, config, args):
                     cost = 1 if info["cost"]>0 else 0
                     cost_model.add_data_point(obs_next, cost)
                 obs = obs_next     
+            # custom validation
+            if validation_epoch and test_episode == 0:
+                logger.custom_video = screens
+                logger.custom_video = np.transpose(np.array(logger.custom_video), axes=[0, 3, 1, 2])
+                video = wandb.Video(logger.custom_video, fps=10, format="gif", caption=f"epoch: {epoch}")
+                logger.wandb_dict["video"] = video
             logger.store(EpRet=ep_ret, EpCost=ep_cost)
             logger.log_tabular('Epoch', epoch)
             logger.log_tabular('Episode', total_epi)
@@ -124,6 +153,10 @@ def run(logger, config, args):
         if not args.test:
             dynamic_model.fit(use_data_buf=True, normalize=True)
             cost_model.fit()
+            logger.log_tabular('LossDyna', epoch)
+            logger.log_tabular('CostPredUnSafeAcc', epoch)
+            logger.log_tabular('CostPredSafeAcc', epoch)
+            logger.dump_tabular()
     env.close()
 
 if __name__ == '__main__':
@@ -147,6 +180,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logger_kwargs = setup_logger_kwargs(args.name, args.seed, args.dir)
+    logger_kwargs["config"] = args
     logger = EpochLogger(**logger_kwargs)
     config = load_config(args.config)
 
