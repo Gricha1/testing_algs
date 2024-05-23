@@ -1,17 +1,15 @@
+import os
+from math import ceil
+
 import torch
+import numpy as np
+import pandas as pd
+import wandb
+import matplotlib.pylab as plt
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from stable_baselines3.common.logger import Video
-
-import os
-import numpy as np
-import pandas as pd
-from math import ceil
-import matplotlib.pylab as plt
-
-
-import wandb
 
 import hrac.utils as utils
 import hrac.hrac as hrac
@@ -19,6 +17,7 @@ from hrac.models import ANet
 from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal
 from envs.create_maze_env import create_maze_env
 from envs.create_gather_env import create_gather_env
+from hrac.models import EnsembleDynamicsModel, PredictEnv
 
 
 """
@@ -297,6 +296,7 @@ def get_reward_function(dims, absolute_goal=False, binary_reward=False):
 
 def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
         optimizer_r, controller_goal_dim, device, args):
+    print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
             for j in range(1, min(args.manager_propose_freq, len(traj) - i)):
@@ -469,7 +469,8 @@ def run_hrac(args):
         correction=not args.no_correction,
         scale=man_scale,
         goal_loss_coeff=args.goal_loss_coeff,
-        absolute_goal=args.absolute_goal
+        absolute_goal=args.absolute_goal,
+        wm_no_xy=no_xy
     )
 
     calculate_controller_reward = get_reward_function(
@@ -500,6 +501,7 @@ def run_hrac(args):
     # Train HRAC or PPO controller
     def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
                          episode_reward, manager_transition, total_timesteps):
+        print("train controller")
         if PPO:
             assert len(controller_buffer) == args.ppo_ctrl_batch_size
             # controller_buffer: 
@@ -554,6 +556,31 @@ def run_hrac(args):
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
+    # initialize world model
+    num_networks = 8
+    num_elites = 6
+    pred_hidden_size = 200
+    use_decay = True
+    reward_size = 0
+    cost_size = 0
+    env_name = 'safepg2'
+    model_type='pytorch'
+    env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
+                                      reward_size, cost_size, pred_hidden_size,
+                                      use_decay=use_decay)
+    predict_env = PredictEnv(env_model, env_name, model_type)
+    manager_policy.set_predict_env(predict_env)
+    def train_predict_model(replay_buffer):
+        print("train world model")
+        # Get all samples from environment
+        world_model_loss = manager_policy.train_world_model(replay_buffer)
+        
+        #logger.store(LossModel=loss)
+        writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
+
+        if episode_num % 10 == 0:
+            print("world model loss: {:.3f}".format(world_model_loss))
+
     if args.load:
         try:
             manager_policy.load("./models")
@@ -586,6 +613,10 @@ def run_hrac(args):
                 if not controller_policy.PPO:
                     train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
                                      episode_reward, manager_transition, total_timesteps)
+                    
+                # Train World Model
+                train_predict_model(controller_buffer)
+
                 # Train manager
                 if timesteps_since_manager >= args.train_manager_freq:
                     timesteps_since_manager = 0
@@ -604,6 +635,9 @@ def run_hrac(args):
                         print("Manager actor loss: {:.3f}".format(man_act_loss))
                         print("Manager critic loss: {:.3f}".format(man_crit_loss))
                         print("Manager goal loss: {:.3f}".format(man_goal_loss))
+
+                print("*************")
+                print()
 
                 # Evaluate
                 if timesteps_since_eval >= args.eval_freq:

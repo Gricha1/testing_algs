@@ -17,26 +17,30 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/hiro.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def var(tensor):
-    return tensor.to(device)
+def var(tensor, to_device=True):
+    if to_device:
+        return tensor.to(device)
+    else:
+        return tensor
 
 
-def get_tensor(z):
+def get_tensor(z, to_device=True):
     if z is None:
         return None
     if z[0].dtype == np.dtype("O"):
         return None
     if len(z.shape) == 1:
-        return var(torch.FloatTensor(z.copy())).unsqueeze(0)
+        return var(torch.FloatTensor(z.copy()), to_device).unsqueeze(0)
     else:
-        return var(torch.FloatTensor(z.copy()))
+        return var(torch.FloatTensor(z.copy()), to_device)
 
 
 class Manager(object):
     def __init__(self, state_dim, goal_dim, action_dim, actor_lr,
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
-                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False):
+                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
+                 wm_no_xy=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -64,6 +68,54 @@ class Manager(object):
         self.noise_clip = noise_clip
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
+
+        self.predict_env = None
+        self.no_xy = wm_no_xy
+    
+    def clean_obs(self, state, dims=2):
+        if self.no_xy:
+            with torch.no_grad():
+                mask = torch.ones_like(state)
+                if len(state.shape) == 3:
+                    mask[:, :, :dims] = 0
+                elif len(state.shape) == 2:
+                    mask[:, :dims] = 0
+                elif len(state.shape) == 1:
+                    mask[:dims] = 0
+
+                return state*mask
+        else:
+            return state
+    
+    def set_predict_env(self, predict_env):
+        self.predict_env = predict_env
+
+    def train_world_model(self, replay_buffer):
+        x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
+        #next_g = get_tensor(self.subgoal_transition(x, sg, y))
+        state = self.clean_obs(get_tensor(x, to_device=False))
+        action = get_tensor(u, to_device=False)
+        sg = get_tensor(sg, to_device=False)
+        done = get_tensor(1 - d, to_device=False)
+        reward = get_tensor(r, to_device=False)
+        next_state = self.clean_obs(get_tensor(y, to_device=False)) 
+
+        #print("memory occupied by  sampled info = ",sys.getsizeof(state))
+        delta_state = next_state - state
+        inputs = np.concatenate((state, action), axis=-1)
+
+        labels = delta_state.numpy()
+
+        #print("inputs shape:", inputs.shape)
+        #print("inputs type:", type(inputs))
+        #print("labels shape:", labels.shape)
+        #print("labels type:", type(labels))
+        #assert 1 == 0
+
+        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+        del state, action, reward, next_state, done, x, y, sg, u, r, d, delta_state, inputs, labels
+        
+        return loss
 
     def set_eval(self):
         self.actor.set_eval()
@@ -144,6 +196,7 @@ class Manager(object):
 
     def train(self, controller_policy, replay_buffer, iterations, batch_size=100, discount=0.99,
               tau=0.005, a_net=None, r_margin=None):
+        print("train subgoal policy")
         avg_act_loss, avg_crit_loss = 0., 0.
         if a_net is not None:
             avg_goal_loss = 0.
