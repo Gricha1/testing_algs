@@ -250,6 +250,7 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
+                 weight_decay_ppo=None,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -265,8 +266,12 @@ class Controller(object):
 
         if self.PPO:
             self.agent = PPOAgent(state_dim, goal_dim, action_dim,
-                                  hidden_dim=hidden_dim_ppo, scale=max_action).to(device)  
-            self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5)  
+                                  hidden_dim=hidden_dim_ppo, scale=max_action).to(device)
+            if not(weight_decay_ppo is None): 
+                self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5,
+                                                weight_decay=weight_decay_ppo)  
+            else:
+                self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5)  
         else:
             self.actor = ControllerActor(state_dim, goal_dim, action_dim,
                                         scale=max_action).to(device)
@@ -344,8 +349,11 @@ class Controller(object):
 
     def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, 
               minibatch_size=None, clip_coef=None, clip_vloss=None,
-              norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None):
+              norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None,
+              num_minibatches=None):
         avg_act_loss, avg_crit_loss = 0., 0.
+        debug_info = {}
+        debug_batch_data = True
         if self.PPO:
             x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
             b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
@@ -355,6 +363,14 @@ class Controller(object):
             b_advantages = torch.FloatTensor(replay_buffer.advantages).to(device)
             b_returns = torch.FloatTensor(replay_buffer.returns).to(device)
             b_values = torch.FloatTensor(v).to(device)
+            b_done = torch.FloatTensor(d).to(device)
+
+            if debug_batch_data:
+                debug_info["batch_return"] = b_returns.mean().cpu()
+                debug_info["batch_values"] = b_values.mean().cpu()
+                debug_info["batch_advantages"] = b_advantages.mean().cpu()
+                debug_info["batch_done"] = b_done.mean().cpu()
+                debug_info["batch_norm_advantages"] = ((b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-8)).mean().cpu()
 
             b_inds = np.arange(batch_size)
             clipfracs = []
@@ -367,7 +383,7 @@ class Controller(object):
                 sg = get_tensor(sg)
                 done = get_tensor(1 - d)
                 reward = get_tensor(r)
-                next_state = self.clean_obs(get_tensor(y))
+                next_state = self.clean_obs(get_tensor(y))                
 
             if self.PPO:
                  # Optimizing the policy and value network
@@ -379,6 +395,11 @@ class Controller(object):
                     _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], b_goals[mb_inds], b_actions[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
+                    debug_info["value"] = newvalue.mean().cpu()
+                    debug_info["action_logprob"] = newlogprob.mean().cpu()
+                    debug_info["ratio"] = ratio.mean().cpu()
+
+
 
                     with torch.no_grad():
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
@@ -394,6 +415,8 @@ class Controller(object):
                     pg_loss1 = -mb_advantages * ratio
                     pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
                     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                    debug_info["pg_loss1"] = pg_loss1.mean().cpu()
+                    debug_info["pg_loss2"] = pg_loss2.mean().cpu()
 
                     # Value loss
                     newvalue = newvalue.view(-1)
@@ -419,7 +442,7 @@ class Controller(object):
                     self.optimizer.step()
 
                     avg_act_loss += pg_loss
-                    avg_crit_loss += vf_coef
+                    avg_crit_loss += v_loss
 
                 if target_kl is not None and approx_kl > target_kl:
                     break
@@ -465,8 +488,11 @@ class Controller(object):
 
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            if self.PPO:
+                avg_act_loss = avg_act_loss / num_minibatches
+                avg_crit_loss = avg_crit_loss / num_minibatches
 
-        return avg_act_loss / iterations, avg_crit_loss / iterations
+        return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 
     def save(self, dir, env_name, algo):
         torch.save(self.actor.state_dict(), "{}/{}_{}_ControllerActor.pth".format(dir, env_name, algo))

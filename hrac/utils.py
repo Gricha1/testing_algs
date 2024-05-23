@@ -189,6 +189,7 @@ def train_adj_net(a_net, states, adj_mat, optimizer, margin_pos, margin_neg,
     n_batches = len(dataloader)
 
     loss_func = ContrastiveLoss(margin_pos, margin_neg)
+    epoches_loss = []
 
     for i in range(n_epochs):
         epoch_loss = []
@@ -210,6 +211,9 @@ def train_adj_net(a_net, states, adj_mat, optimizer, margin_pos, margin_neg,
 
         if verbose:
             print('Mean loss: {:.4f}'.format(np.mean(epoch_loss)))
+        epoches_loss.append(np.mean(epoch_loss))
+
+    return np.mean(epoches_loss)
 
 
 class ContrastiveLoss(nn.Module):
