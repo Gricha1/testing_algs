@@ -790,7 +790,7 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=4000)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--exp_name', type=str, default='ppo')
-    parser.add_argument('--cost_limit', type=int, default=40) # 18
+    parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
     # world model
     parser.add_argument('--pred_hidden_size', default=200, type=int)
