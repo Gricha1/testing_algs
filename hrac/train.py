@@ -17,7 +17,7 @@ from hrac.models import ANet
 from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal
 from envs.create_maze_env import create_maze_env
 from envs.create_gather_env import create_gather_env
-from hrac.models import EnsembleDynamicsModel, PredictEnv
+from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
 
 
 """
@@ -33,8 +33,22 @@ class CustomVideoRendered:
         self.add_subgoal_values = False
         self.add_mesurements = True
         self.env = env
+        self.world_model_comparsion = True
+        if self.world_model_comparsion:
+            self.robot_poses = None
+            self.world_model_poses = None
         if self.add_subgoal_values:
             assert 1 == 0, "didnt implement"
+    
+    def setup_renderer(self):
+        if self.world_model_comparsion:
+            self.robot_poses = []
+            self.world_model_poses = []
+    
+    def delete_data(self):
+        if self.world_model_comparsion:
+            del self.robot_poses
+            del self.world_model_poses
 
     def custom_render(self, current_step_info, positions_render=False, 
                       plot_goal=True, debug_info={}, shape=(600, 600), env_name=""):    
@@ -51,18 +65,38 @@ class CustomVideoRendered:
                 self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
                 self.render_info["ax_subgoal_values"] = self.render_info["fig"].add_subplot(122)
+            elif self.world_model_comparsion:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_world_model_robot_trajectories"] = self.render_info["fig"].add_subplot(122)
             else:
                 self.render_info["fig"] = plt.figure(figsize=[6.4, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(111)
         self.render_info["ax_states"].set_ylim(bottom=env_min_y, top=env_max_y)
         self.render_info["ax_states"].set_xlim(left=env_min_x, right=env_max_x)
+        if self.world_model_comparsion:
+            self.render_info["ax_world_model_robot_trajectories"].set_ylim(bottom=env_min_y, top=env_max_y)
+            self.render_info["ax_world_model_robot_trajectories"].set_xlim(left=env_min_x, right=env_max_x)
+
         # robot pose
         x = current_step_info["robot_pos"][0] + shift_x
         y = current_step_info["robot_pos"][1] + shift_y
         circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="g", alpha=0.5)
         self.render_info["ax_states"].add_patch(circle_robot) 
-        self.render_info["ax_states"].scatter(x, y, color="red")
         self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
+        # world model comparsion
+        if self.world_model_comparsion:
+            self.robot_poses.append((x, y))   
+
+        # robot imagined pose
+        x = current_step_info["imagined_robot_pos"][0] + shift_x
+        y = current_step_info["imagined_robot_pos"][1] + shift_y
+        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
+        self.render_info["ax_states"].add_patch(circle_robot) 
+        self.render_info["ax_states"].text(x, y + 0.05, "i_s")
+        # world model comparsion
+        if self.world_model_comparsion:
+            self.world_model_poses.append((x, y))   
 
         # subgoal
         x = current_step_info["subgoal_pos"][0] + shift_x
@@ -80,7 +114,52 @@ class CustomVideoRendered:
             y = current_step_info["goal_pos"][1] + shift_y
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="y", alpha=0.5)
             self.render_info["ax_states"].add_patch(circle_robot) 
-            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")        
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")  
+
+        # world model comparsion
+        if self.world_model_comparsion:
+            xA, yA = zip(*self.robot_poses)
+            xB, yB = zip(*self.world_model_poses)
+            self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
+            self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
+
+        # safety boundary
+        class Point:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+            @property
+            def x(self):
+                return self._x + shift_x
+            @property
+            def y(self):
+                return self._y + shift_y
+            @x.setter
+            def x(self, x):
+                self._x = x
+            @y.setter
+            def y(self, y):
+                self._y = y
+        safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
+        safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
+        safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
+        safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
+        safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
+        safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+        safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
+        safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
+        safety_point_1 = safety_point_9
+        safety_boundary = [safety_point_1,
+                           safety_point_2, safety_point_3, 
+                           safety_point_4, safety_point_5, 
+                           safety_point_6, safety_point_7,
+                           safety_point_8, safety_point_9]
+        xs = [point.x for point in safety_boundary]
+        ys = [point.y for point in safety_boundary]
+        self.render_info["ax_states"].plot(xs, ys, 'b')
+        #state xy: (0.03229626534308827, -0.06590457330324587)
+        #goal xy: (0.0, 16.0)
+            
         
         # print maze
         if env_name != "AntGather":
@@ -91,8 +170,8 @@ class CustomVideoRendered:
                         i[indx] = 2
 
             self.render_info["ax_states"].imshow(env_map, cmap='viridis', 
-                                             interpolation='nearest', 
-                                             extent=[env_min_x, env_max_x, env_min_y, env_max_y])
+                                                 interpolation='nearest', 
+                                                 extent=[env_min_x, env_max_x, env_min_y, env_max_y])
         else:
             # add apples & bombs
             apples_and_bombs = current_step_info["apples_and_bombs"]
@@ -136,6 +215,8 @@ class CustomVideoRendered:
         data = np.frombuffer(self.render_info["fig"].canvas.tostring_rgb(), dtype=np.uint8)
         data = data.reshape(self.render_info["fig"].canvas.get_width_height()[::-1] + (3,))
         self.render_info["ax_states"].clear()
+        if self.world_model_comparsion:
+            self.render_info["ax_world_model_robot_trajectories"].clear()
         if self.add_subgoal_values:
             self.render_info["ax_subgoal_values"].clear()
         return data
@@ -161,6 +242,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
             goal = obs["desired_goal"]
             state = obs["observation"]
+            prev_action = None
+            prev_state = None
 
             # render
             if eval_ep == 0:
@@ -191,6 +274,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
                 # render env
                 if not (renderer is None) and eval_ep == 0:
+                    if step_count == 1:
+                        renderer.setup_renderer()
                     debug_info = {}
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_controller_reward"] = episode_controller_rew
@@ -215,11 +300,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                         current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                            current_step_info["robot_pos"]
                     current_step_info["robot_radius"] = 1.5
+                    if prev_state is None or prev_action is None:
+                        imagined_state = state
+                    else:
+                        imagined_state = manager_policy.predict_env.step(prev_imagined_state, prev_action)
+                    prev_imagined_state = state
+                    current_step_info["imagined_robot_pos"] = imagined_state[:2]
                     
                     if env_name =="AntGather":
                         current_step_info["apples_and_bombs"] = env.get_apples_and_bombs()
                         current_step_info["apple_bomb_radius"] = 1.0
-                    screen = renderer.custom_render(current_step_info, debug_info=debug_info, 
+                    screen = renderer.custom_render(current_step_info, 
+                                                    debug_info=debug_info, 
                                                     plot_goal=True,
                                                     env_name=env_name)
                     positions_screens.append(screen.transpose(2, 0, 1))
@@ -231,10 +323,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
                 avg_reward += reward
                 avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
-                # custom
                 episode_reward += reward
                 episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
 
+                prev_state = state
+                prev_action = action
                 state = new_state
 
         if not (renderer is None) and not (writer is None):
@@ -246,6 +339,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 #exclude=("stdout", "log", "json", "csv"),
             )
             del positions_screens
+            renderer.delete_data()
             
         avg_reward /= eval_episodes
         avg_controller_rew /= global_steps
@@ -442,6 +536,14 @@ def run_hrac(args):
     else:
         goal_dim = 0
 
+    print("*******")
+    print("env name:", args.env_name)
+    print("state_dim:", state_dim)
+    print("goal_dim:", goal_dim)
+    print("action_dim:", action_dim)
+    print("*******")
+    print()
+
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -565,10 +667,11 @@ def run_hrac(args):
     cost_size = 0
     env_name = 'safepg2'
     model_type='pytorch'
-    env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
-                                      reward_size, cost_size, pred_hidden_size,
-                                      use_decay=use_decay)
-    predict_env = PredictEnv(env_model, env_name, model_type)
+    with TensorWrapper():
+        env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
+                                        reward_size, cost_size, pred_hidden_size,
+                                        use_decay=use_decay)
+        predict_env = PredictEnv(env_model, env_name, model_type)
     manager_policy.set_predict_env(predict_env)
     def train_predict_model(replay_buffer):
         print("train world model")
@@ -615,7 +718,8 @@ def run_hrac(args):
                                      episode_reward, manager_transition, total_timesteps)
                     
                 # Train World Model
-                train_predict_model(controller_buffer)
+                with TensorWrapper():
+                    train_predict_model(controller_buffer)
 
                 # Train manager
                 if timesteps_since_manager >= args.train_manager_freq:

@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=300_000, type=float) # 2e5
+    parser.add_argument("--eval_freq", default=1_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", action="store_true")
     parser.add_argument("--env_name", default="AntMaze", type=str)
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 
     parser.add_argument("--gid", default=0, type=int)
-    parser.add_argument("--traj_buffer_size", default=50000, type=int)
+    parser.add_argument("--traj_buffer_size", default=50_000, type=int) # 50_000
     parser.add_argument("--lr_r", default=2e-4, type=float)
     parser.add_argument("--r_margin_pos", default=1.0, type=float)
     parser.add_argument("--r_margin_neg", default=1.2, type=float)

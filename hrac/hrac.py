@@ -113,7 +113,8 @@ class Manager(object):
         #assert 1 == 0
 
         epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
-        del state, action, reward, next_state, done, x, y, sg, u, r, d, delta_state, inputs, labels
+        #del state, action, reward, next_state, done, x, y, sg, u, r, d, delta_state, inputs, labels
+        del state, action, reward, next_state, done
         
         return loss
 
