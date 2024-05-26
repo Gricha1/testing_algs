@@ -7,10 +7,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=1_000, type=float) # 300_000
+    parser.add_argument("--eval_freq", default=300_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", action="store_true")
-    parser.add_argument("--env_name", default="AntMaze", type=str)
+    parser.add_argument("--env_name", default="SafeAntMaze", type=str)
     parser.add_argument("--load", default=False, type=bool)
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_act_lr", default=1e-4, type=float)
     parser.add_argument("--ctrl_crit_lr", default=1e-3, type=float)
     parser.add_argument("--ctrl_discount", default=0.95, type=float)
-    # PPO controller parameters
+    # PPO controller Parameters
     parser.add_argument("--PPO", action='store_true', default=False)
     parser.add_argument("--ppo_ctrl_batch_size", default=4096, type=int)
     parser.add_argument("--ppo_ctrl_buffer_size", default=4096, type=int)
@@ -70,6 +70,14 @@ if __name__ == "__main__":
     parser.add_argument("--ppo_hidden_dim", default=300, type=int)
     parser.add_argument("--ppo_weight_decay", default=None, type=float)
 
+    # WorldModel Parameters
+    parser.add_argument("--world_model", action='store_true', default=False)
+
+    # Safety Parameters
+    parser.add_argument("--safety_subgoals", action='store_true', default=False)
+    parser.add_argument("--safety_loss_coef", default=1., type=float)
+    parser.add_argument("--img_horizon", default=10, type=int)
+
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)
     parser.add_argument("--ctrl_noise_sigma", default=1., type=float)
@@ -81,6 +89,9 @@ if __name__ == "__main__":
 
     # Run the algorithm
     args = parser.parse_args()
+
+    assert not args.safety_subgoals or (args.world_model and args.safety_subgoals), \
+            " to train safety you need world model"
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)

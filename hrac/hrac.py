@@ -40,7 +40,8 @@ class Manager(object):
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False):
+                 wm_no_xy=False, safety_subgoals=False, safety_loss_coef=1, img_horizon=10, 
+                 cost_function=None):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -71,6 +72,10 @@ class Manager(object):
 
         self.predict_env = None
         self.no_xy = wm_no_xy
+        self.safety_subgoals = safety_subgoals
+        self.safety_loss_coef = safety_loss_coef
+        self.img_horizon = img_horizon
+        self.cost_function = cost_function
     
     def clean_obs(self, state, dims=2):
         if self.no_xy:
@@ -100,20 +105,12 @@ class Manager(object):
         reward = get_tensor(r, to_device=False)
         next_state = self.clean_obs(get_tensor(y, to_device=False)) 
 
-        #print("memory occupied by  sampled info = ",sys.getsizeof(state))
         delta_state = next_state - state
         inputs = np.concatenate((state, action), axis=-1)
 
         labels = delta_state.numpy()
 
-        #print("inputs shape:", inputs.shape)
-        #print("inputs type:", type(inputs))
-        #print("labels shape:", labels.shape)
-        #print("labels type:", type(labels))
-        #assert 1 == 0
-
         epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
-        #del state, action, reward, next_state, done, x, y, sg, u, r, d, delta_state, inputs, labels
         del state, action, reward, next_state, done
         
         return loss
@@ -138,16 +135,36 @@ class Manager(object):
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
 
-    def actor_loss(self, state, goal, a_net, r_margin):
+    def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
         actions = self.actor(state, goal)
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
-        if a_net is None:
-            return eval + norm
-        else:
+        goal_loss = None
+        safety_loss = None
+        if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
-            return eval + norm, goal_loss
+        if self.safety_subgoals:
+            assert not(self.predict_env is None), "world model must be initialized"
+            safety_loss = 0
+            with torch.no_grad():
+                h = 0
+                img_state = state
+                acc_costs = np.zeros(img_state.shape[0]) # (batch_size,)
+                while h < self.img_horizon:
+                    # subgoals = actions
+                    img_actions = controller_policy.actor(img_state, actions) 
+                    img_state = img_state.cpu().numpy()
+                    img_actions = img_actions.cpu().numpy()
+
+                    # get imagination safety
+                    acc_costs += self.cost_function(img_state)
+
+                    img_state = self.predict_env.step(img_state, img_actions)
+                    img_state = torch.from_numpy(img_state).float().to(device)
+                    h += 1
+                safety_loss = (acc_costs/self.img_horizon).mean()
+        return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -201,6 +218,10 @@ class Manager(object):
         avg_act_loss, avg_crit_loss = 0., 0.
         if a_net is not None:
             avg_goal_loss = 0.
+        if self.safety_subgoals:
+            avg_safety_subgoals_loss = 0.
+        else:
+            avg_safety_subgoals_loss = None
         for it in range(iterations):
             # Sample replay buffer
             x, y, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
@@ -247,11 +268,11 @@ class Manager(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            if a_net is None:
-                actor_loss = self.actor_loss(state, goal, a_net, r_margin)
-            else:
-                actor_loss, goal_loss = self.actor_loss(state, goal, a_net, r_margin)
+            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, controller_policy)
+            if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
+            if self.safety_subgoals:
+                actor_loss = actor_loss + self.safety_loss_coef * safety_subgoals_loss
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
@@ -262,6 +283,8 @@ class Manager(object):
             avg_crit_loss += critic_loss
             if a_net is not None:
                 avg_goal_loss += goal_loss
+            if self.safety_subgoals:
+                avg_safety_subgoals_loss += safety_subgoals_loss
 
             # Update the frozen target models
             for param, target_param in zip(self.critic.parameters(),
@@ -272,10 +295,8 @@ class Manager(object):
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-        if a_net is None:
-            return avg_act_loss / iterations, avg_crit_loss / iterations
-        else:
-            return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations
+        avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
+        return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss
 
     def load_pretrained_weights(self, filename):
         state = torch.load(filename)

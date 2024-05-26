@@ -1,5 +1,5 @@
-# HRAC
-python main.py --env_name AntMaze --max_timesteps 2000000 --wandb_postfix "world_model_learn"
+# HRAC + MB
+python main.py --world_model --safety_subgoals --max_timesteps 2000000 --wandb_postfix "world_model_learn"
 
 # PPO
 #python main.py --env_name AntMaze --PPO --max_timesteps 2000000 --wandb_postfix "test"

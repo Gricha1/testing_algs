@@ -5,6 +5,30 @@ from gym import spaces
 
 import envs.create_maze_env
 
+SHIFT_X, SHIFT_Y = -8, -8
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+    @property
+    def render_x(self):
+        return self._x + SHIFT_X
+    @property
+    def render_y(self):
+        return self._y + SHIFT_Y
+    @property
+    def x(self):
+        return self._x
+    @property
+    def y(self):
+        return self._y
+    @x.setter
+    def x(self, x):
+        self._x = x
+    @y.setter
+    def y(self, y):
+        self._y = y
 
 def get_goal_sample_fn(env_name, evaluate, maze_id=None):
     if env_name == 'AntMaze':
@@ -157,8 +181,6 @@ class EnvWithGoal(object):
         return self.base_env.action_space
     
 
-
-
 class MultyEnvWithGoal(EnvWithGoal):
     def __init__(self, envs):
         assert type(envs) == list
@@ -200,3 +222,100 @@ class MultyEnvWithGoal(EnvWithGoal):
 
     def step(self, action):
         return self.env.step(action)
+    
+
+class SafeMazeAnt:
+    def __init__(self, env):
+        self.env = env
+        self.safety_bounds = self.get_safety_bounds()
+
+    def seed(self, seed):
+        self.env.seed(seed)
+
+    @property
+    def evaluate(self):
+        return self.env.evaluate
+    
+    @evaluate.setter
+    def evaluate(self, val):
+        self.env.evaluate = val
+
+    @property
+    def action_space(self):
+        return self.env.action_space
+    
+    def get_maze(self):
+        return self.env.get_maze()
+    
+    def success_fn(self, reward):
+        return self.env.success_fn(reward)
+        
+    def get_maze(self):
+        return self.env.get_maze()
+
+    def reset(self):
+        return self.env.reset()
+
+    def step(self, action):
+        next_tup, rew, done, info = self.env.step(action)
+        safety_bounds = self.get_safety_bounds()
+        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
+        # test cost reward
+        #rew -= info["safety_cost"]
+
+        return next_tup, rew, done, info
+    
+
+    def cost_func(self, state: np.array):
+        if len(state.shape) == 1:
+            robot_x, robot_y = state[:2]
+            cost = 0
+            if robot_x <= self.safety_bounds[3-1].x or robot_x >= self.safety_bounds[2-1].x:
+                cost = 1
+            elif robot_y <= self.safety_bounds[3-1].y or robot_y >= self.safety_bounds[1-1].y:
+                cost = 1
+            elif robot_y <= self.safety_bounds[7-1].y and robot_y >= self.safety_bounds[4-1].y:
+                if robot_x <= self.safety_bounds[5-1].x:
+                    cost = 1
+        else:
+            robot_x = state[:, 0]
+            robot_y = state[:, 1]
+            cost = (robot_x <= self.safety_bounds[3-1].x) + (robot_x >= self.safety_bounds[2-1].x)
+            cost = cost + (robot_y <= self.safety_bounds[3-1].y) + (robot_y >= self.safety_bounds[1-1].y)
+            cost = cost + (robot_y <= self.safety_bounds[7-1].y) * (robot_y >= self.safety_bounds[4-1].y) * (robot_x <= self.safety_bounds[5-1].x)
+            cost = (cost >= 1)
+            cost = cost.astype(float)
+            assert (cost <= 1.0).all()
+            
+        return cost
+    
+    
+    def get_safety_bounds(self):
+        """
+        8-------------------1=9
+        |                    |
+        |                    |
+        7-----------6        |
+                    |        |
+                    |        |
+                    |        |
+        4-----------5        |
+        |                    |
+        |                    |
+        3--------------------2
+        """
+        safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
+        safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
+        safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
+        safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
+        safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
+        safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+        safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
+        safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
+        safety_point_1 = safety_point_9
+        safety_boundary = [safety_point_1,
+                           safety_point_2, safety_point_3, 
+                           safety_point_4, safety_point_5, 
+                           safety_point_6, safety_point_7,
+                           safety_point_8, safety_point_9]
+        return safety_boundary

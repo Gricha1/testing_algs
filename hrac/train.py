@@ -14,7 +14,7 @@ from stable_baselines3.common.logger import Video
 import hrac.utils as utils
 import hrac.hrac as hrac
 from hrac.models import ANet
-from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal
+from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal, SafeMazeAnt
 from envs.create_maze_env import create_maze_env
 from envs.create_gather_env import create_gather_env
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
@@ -26,14 +26,14 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 """
 
 class CustomVideoRendered:
-    def __init__(self, env):
+    def __init__(self, env, world_model):
         self.render_info = {}
         self.render_info["fig"] = None
         self.render_info["ax_states"] = None
         self.add_subgoal_values = False
         self.add_mesurements = True
         self.env = env
-        self.world_model_comparsion = True
+        self.world_model_comparsion = world_model
         if self.world_model_comparsion:
             self.robot_poses = None
             self.world_model_poses = None
@@ -124,43 +124,11 @@ class CustomVideoRendered:
             self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
 
         # safety boundary
-        class Point:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-            @property
-            def x(self):
-                return self._x + shift_x
-            @property
-            def y(self):
-                return self._y + shift_y
-            @x.setter
-            def x(self, x):
-                self._x = x
-            @y.setter
-            def y(self, y):
-                self._y = y
-        safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
-        safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
-        safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
-        safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
-        safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
-        safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
-        safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
-        safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
-        safety_point_1 = safety_point_9
-        safety_boundary = [safety_point_1,
-                           safety_point_2, safety_point_3, 
-                           safety_point_4, safety_point_5, 
-                           safety_point_6, safety_point_7,
-                           safety_point_8, safety_point_9]
-        xs = [point.x for point in safety_boundary]
-        ys = [point.y for point in safety_boundary]
+        safety_boundary = self.env.get_safety_bounds()
+        xs = [point.render_x for point in safety_boundary]
+        ys = [point.render_y for point in safety_boundary]
         self.render_info["ax_states"].plot(xs, ys, 'b')
-        #state xy: (0.03229626534308827, -0.06590457330324587)
-        #goal xy: (0.0, 16.0)
             
-        
         # print maze
         if env_name != "AntGather":
             env_map = self.env.get_maze()
@@ -195,6 +163,7 @@ class CustomVideoRendered:
             # debug info
             if len(debug_info) != 0:
                 acc_reward = debug_info["acc_reward"]
+                acc_cost = debug_info["acc_cost"]
                 acc_controller_reward = debug_info["acc_controller_reward"]
                 t = debug_info["t"]
                 dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
@@ -205,7 +174,8 @@ class CustomVideoRendered:
                 #self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 0.3, f"C:{int(acc_cost*10)/10}")
                 #self.render_info["ax_states"].text(env_max_x - 10.5, env_max_y - 0.3, f"a_net(s, sg):{dist_a_net_s_sg}")
                 #self.render_info["ax_states"].text(env_max_x - 22.5, env_max_y - 2, f"a_net(s, g):{dist_a_net_s_g}")
-                self.render_info["ax_states"].text(env_max_x - 22.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
+                self.render_info["ax_states"].text(env_max_x - 28.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
+                self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
                 #self.render_info["ax_states"].text(env_max_x - 10.5, env_max_y - 2, f"t:{t}")
 
@@ -253,6 +223,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             step_count = 0
             env_goals_achieved = 0
             episode_reward = 0
+            episode_cost = 0
             episode_controller_rew = 0
             while not done:
                 if step_count % manager_propose_frequency == 0:
@@ -266,7 +237,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     action = action.cpu().numpy().squeeze()
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
-                new_obs, reward, done, _ = env.step(action)
+                new_obs, reward, done, info = env.step(action)
                 if env_name != "AntGather" and env.success_fn(reward):
                     env_goals_achieved += 1
                     goals_achieved += 1
@@ -278,6 +249,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                         renderer.setup_renderer()
                     debug_info = {}
                     debug_info["acc_reward"] = episode_reward
+                    debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
                     debug_info["t"] = step_count
                     debug_info["dist_a_net_s_sg"] = 0
@@ -300,13 +272,15 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                         current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                            current_step_info["robot_pos"]
                     current_step_info["robot_radius"] = 1.5
-                    if prev_state is None or prev_action is None:
-                        imagined_state = state
-                    else:
-                        imagined_state = manager_policy.predict_env.step(prev_imagined_state, prev_action)
-                    prev_imagined_state = state
-                    current_step_info["imagined_robot_pos"] = imagined_state[:2]
-                    
+                    # add world model img states
+                    if not(manager_policy.predict_env is None):
+                        if prev_state is None or prev_action is None:
+                            imagined_state = state
+                        else:
+                            imagined_state = manager_policy.predict_env.step(prev_imagined_state, prev_action)
+                        prev_imagined_state = state
+                        current_step_info["imagined_robot_pos"] = imagined_state[:2]
+                    # add apples and bombs if GatherEnv
                     if env_name =="AntGather":
                         current_step_info["apples_and_bombs"] = env.get_apples_and_bombs()
                         current_step_info["apple_bomb_radius"] = 1.0
@@ -324,6 +298,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 avg_reward += reward
                 avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
                 episode_reward += reward
+                episode_cost += info["safety_cost"]
                 episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
 
                 prev_state = state
@@ -466,8 +441,8 @@ def run_hrac(args):
     if args.env_name == "AntGather":
         env = GatherEnv(create_gather_env(args.env_name, args.seed), args.env_name)
         env.seed(args.seed)   
-    elif args.env_name in ["AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
-        if args.env_name == "AntMaze":
+    elif args.env_name in ["SafeAntMaze", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
+        if args.env_name == "AntMaze" or args.env_name == "SafeAntMaze":
             maze_id = "Maze"
         elif args.env_name == "AntMazeSparse":
             maze_id = "Maze2"
@@ -477,7 +452,10 @@ def run_hrac(args):
             maze_id = "Fall"
         else:
             assert 1 == 0
-        env = EnvWithGoal(create_maze_env(args.env_name, args.seed, maze_id=maze_id), args.env_name, maze_id=maze_id)
+        if args.env_name == "SafeAntMaze":
+            env = SafeMazeAnt(EnvWithGoal(create_maze_env("AntMaze", args.seed, maze_id=maze_id), "AntMaze", maze_id=maze_id))
+        else:
+            env = EnvWithGoal(create_maze_env(args.env_name, args.seed, maze_id=maze_id), args.env_name, maze_id=maze_id)
         env.seed(args.seed)
     elif args.env_name == "AntMazeMultiMap":    
         maze_ids = ["Maze_map_1", "Maze_map_2", "Maze_map_3", "Maze_map_4"]
@@ -492,7 +470,7 @@ def run_hrac(args):
         raise NotImplementedError
     
     # render
-    renderer = CustomVideoRendered(env)
+    renderer = CustomVideoRendered(env, world_model=args.world_model)
     
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
@@ -531,7 +509,7 @@ def run_hrac(args):
     torch.backends.cudnn.benchmark = False
 
     state_dim = state.shape[0]
-    if args.env_name in ["AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
+    if args.env_name in ["SafeAntMaze", "AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
         goal_dim = goal.shape[0]
     else:
         goal_dim = 0
@@ -572,7 +550,11 @@ def run_hrac(args):
         scale=man_scale,
         goal_loss_coeff=args.goal_loss_coeff,
         absolute_goal=args.absolute_goal,
-        wm_no_xy=no_xy
+        wm_no_xy=no_xy,
+        safety_subgoals=args.safety_subgoals,
+        safety_loss_coef=args.safety_loss_coef,
+        img_horizon=args.img_horizon,
+        cost_function=env.cost_func,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -602,7 +584,7 @@ def run_hrac(args):
 
     # Train HRAC or PPO controller
     def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
-                         episode_reward, manager_transition, total_timesteps):
+                         episode_reward, episode_cost, manager_transition, total_timesteps):
         print("train controller")
         if PPO:
             assert len(controller_buffer) == args.ppo_ctrl_batch_size
@@ -642,6 +624,7 @@ def run_hrac(args):
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
 
+        writer.add_scalar("data/controller_ep_cost", episode_cost, total_timesteps)
         writer.add_scalar("data/controller_ep_rew", episode_reward, total_timesteps)
         writer.add_scalar("data/manager_ep_rew", manager_transition[4], total_timesteps)
 
@@ -667,22 +650,23 @@ def run_hrac(args):
     cost_size = 0
     env_name = 'safepg2'
     model_type='pytorch'
-    with TensorWrapper():
-        env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
-                                        reward_size, cost_size, pred_hidden_size,
-                                        use_decay=use_decay)
-        predict_env = PredictEnv(env_model, env_name, model_type)
-    manager_policy.set_predict_env(predict_env)
-    def train_predict_model(replay_buffer):
-        print("train world model")
-        # Get all samples from environment
-        world_model_loss = manager_policy.train_world_model(replay_buffer)
-        
-        #logger.store(LossModel=loss)
-        writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
+    if args.world_model:
+        with TensorWrapper():
+            env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
+                                            reward_size, cost_size, pred_hidden_size,
+                                            use_decay=use_decay)
+            predict_env = PredictEnv(env_model, env_name, model_type)
+        manager_policy.set_predict_env(predict_env)
+        def train_predict_model(replay_buffer):
+            print("train world model")
+            # Get all samples from environment
+            world_model_loss = manager_policy.train_world_model(replay_buffer)
+            
+            #logger.store(LossModel=loss)
+            writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
 
-        if episode_num % 10 == 0:
-            print("world model loss: {:.3f}".format(world_model_loss))
+            if episode_num % 10 == 0:
+                print("world model loss: {:.3f}".format(world_model_loss))
 
     if args.load:
         try:
@@ -715,18 +699,19 @@ def run_hrac(args):
                 # Train HRAC controller
                 if not controller_policy.PPO:
                     train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
-                                     episode_reward, manager_transition, total_timesteps)
+                                     episode_reward, episode_cost, manager_transition, total_timesteps)
                     
                 # Train World Model
-                with TensorWrapper():
-                    train_predict_model(controller_buffer)
+                if args.world_model:
+                    with TensorWrapper():
+                        train_predict_model(controller_buffer)
 
                 # Train manager
                 if timesteps_since_manager >= args.train_manager_freq:
                     timesteps_since_manager = 0
                     r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
-                    man_act_loss, man_crit_loss, man_goal_loss = manager_policy.train(controller_policy,
+                    man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss = manager_policy.train(controller_policy,
                         manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
                         batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
                         a_net=a_net, r_margin=r_margin)
@@ -734,11 +719,15 @@ def run_hrac(args):
                     writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                     writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
                     writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
+                    if not(man_safety_loss is None):
+                        writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
 
                     if episode_num % 10 == 0:
                         print("Manager actor loss: {:.3f}".format(man_act_loss))
                         print("Manager critic loss: {:.3f}".format(man_crit_loss))
                         print("Manager goal loss: {:.3f}".format(man_goal_loss))
+                        if not(man_safety_loss is None):
+                            print("Manager safety loss: {:.3f}".format(man_safety_loss))
 
                 print("*************")
                 print()
@@ -789,6 +778,7 @@ def run_hrac(args):
             traj_buffer.append(state)
             done = False
             episode_reward = 0
+            episode_cost = 0
             episode_timesteps = 0
             just_loaded = False
             episode_num += 1
@@ -816,7 +806,7 @@ def run_hrac(args):
 
         action_copy = action.copy()
 
-        next_tup, manager_reward, done, _ = env.step(action_copy)
+        next_tup, manager_reward, done, info = env.step(action_copy)
 
         manager_transition[4] += manager_reward * args.man_rew_scale
         manager_transition[-1].append(action)
@@ -832,6 +822,10 @@ def run_hrac(args):
 
         controller_goal = subgoal
         episode_reward += controller_reward
+        if args.env_name == "SafeAntMaze":
+            episode_cost += info["safety_cost"]
+        else:
+            episode_cost += 0
 
         if args.inner_dones:
             ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
@@ -842,8 +836,12 @@ def run_hrac(args):
             controller_buffer.add(
                 (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), logprob, value, [], []))
         else:
-            controller_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+            if args.env_name == "SafeAntMaze":
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+            else:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
 
         state = next_state
         goal = next_goal
@@ -873,8 +871,9 @@ def run_hrac(args):
         
         # Train PPO controller
         if controller_policy.PPO and len(controller_buffer) == args.ppo_ctrl_batch_size:
-            train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
-                                episode_reward, manager_transition, total_timesteps)
+            train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, 
+                             episode_timesteps, episode_reward, episode_cost, 
+                             manager_transition, total_timesteps)
 
     # Final evaluation
     avg_ep_rew, avg_controller_rew, avg_steps, avg_env_finish = evaluate_policy(
