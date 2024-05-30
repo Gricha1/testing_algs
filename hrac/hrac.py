@@ -15,6 +15,11 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/hiro.py
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("******")
+print("******")
+print("training device:", device)
+print("******")
+print("******")
 
 
 def var(tensor, to_device=True):
@@ -76,34 +81,23 @@ class Manager(object):
         self.safety_loss_coef = safety_loss_coef
         self.img_horizon = img_horizon
         self.cost_function = cost_function
-    
-    def clean_obs(self, state, dims=2):
-        if self.no_xy:
-            with torch.no_grad():
-                mask = torch.ones_like(state)
-                if len(state.shape) == 3:
-                    mask[:, :, :dims] = 0
-                elif len(state.shape) == 2:
-                    mask[:, :dims] = 0
-                elif len(state.shape) == 1:
-                    mask[:dims] = 0
 
-                return state*mask
-        else:
-            return state
-    
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
 
+    def imagine_state(self, prev_imagined_state, prev_action, current_state, current_step, imagined_state_freq):
+        with torch.no_grad():
+            if prev_imagined_state is None or current_step % imagined_state_freq == 0:
+                imagined_state = current_state
+            else:
+                imagined_state = self.predict_env.step(prev_imagined_state, prev_action)
+        return imagined_state
+
     def train_world_model(self, replay_buffer):
         x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        #next_g = get_tensor(self.subgoal_transition(x, sg, y))
-        state = self.clean_obs(get_tensor(x, to_device=False))
+        state = get_tensor(x, to_device=False)
         action = get_tensor(u, to_device=False)
-        sg = get_tensor(sg, to_device=False)
-        done = get_tensor(1 - d, to_device=False)
-        reward = get_tensor(r, to_device=False)
-        next_state = self.clean_obs(get_tensor(y, to_device=False)) 
+        next_state = get_tensor(y, to_device=False)
 
         delta_state = next_state - state
         inputs = np.concatenate((state, action), axis=-1)
@@ -111,7 +105,7 @@ class Manager(object):
         labels = delta_state.numpy()
 
         epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
-        del state, action, reward, next_state, done
+        del state, action, next_state
         
         return loss
 
@@ -295,7 +289,8 @@ class Manager(object):
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-        avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
+        if self.safety_subgoals:
+            avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
         return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss
 
     def load_pretrained_weights(self, filename):

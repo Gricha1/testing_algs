@@ -260,8 +260,6 @@ class SafeMazeAnt:
         next_tup, rew, done, info = self.env.step(action)
         safety_bounds = self.get_safety_bounds()
         info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
-        # test cost reward
-        #rew -= info["safety_cost"]
 
         return next_tup, rew, done, info
     

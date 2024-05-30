@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=300_000, type=float) # 300_000
+    parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", action="store_true")
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 
+    # Adjacency Network Parameters
     parser.add_argument("--gid", default=0, type=int)
     parser.add_argument("--traj_buffer_size", default=50_000, type=int) # 50_000
     parser.add_argument("--lr_r", default=2e-4, type=float)
@@ -30,10 +31,9 @@ if __name__ == "__main__":
     parser.add_argument("--r_embedding_dim", default=32, type=int)
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
 
+    # Manager Parameters
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
     parser.add_argument("--train_manager_freq", default=10, type=int)
-
-    # Manager Parameters
     parser.add_argument("--man_soft_sync_rate", default=0.005, type=float)
     parser.add_argument("--man_batch_size", default=128, type=int)
     parser.add_argument("--man_buffer_size", default=2e5, type=int)
@@ -51,6 +51,7 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_act_lr", default=1e-4, type=float)
     parser.add_argument("--ctrl_crit_lr", default=1e-3, type=float)
     parser.add_argument("--ctrl_discount", default=0.95, type=float)
+
     # PPO controller Parameters
     parser.add_argument("--PPO", action='store_true', default=False)
     parser.add_argument("--ppo_ctrl_batch_size", default=4096, type=int)
@@ -72,11 +73,18 @@ if __name__ == "__main__":
 
     # WorldModel Parameters
     parser.add_argument("--world_model", action='store_true', default=False)
+    parser.add_argument("--wm_buffer_size", default=1e6, type=int)
+    parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
+    parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
+    parser.add_argument("--num_networks", default=8, type=int)
+    parser.add_argument("--num_elites", default=6, type=int)
+    parser.add_argument("--pred_hidden_size", default=400, type=int)
+    parser.add_argument("--use_decay", default=True, type=bool)
 
     # Safety Parameters
     parser.add_argument("--safety_subgoals", action='store_true', default=False)
-    parser.add_argument("--safety_loss_coef", default=1., type=float)
-    parser.add_argument("--img_horizon", default=10, type=int)
+    parser.add_argument("--safety_loss_coef", default=20., type=float)
+    parser.add_argument("--img_horizon", default=20, type=int)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)
