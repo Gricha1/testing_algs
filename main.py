@@ -78,7 +78,7 @@ if __name__ == "__main__":
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--num_networks", default=8, type=int)
     parser.add_argument("--num_elites", default=6, type=int)
-    parser.add_argument("--pred_hidden_size", default=400, type=int)
+    parser.add_argument("--pred_hidden_size", default=200, type=int)
     parser.add_argument("--use_decay", default=True, type=bool)
 
     # Safety Parameters

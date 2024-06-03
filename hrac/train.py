@@ -303,13 +303,16 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 prev_action = action
 
         if not (renderer is None) and not (writer is None):
-            writer.add_video(
-                "eval/pos_video",
-                #Video(torch.ByteTensor([positions_screens]), fps=40),
-                torch.ByteTensor([positions_screens]),
-                total_timesteps,
-                #exclude=("stdout", "log", "json", "csv"),
-            )
+            try: # doest know why problem appears
+                writer.add_video(
+                    "eval/pos_video",
+                    #Video(torch.ByteTensor([positions_screens]), fps=40),
+                    torch.ByteTensor([positions_screens]),
+                    total_timesteps,
+                    #exclude=("stdout", "log", "json", "csv"),
+                )
+            except:
+                pass
             del positions_screens
             renderer.delete_data()
             

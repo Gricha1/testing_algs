@@ -1,5 +1,18 @@
 # HRAC + MB
-python main.py --world_model --safety_subgoals --max_timesteps 3000000 --wandb_postfix "safety_subgoals"
+python main.py --world_model --safety_subgoals --pred_hidden_size 1000 --safety_loss_coef 200 --max_timesteps 1500000 --wandb_postfix "wm_hidden_size=1000, coef_safety=200"
+python main.py --world_model --safety_subgoals --safety_loss_coef 20 --max_timesteps 1500000 --wandb_postfix "coef_safety=200"
+python main.py --world_model --safety_subgoals --safety_loss_coef 2000 --max_timesteps 1500000 --wandb_postfix "coef_safety=2000"
+#python main.py --world_model --safety_subgoals --pred_hidden_size 600 --max_timesteps 2500000 --wandb_postfix "wm_hidden_size=600, safety_subgoals"
+#python main.py --world_model --safety_subgoals --pred_hidden_size 1000 --max_timesteps 2500000 --wandb_postfix "wm_hidden_size=1000, safety_subgoals"
+#python main.py --world_model --safety_subgoals --pred_hidden_size 200 --max_timesteps 2500000 --wandb_postfix "wm_hidden_size=1000, safety_subgoals"
+
+#python main.py --world_model --safety_subgoals --img_horizon 5 --max_timesteps 1500000 --wandb_postfix "wm_hidden_size=1000, safety_subgoals"
+#python main.py --world_model --safety_subgoals --img_horizon 10 --max_timesteps 1500000 --wandb_postfix "wm_hidden_size=1000, safety_subgoals"
+#python main.py --world_model --safety_subgoals --img_horizon 30 --max_timesteps 1500000 --wandb_postfix "wm_hidden_size=1000, safety_subgoals"
+#python main.py --world_model --safety_subgoals --max_timesteps 1500000 --wandb_postfix "safety_subgoals"
+#python main.py --world_model --safety_subgoals --safety_loss_coef 20000 --max_timesteps 1500000 --wandb_postfix "safety_subgoals"
+
+
 #python main.py --max_timesteps 3000000 --wandb_postfix "base"
 
 # PPO
