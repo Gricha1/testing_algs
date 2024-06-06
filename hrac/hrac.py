@@ -46,7 +46,7 @@ class Manager(object):
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
                  wm_no_xy=False, safety_subgoals=False, safety_loss_coef=1, img_horizon=10, 
-                 cost_function=None):
+                 cost_function=None, testing_safety_subgoal=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -81,6 +81,7 @@ class Manager(object):
         self.safety_loss_coef = safety_loss_coef
         self.img_horizon = img_horizon
         self.cost_function = cost_function
+        self.testing_safety_subgoal = testing_safety_subgoal
 
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
@@ -142,22 +143,29 @@ class Manager(object):
             assert not(self.predict_env is None), "world model must be initialized"
             safety_loss = 0
             with torch.no_grad():
-                h = 0
-                img_state = state
-                acc_costs = np.zeros(img_state.shape[0]) # (batch_size,)
-                while h < self.img_horizon:
-                    # subgoals = actions
-                    img_actions = controller_policy.actor(img_state, actions) 
-                    img_state = img_state.cpu().numpy()
-                    img_actions = img_actions.cpu().numpy()
+                if self.testing_safety_subgoal:
+                    acc_costs = np.zeros(state.shape[0]) # (batch_size,)
+                    copy_state = state.cpu().numpy()
+                    copy_actions = actions.cpu().numpy()
+                    acc_costs += self.cost_function(copy_state[:, :2] + copy_actions)
+                    safety_loss = acc_costs.mean()
+                else:
+                    h = 0
+                    img_state = state
+                    acc_costs = np.zeros(img_state.shape[0]) # (batch_size,)
+                    while h < self.img_horizon:
+                        # subgoals = actions
+                        img_actions = controller_policy.actor(img_state, actions) 
+                        img_state = img_state.cpu().numpy()
+                        img_actions = img_actions.cpu().numpy()
 
-                    # get imagination safety
-                    acc_costs += self.cost_function(img_state)
+                        # get imagination safety
+                        acc_costs += self.cost_function(img_state)
 
-                    img_state = self.predict_env.step(img_state, img_actions)
-                    img_state = torch.from_numpy(img_state).float().to(device)
-                    h += 1
-                safety_loss = (acc_costs/self.img_horizon).mean()
+                        img_state = self.predict_env.step(img_state, img_actions)
+                        img_state = torch.from_numpy(img_state).float().to(device)
+                        h += 1
+                    safety_loss = (acc_costs/self.img_horizon).mean()
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):

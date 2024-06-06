@@ -83,8 +83,9 @@ if __name__ == "__main__":
 
     # Safety Parameters
     parser.add_argument("--safety_subgoals", action='store_true', default=False)
-    parser.add_argument("--safety_loss_coef", default=20., type=float)
+    parser.add_argument("--safety_loss_coef", default=200., type=float)
     parser.add_argument("--img_horizon", default=20, type=int)
+    parser.add_argument("--testing_safety_subgoal", action='store_true', default=False)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)

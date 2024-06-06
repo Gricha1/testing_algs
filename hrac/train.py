@@ -202,6 +202,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         avg_controller_rew = 0.
         global_steps = 0
         goals_achieved = 0
+        eval_image_ep = 0
+        avg_episode_safety_subgoal_rate = 0
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
@@ -212,7 +214,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             state = obs["observation"]
 
             # render env
-            if eval_ep == 0:
+            if eval_ep == eval_image_ep:
                 positions_screens = []
                 imagined_state_freq = 100
                 prev_imagined_state = None
@@ -224,9 +226,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             episode_reward = 0
             episode_cost = 0
             episode_controller_rew = 0
+            episode_safety_subgoal_rate = 0
+            episode_subgoals_count = 0
             while not done:
                 if step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
+                    assert not manager_policy.absolute_goal, "incorrect subgoal cost"
+                    episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                    episode_subgoals_count += 1
 
                 step_count += 1
                 global_steps += 1
@@ -244,7 +251,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     done = True
 
                 # render env
-                if not (renderer is None) and eval_ep == 0:
+                if not (renderer is None) and eval_ep == eval_image_ep:
                     if step_count == 1:
                         renderer.setup_renderer()
                     debug_info = {}
@@ -302,6 +309,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 state = new_state
                 prev_action = action
 
+            avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
+
         if not (renderer is None) and not (writer is None):
             try: # doest know why problem appears
                 writer.add_video(
@@ -321,6 +330,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
         avg_env_finish = goals_achieved / eval_episodes
+        avg_episode_safety_subgoal_rate /= eval_episodes
 
         print("---------------------------------------")
         print("Evaluation over {} episodes:\nAvg Ctrl Reward: {:.3f}".format(eval_episodes, avg_controller_rew))
@@ -332,7 +342,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         print("---------------------------------------")
 
         env.evaluate = False
-        return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish
+        return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, avg_episode_safety_subgoal_rate
 
 
 def get_reward_function(dims, absolute_goal=False, binary_reward=False):
@@ -556,6 +566,7 @@ def run_hrac(args):
         safety_loss_coef=args.safety_loss_coef,
         img_horizon=args.img_horizon,
         cost_function=env.cost_func,
+        testing_safety_subgoal=args.testing_safety_subgoal
     )
 
     calculate_controller_reward = get_reward_function(
@@ -585,7 +596,7 @@ def run_hrac(args):
 
     # Train HRAC or PPO controller
     def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
-                         episode_reward, episode_cost, man_episode_cost, manager_transition, total_timesteps):
+                         episode_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, manager_transition, total_timesteps):
         print("train controller")
         if PPO:
             assert len(controller_buffer) == args.ppo_ctrl_batch_size
@@ -629,6 +640,7 @@ def run_hrac(args):
         writer.add_scalar("data/controller_ep_rew", episode_reward, total_timesteps)
         writer.add_scalar("data/manager_ep_rew", manager_transition[4], total_timesteps)
         writer.add_scalar("data/manager_ep_cost", man_episode_cost, total_timesteps)
+        writer.add_scalar("data/manager_ep_safety_subgoal_rate", episode_safety_subgoal_rate, total_timesteps)
 
     # Initialize adjacency matrix and adjacency network
     n_states = 0
@@ -724,7 +736,9 @@ def run_hrac(args):
                 # Train HRAC controller
                 if not controller_policy.PPO:
                     train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
-                                     episode_reward, controller_episode_cost, episode_cost, manager_transition, total_timesteps)
+                                     episode_reward, controller_episode_cost, episode_cost, 
+                                     episode_safety_subgoal_rate/episode_subgoals_count, 
+                                     manager_transition, total_timesteps)
                     
                 # Train World Model
                 if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
@@ -759,7 +773,7 @@ def run_hrac(args):
                 # Evaluate
                 if timesteps_since_eval >= args.eval_freq:
                     timesteps_since_eval = 0
-                    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish =\
+                    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate =\
                         evaluate_policy(env, args.env_name, manager_policy, controller_policy,
                             calculate_controller_reward, args.ctrl_rew_scale, 
                             args.manager_propose_freq, len(evaluations), 
@@ -769,6 +783,7 @@ def run_hrac(args):
                     writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
                     writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
                     writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
+                    writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, total_timesteps)
 
                     evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
                     output_data["frames"].append(total_timesteps)
@@ -803,11 +818,14 @@ def run_hrac(args):
             traj_buffer.append(state)
             done = False
             episode_reward = 0
-            episode_cost = 0
-            controller_episode_cost = 0
             episode_timesteps = 0
             just_loaded = False
             episode_num += 1
+            if args.env_name == "SafeAntMaze":
+                episode_cost = 0
+                controller_episode_cost = 0
+                episode_safety_subgoal_rate = 0
+                episode_subgoals_count = 0
             prev_action = None
             if args.world_model:
                 prev_imagined_state = None
@@ -906,6 +924,11 @@ def run_hrac(args):
             manager_buffer.add(manager_transition)
             subgoal = manager_policy.sample_goal(state, goal)
 
+            if args.env_name == "SafeAntMaze":
+                assert not manager_policy.absolute_goal, "incorrect subgoal cost"
+                episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                episode_subgoals_count += 1
+
             if not args.absolute_goal:
                 subgoal = man_noise.perturb_action(subgoal,
                     min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
@@ -919,11 +942,13 @@ def run_hrac(args):
         # Train PPO controller
         if controller_policy.PPO and len(controller_buffer) == args.ppo_ctrl_batch_size:
             train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, 
-                             episode_timesteps, episode_reward, controller_episode_cost, episode_cost, 
+                             episode_timesteps, episode_reward, controller_episode_cost, 
+                             episode_cost, 
+                             episode_safety_subgoal_rate/episode_subgoals_count, 
                              manager_transition, total_timesteps)
 
     # Final evaluation
-    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish = evaluate_policy(
+    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate = evaluate_policy(
         env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
         args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
         renderer=renderer, writer=writer, total_timesteps=total_timesteps,
