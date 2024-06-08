@@ -85,6 +85,14 @@ def construct_maze(maze_id='Maze'):
         [1, 0, 0, 0, 1],
         [1, 1, 1, 1, 1],
     ]
+  elif maze_id == 'MazeSafe_map_1':
+    structure = [
+        [1, 1, 1, 1, 1],
+        [1, 'r', 0, 0, 1],
+        [1, 1, 0, 0, 1],
+        [1, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1],
+    ]
   elif maze_id == 'Maze2':
     O = 'r'
     structure = [

@@ -453,8 +453,10 @@ def run_hrac(args):
         env = GatherEnv(create_gather_env(args.env_name, args.seed), args.env_name)
         env.seed(args.seed)   
     elif args.env_name in ["SafeAntMaze", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
-        if args.env_name == "AntMaze" or args.env_name == "SafeAntMaze":
+        if args.env_name == "AntMaze":
             maze_id = "Maze"
+        if args.env_name == "SafeAntMaze":
+            maze_id = "MazeSafe_map_1"
         elif args.env_name == "AntMazeSparse":
             maze_id = "Maze2"
         elif args.env_name == "AntPush":

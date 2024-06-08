@@ -132,7 +132,7 @@ class EnvWithGoal(object):
         self.early_stop = False if env_name in ['AntMaze', 'AntPush', 'AntFall', "AntMazeMultiMap"] else True
         self.early_stop_flag = False
         self.maze_id = maze_id
-        assert (not env_name == 'AntMaze') or (env_name == 'AntMaze' and maze_id == "Maze")
+        assert (not env_name == 'AntMaze') or (env_name == 'AntMaze' and (maze_id == "Maze" or maze_id == "MazeSafe_map_1"))
         assert (not env_name == 'MazeSparse') or (env_name == 'MazeSparse' and maze_id == "Maze2")
         assert (not env_name == 'Push') or (env_name == 'Push' and maze_id == "Push")
         assert (not env_name == 'Fall') or (env_name == 'Fall' and maze_id == "Fall")
