@@ -264,7 +264,7 @@ class SafeMazeAnt:
         return next_tup, rew, done, info
     
 
-    def cost_func(self, state: np.array):
+    def cost_func(self, state):
         if len(state.shape) == 1:
             robot_x, robot_y = state[:2]
             cost = 0
@@ -282,7 +282,8 @@ class SafeMazeAnt:
             cost = cost + (robot_y <= self.safety_bounds[3-1].y) + (robot_y >= self.safety_bounds[1-1].y)
             cost = cost + (robot_y <= self.safety_bounds[7-1].y) * (robot_y >= self.safety_bounds[4-1].y) * (robot_x <= self.safety_bounds[5-1].x)
             cost = (cost >= 1)
-            cost = cost.astype(float)
+            #cost = cost.astype(float)
+            cost = cost.to(float)
             assert (cost <= 1.0).all()
             
         return cost
