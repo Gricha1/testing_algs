@@ -312,16 +312,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
 
         if not (renderer is None) and not (writer is None):
-            try: # doest know why problem appears
-                writer.add_video(
-                    "eval/pos_video",
-                    #Video(torch.ByteTensor([positions_screens]), fps=40),
-                    torch.ByteTensor([positions_screens]),
-                    total_timesteps,
-                    #exclude=("stdout", "log", "json", "csv"),
-                )
-            except:
-                pass
+            writer.add_video(
+                "eval/pos_video",
+                #Video(torch.ByteTensor([positions_screens]), fps=40),
+                torch.ByteTensor([positions_screens]),
+                total_timesteps,
+                #exclude=("stdout", "log", "json", "csv"),
+            )
             del positions_screens
             renderer.delete_data()
             
