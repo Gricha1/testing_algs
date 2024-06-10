@@ -375,7 +375,8 @@ def get_reward_function(dims, absolute_goal=False, binary_reward=False):
 
 
 def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
-        optimizer_r, controller_goal_dim, device, args):
+        optimizer_r, controller_goal_dim, device, args,
+        exp_num):
     print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
@@ -397,17 +398,16 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     for s in state_list:
         flags[int(s[0]), int(s[1])] = 0
     print(flags)
-    if not args.load_adj_net:
-        print("Training adjacency network...")
-        loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
-                            optimizer_r, args.r_margin_pos, args.r_margin_neg,
-                            n_epochs=args.r_training_epochs, batch_size=args.r_batch_size,
-                            device=device, verbose=False)
+    print("Training adjacency network...")
+    loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
+                        optimizer_r, args.r_margin_pos, args.r_margin_neg,
+                        n_epochs=args.r_training_epochs, batch_size=args.r_batch_size,
+                        device=device, verbose=False)
 
-        if args.save_models:
-            r_filename = os.path.join("./models", "{}_{}_a_network.pth".format(args.env_name, args.algo))
-            torch.save(a_net.state_dict(), r_filename)
-            print("----- Adjacency network {} saved. -----".format(episode_num))
+    if args.save_models:
+        r_filename = os.path.join(f"./models/{exp_num}", "{}_{}_a_network.pth".format(args.env_name, args.algo))
+        torch.save(a_net.state_dict(), r_filename)
+        #print("----- Adjacency network {} saved. -----".format(episode_num))
 
     traj_buffer.reset()
 
@@ -431,8 +431,12 @@ def run_hrac(args):
     
     if not os.path.exists("./results"):
         os.makedirs("./results")
-    if args.save_models and not os.path.exists("./models"):
-        os.makedirs("./models")
+    if args.save_models:
+        exp_num = 0
+        while os.path.exists(f"./models/{exp_num}"):
+            exp_num += 1
+        os.makedirs(f"./models/{exp_num}")
+        wandb.config["model_save_path"] = f"./models/{exp_num}"
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
     output_dir = os.path.join(args.log_dir, args.algo)
@@ -441,8 +445,7 @@ def run_hrac(args):
     output_dir += "/" + args.env_name
     if args.PPO:
         output_dir += "PPO"
-    output_dir += "_1"
-    # output_dir = "logs/hrac/AntGather_1"
+    output_dir += "_1"    
     while os.path.exists(output_dir):
         run_number = int(output_dir.split("_")[-1])
         output_dir = "_".join(output_dir.split("_")[:-1])
@@ -598,7 +601,8 @@ def run_hrac(args):
 
     # Train HRAC or PPO controller
     def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
-                         episode_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, manager_transition, total_timesteps):
+                         ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
+                         ep_manager_reward, total_timesteps):
         print("train controller")
         if PPO:
             assert len(controller_buffer) == args.ppo_ctrl_batch_size
@@ -639,8 +643,8 @@ def run_hrac(args):
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
 
         writer.add_scalar("data/controller_ep_cost", episode_cost, total_timesteps)
-        writer.add_scalar("data/controller_ep_rew", episode_reward, total_timesteps)
-        writer.add_scalar("data/manager_ep_rew", manager_transition[4], total_timesteps)
+        writer.add_scalar("data/controller_ep_rew", ep_controller_reward, total_timesteps)
+        writer.add_scalar("data/manager_ep_rew", ep_manager_reward, total_timesteps)
         writer.add_scalar("data/manager_ep_cost", man_episode_cost, total_timesteps)
         writer.add_scalar("data/manager_ep_safety_subgoal_rate", episode_safety_subgoal_rate, total_timesteps)
 
@@ -653,7 +657,7 @@ def run_hrac(args):
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:
         print("Loading adjacency network...")
-        a_net.load_state_dict(torch.load("./models/a_network.pth"))
+        a_net.load_state_dict(torch.load("./models/{args.loaded_exp_num}/a_network.pth"))
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
@@ -688,8 +692,8 @@ def run_hrac(args):
 
     if args.load:
         try:
-            manager_policy.load("./models")
-            controller_policy.load("./models")
+            manager_policy.load("./models", exp_num=args.loaded_exp_num)
+            controller_policy.load("./models", exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
         except Exception as e:
@@ -702,20 +706,21 @@ def run_hrac(args):
     # Collect transitions with random policy
     done = True
     print("collecting random episodes...")
-    exploration_total_timesteps = 0
-    if args.world_model:
-        while exploration_total_timesteps < args.wm_n_initial_exploration_steps:
-            if done:
-                obs = env.reset()
-                state = obs["observation"]
-                done = False
-            action = env.action_space.sample()
-            next_tup, manager_reward, done, info = env.step(action)   
-            next_state = next_tup["observation"]
-            world_model_buffer.add(
-                (state, next_state, None, action, None, None, [], [])) 
-            state = next_state
-            exploration_total_timesteps += 1
+    if not just_loaded:
+        exploration_total_timesteps = 0
+        if args.world_model:
+            while exploration_total_timesteps < args.wm_n_initial_exploration_steps:
+                if done:
+                    obs = env.reset()
+                    state = obs["observation"]
+                    done = False
+                action = env.action_space.sample()
+                next_tup, manager_reward, done, info = env.step(action)   
+                next_state = next_tup["observation"]
+                world_model_buffer.add(
+                    (state, next_state, None, action, None, None, [], [])) 
+                state = next_state
+                exploration_total_timesteps += 1
 
     # Logging Parameters
     total_timesteps = 0
@@ -738,9 +743,9 @@ def run_hrac(args):
                 # Train HRAC controller
                 if not controller_policy.PPO:
                     train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
-                                     episode_reward, controller_episode_cost, episode_cost, 
+                                     ep_controller_reward, controller_episode_cost, episode_cost, 
                                      episode_safety_subgoal_rate/episode_subgoals_count, 
-                                     manager_transition, total_timesteps)
+                                     ep_manager_reward, total_timesteps)
                     
                 # Train World Model
                 if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
@@ -798,12 +803,12 @@ def run_hrac(args):
                     output_data["dist"].append(-avg_controller_rew)
 
                     if args.save_models:
-                        controller_policy.save("./models", args.env_name, args.algo)
-                        manager_policy.save("./models", args.env_name, args.algo)
+                        controller_policy.save("./models", args.env_name, args.algo, exp_num)
+                        manager_policy.save("./models", args.env_name, args.algo, exp_num)
 
                 if traj_buffer.full():
                      n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
-                        optimizer_r, controller_goal_dim, device, args)
+                        optimizer_r, controller_goal_dim, device, args, exp_num)
                      
                      writer.add_scalar("data/a_net_loss", a_loss, total_timesteps)
 
@@ -819,7 +824,8 @@ def run_hrac(args):
             traj_buffer.create_new_trajectory()
             traj_buffer.append(state)
             done = False
-            episode_reward = 0
+            ep_controller_reward = 0
+            ep_manager_reward = 0
             episode_timesteps = 0
             just_loaded = False
             episode_num += 1
@@ -862,6 +868,7 @@ def run_hrac(args):
         cost = info["safety_cost"]
 
         manager_transition[4] += manager_reward * args.man_rew_scale
+        ep_manager_reward += manager_reward * args.man_rew_scale
         manager_transition[-1].append(action)
 
         next_goal = next_tup["desired_goal"]
@@ -874,7 +881,7 @@ def run_hrac(args):
         subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
 
         controller_goal = subgoal
-        episode_reward += controller_reward
+        ep_controller_reward += controller_reward
         controller_episode_cost += 0
         if args.env_name == "SafeAntMaze":
             episode_cost += cost
@@ -944,10 +951,10 @@ def run_hrac(args):
         # Train PPO controller
         if controller_policy.PPO and len(controller_buffer) == args.ppo_ctrl_batch_size:
             train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, 
-                             episode_timesteps, episode_reward, controller_episode_cost, 
+                             episode_timesteps, ep_controller_reward, controller_episode_cost, 
                              episode_cost, 
                              episode_safety_subgoal_rate/episode_subgoals_count, 
-                             manager_transition, total_timesteps)
+                             ep_manager_reward, total_timesteps)
 
     # Final evaluation
     avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate = evaluate_policy(
@@ -964,8 +971,8 @@ def run_hrac(args):
     output_data["dist"].append(-avg_controller_rew)
 
     if args.save_models:
-        controller_policy.save("./models", args.env_name, args.algo)
-        manager_policy.save("./models", args.env_name, args.algo)
+        controller_policy.save("./models", args.env_name, args.algo, exp_num)
+        manager_policy.save("./models", args.env_name, args.algo, exp_num)
 
     writer.close()
 

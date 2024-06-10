@@ -9,9 +9,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", default=2, type=int)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
-    parser.add_argument("--save_models", action="store_true")
+    parser.add_argument("--save_models", default=True, type=bool)
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
-    parser.add_argument("--load", default=False, type=bool)
+    parser.add_argument("--load", action="store_true", default=False)
+    parser.add_argument("--loaded_exp_num", default=0, type=int)
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
@@ -99,8 +100,9 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    assert not args.safety_subgoals or (args.world_model and args.safety_subgoals), \
+    assert not args.safety_subgoals or (args.world_model and args.safety_subgoals or args.testing_safety_subgoal), \
             " to train safety you need world model"
+    assert not args.testing_safety_subgoal or (args.safety_subgoals and args.testing_safety_subgoal)
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)

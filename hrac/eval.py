@@ -7,8 +7,9 @@ import hrac.hrac as hrac
 from envs import EnvWithGoal, GatherEnv
 from envs.create_maze_env import create_maze_env
 from envs.create_gather_env import create_gather_env
+from hrac.train import evaluate_policy
 
-
+"""
 def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_episodes=100):
@@ -68,7 +69,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
         env.evaluate = False
         return avg_reward, avg_controller_rew, avg_step_count, avg_env_finish
-
+"""
 
 def get_reward_function(dims, absolute_goal=False, binary_reward=False):
     if absolute_goal and binary_reward:
