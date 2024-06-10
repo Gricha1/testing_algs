@@ -143,12 +143,17 @@ class Manager(object):
         if self.safety_subgoals:
             assert self.testing_safety_subgoal or (not self.testing_safety_subgoal and not(self.predict_env is None)), "world model must be initialized"
             if self.testing_safety_subgoal:
-                #acc_costs = np.zeros(state.shape[0]) # (batch_size,)
-                #copy_state = state.cpu().numpy()
-                #copy_actions = actions.cpu().numpy()
-                manager_absolute_goal = state[:, :self.action_dim] + actions[:, :self.action_dim]
-                acc_costs = self.cost_function(manager_absolute_goal)
-                safety_loss = acc_costs.mean()
+                copy_state = state.cpu().detach().numpy()
+                copy_actions = actions.cpu().detach().numpy()
+                manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
+                cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
+                cost_violate_indexes = torch.nonzero(cost_indexes).squeeze()
+                safe_indexes = torch.nonzero(1 - cost_indexes).squeeze()
+                
+                safety_loss = actions[:, 0] + actions[:, 1]
+                safety_loss[cost_violate_indexes] = safety_loss[cost_violate_indexes] / safety_loss[cost_violate_indexes]
+                safety_loss[safe_indexes] = safety_loss[safe_indexes] * 0
+                safety_loss = safety_loss.mean()
             else:
                 safety_loss = 0
                 h = 0
@@ -157,8 +162,8 @@ class Manager(object):
                 while h < self.img_horizon:
                     # subgoals = actions
                     img_actions = controller_policy.actor(img_state, actions) 
-                    img_state = img_state.cpu().numpy()
-                    img_actions = img_actions.cpu().numpy()
+                    #img_state = img_state.cpu().numpy()
+                    #img_actions = img_actions.cpu().numpy()
 
                     # get imagination safety
                     acc_costs += self.cost_function(img_state)
@@ -279,6 +284,12 @@ class Manager(object):
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
+
+            # test
+            actor_loss.retain_grad() 
+            goal_loss.retain_grad() 
+            safety_subgoals_loss.retain_grad() 
+
             actor_loss.backward()
             self.actor_optimizer.step()
 
