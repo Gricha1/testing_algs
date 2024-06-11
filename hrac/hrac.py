@@ -147,10 +147,13 @@ class Manager(object):
                 copy_actions = actions.cpu().detach().numpy()
                 manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
                 cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
-                cost_violate_indexes = torch.nonzero(cost_indexes).squeeze()
-                safe_indexes = torch.nonzero(1 - cost_indexes).squeeze()
-                
-                safety_loss = actions[:, 0] + actions[:, 1]
+                cost_violate_indexes = (cost_indexes).bool()
+                safe_indexes = (1 - cost_indexes).bool()
+                # if unsafe state loss = 1, loss = 0 otherwise
+                safety_loss = torch.abs(actions[:, 0]) + torch.abs(actions[:, 1])
+                zero_indexes = (safety_loss == 0).cpu().detach()
+                cost_violate_indexes[zero_indexes] = False
+                safe_indexes[zero_indexes] = True
                 safety_loss[cost_violate_indexes] = safety_loss[cost_violate_indexes] / safety_loss[cost_violate_indexes]
                 safety_loss[safe_indexes] = safety_loss[safe_indexes] * 0
                 safety_loss = safety_loss.mean()
@@ -161,14 +164,11 @@ class Manager(object):
                 acc_costs = np.zeros(img_state.shape[0]) # (batch_size,)
                 while h < self.img_horizon:
                     # subgoals = actions
-                    img_actions = controller_policy.actor(img_state, actions) 
-                    #img_state = img_state.cpu().numpy()
-                    #img_actions = img_actions.cpu().numpy()
-
-                    # get imagination safety
-                    acc_costs += self.cost_function(img_state)
-
-                    img_state = self.predict_env.step(img_state, img_actions)
+                    ctrl_actions = controller_policy.actor(img_state, actions) 
+                    img_state = img_state.cpu().numpy()
+                    img_actions = img_actions.cpu().numpy()
+                    #acc_costs += self.cost_function(img_state)
+                    img_state = self.predict_env.step(img_state, ctrl_actions)
                     img_state = torch.from_numpy(img_state).float().to(device)
                     h += 1
                 safety_loss = (acc_costs/self.img_horizon).mean()
@@ -286,9 +286,9 @@ class Manager(object):
             self.actor_optimizer.zero_grad()
 
             # test
-            actor_loss.retain_grad() 
-            goal_loss.retain_grad() 
-            safety_subgoals_loss.retain_grad() 
+            #actor_loss.retain_grad() 
+            #goal_loss.retain_grad() 
+            #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
             self.actor_optimizer.step()
