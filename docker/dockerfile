@@ -53,6 +53,7 @@ RUN pip install pandas==1.5.3
 RUN pip install matplotlib==3.6.2
 RUN pip install stable_baselines3==2.3.0 --no-deps
 RUN pip install numpy==1.23.4
+RUN pip install imageio-ffmpeg==0.4.9
 
 # mb rce deps
 #RUN apt-get install libopenmpi-dev
