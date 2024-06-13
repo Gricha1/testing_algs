@@ -231,8 +231,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             while not done:
                 if step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
-                    assert not manager_policy.absolute_goal, "incorrect subgoal cost"
-                    episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                    if manager_policy.absolute_goal:
+                        episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                    else:
+                        episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                     episode_subgoals_count += 1
 
                 step_count += 1
@@ -314,10 +316,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         if not (renderer is None) and not (writer is None):
             writer.add_video(
                 "eval/pos_video",
-                #Video(torch.ByteTensor([positions_screens]), fps=40),
                 torch.ByteTensor([positions_screens]),
                 total_timesteps,
-                #exclude=("stdout", "log", "json", "csv"),
             )
             del positions_screens
             renderer.delete_data()
@@ -602,7 +602,7 @@ def run_hrac(args):
                          ep_manager_reward, total_timesteps):
         print("train controller")
         if PPO:
-            assert len(controller_buffer) == args.ppo_ctrl_batch_size
+            args.ppo_ctrl_batch_size = len(controller_buffer)
             # controller_buffer: 
             # 0 - x, 1 - y, 2 - g, 3 - u, 4 - r, 5 - d, 6 - l, 7 - v, 8 - x_seq, 9 - a_seq
             with torch.no_grad():
@@ -699,6 +699,23 @@ def run_hrac(args):
     else:
         just_loaded = False
 
+    # Pretrain adj network for PPO controller
+    if controller_policy.PPO:
+        done = True
+        print("collecting random episodes for adj network...")
+        if not just_loaded:
+            while not traj_buffer.full():
+                if done:
+                    obs = env.reset()
+                    state = obs["observation"]
+                    done = False
+                    traj_buffer.create_new_trajectory()
+                    traj_buffer.append(state)
+                action = env.action_space.sample()
+                next_tup, manager_reward, done, info = env.step(action)   
+                next_state = next_tup["observation"]
+                traj_buffer.append(next_state)
+                state = next_state
 
     # Collect transitions with random policy
     done = True
@@ -737,12 +754,11 @@ def run_hrac(args):
                 print("episode num:", episode_num)
                 if episode_num % 10 == 0:
                     print("Episode {}".format(episode_num))
-                # Train HRAC controller
-                if not controller_policy.PPO:
-                    train_controller(False, controller_buffer, done, next_state, subgoal, episode_timesteps, 
-                                     ep_controller_reward, controller_episode_cost, episode_cost, 
-                                     episode_safety_subgoal_rate/episode_subgoals_count, 
-                                     ep_manager_reward, total_timesteps)
+                # Train TD3 or PPO controller
+                train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
+                                    ep_controller_reward, controller_episode_cost, episode_cost, 
+                                    episode_safety_subgoal_rate/episode_subgoals_count, 
+                                    ep_manager_reward, total_timesteps)
                     
                 # Train World Model
                 if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
@@ -839,6 +855,9 @@ def run_hrac(args):
                 wm_imagination_episode_metric = 0
 
             subgoal = manager_policy.sample_goal(state, goal)
+            # testing
+            subgoal[0] = 5
+            subgoal[1] = 0
             if not args.absolute_goal:
                 subgoal = man_noise.perturb_action(subgoal,
                     min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
@@ -929,10 +948,15 @@ def run_hrac(args):
 
             manager_buffer.add(manager_transition)
             subgoal = manager_policy.sample_goal(state, goal)
+            # testing
+            subgoal[0] = 5
+            subgoal[1] = 0
 
             if args.env_name == "SafeAntMaze":
-                assert not manager_policy.absolute_goal, "incorrect subgoal cost"
-                episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                if manager_policy.absolute_goal:
+                        episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                else:
+                    episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                 episode_subgoals_count += 1
 
             if not args.absolute_goal:
@@ -944,14 +968,6 @@ def run_hrac(args):
 
             timesteps_since_subgoal = 0
             manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
-        
-        # Train PPO controller
-        if controller_policy.PPO and len(controller_buffer) == args.ppo_ctrl_batch_size:
-            train_controller(True, controller_buffer, ctrl_done, next_state, subgoal, 
-                             episode_timesteps, ep_controller_reward, controller_episode_cost, 
-                             episode_cost, 
-                             episode_safety_subgoal_rate/episode_subgoals_count, 
-                             ep_manager_reward, total_timesteps)
 
     # Final evaluation
     avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate = evaluate_policy(

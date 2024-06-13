@@ -133,6 +133,7 @@ class Manager(object):
 
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
         actions = self.actor(state, goal)
+        
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
         goal_loss = None
@@ -145,7 +146,10 @@ class Manager(object):
             if self.testing_safety_subgoal:
                 copy_state = state.cpu().detach().numpy()
                 copy_actions = actions.cpu().detach().numpy()
-                manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
+                if self.absolute_goal:
+                        manager_absolute_goal = copy_actions[:, :self.action_dim]
+                else:
+                    manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
                 cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
                 cost_violate_indexes = (cost_indexes).bool()
                 safe_indexes = (1 - cost_indexes).bool()
@@ -291,6 +295,7 @@ class Manager(object):
             #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
+            
             self.actor_optimizer.step()
 
             avg_act_loss += actor_loss
@@ -593,17 +598,23 @@ class Controller(object):
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 
     def save(self, dir, env_name, algo, exp_num):
-        torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
-        # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo))
-        # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo))
+        if self.PPO:
+            pass
+        else:
+            torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
+            torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
+            torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
+            torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
+            # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo))
+            # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo))
 
     def load(self, dir, env_name, algo, exp_num):
-        self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))
-        self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
-        self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
-        self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
-        # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo)))
-        # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo)))
+        if self.PPO:
+            pass
+        else:
+            self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))
+            self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
+            self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
+            self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
+            # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo)))
+            # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo)))

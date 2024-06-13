@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
+    parser.add_argument("--eval_freq", default=1_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", default=True, type=bool)
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     # Manager Parameters
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
-    parser.add_argument("--train_manager_freq", default=10, type=int)
+    parser.add_argument("--train_manager_freq", default=10, type=int) # 10
     parser.add_argument("--man_soft_sync_rate", default=0.005, type=float)
     parser.add_argument("--man_batch_size", default=128, type=int)
     parser.add_argument("--man_buffer_size", default=2e5, type=int)
