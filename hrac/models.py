@@ -124,7 +124,7 @@ class SafeCritic(nn.Module):
         x1 = F.relu(self.l2(x1))
         x1 = self.l3(x1)
 
-        return x1
+        return torch.sigmoid(x1)
 
 
 class ControllerSafeModel(nn.Module):
@@ -137,7 +137,7 @@ class ControllerSafeModel(nn.Module):
         return self.critic(x)
     
     def predict(self, x):
-        return torch.sigmoid(self.critic(x))
+        return self.critic(x)
 
 
 class ControllerActor(nn.Module):

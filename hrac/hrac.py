@@ -372,7 +372,8 @@ class Controller(object):
             assert not(cost_function is None)
             self.cost_function = cost_function
             self.safe_model = ControllerSafeModel(state_dim).to(device)
-            self.safe_model_criterion = nn.CrossEntropyLoss()
+            #self.safe_model_criterion = nn.CrossEntropyLoss()
+            self.safe_model_criterion = nn.BCELoss()
             self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
                                                  lr=critic_lr, weight_decay=0.0001)
 
@@ -468,6 +469,9 @@ class Controller(object):
         debug_batch_data = True
         if self.safe_model:
             debug_info["safe_model_loss"] = []
+            if debug_batch_data:
+                debug_info["safe_model_mean_true"] = [] 
+                debug_info["safe_model_mean_pred"] = [] 
         if self.PPO:
             x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
             b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
@@ -586,7 +590,7 @@ class Controller(object):
                 if self.safe_model:
                     pred = self.safe_model(init_state)
                     numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
-                    true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.long).to(device)
+                    true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
 
                     # Compute safet_model loss
                     safe_model_loss = self.safe_model_criterion(pred, true)
@@ -597,6 +601,8 @@ class Controller(object):
                     self.safe_model_optimizer.step()
 
                     debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
+                    debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
+                    debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
 
                 # Compute actor loss
                 actor_loss = self.actor_loss(state, sg)
@@ -621,7 +627,8 @@ class Controller(object):
                 avg_crit_loss = avg_crit_loss / num_minibatches
 
         if self.safe_model:
-            debug_info["safe_model_loss"] = np.mean(debug_info["safe_model_loss"])
+            for key_ in debug_info:
+                debug_info[key_] = np.mean(debug_info[key_])    
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 
