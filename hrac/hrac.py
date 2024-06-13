@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic, PPOAgent
+    ManagerActor, ManagerCritic, PPOAgent, ControllerSafeModel
 
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv
 
@@ -353,7 +353,7 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None,
+                 weight_decay_ppo=None, safe_model=False, cost_function=None,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -366,6 +366,15 @@ class Controller(object):
         self.absolute_goal = absolute_goal
         self.criterion = nn.SmoothL1Loss()    
         # self.criterion = nn.MSELoss()
+
+        self.safe_model = safe_model
+        if safe_model:
+            assert not(cost_function is None)
+            self.cost_function = cost_function
+            self.safe_model = ControllerSafeModel(state_dim).to(device)
+            self.safe_model_criterion = nn.CrossEntropyLoss()
+            self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
+                                                 lr=critic_lr, weight_decay=0.0001)
 
         if self.PPO:
             self.agent = PPOAgent(state_dim, goal_dim, action_dim,
@@ -457,6 +466,8 @@ class Controller(object):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
         debug_batch_data = True
+        if self.safe_model:
+            debug_info["safe_model_loss"] = []
         if self.PPO:
             x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
             b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
@@ -480,6 +491,7 @@ class Controller(object):
         for it in range(iterations):
             if not self.PPO:
                 x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+                init_state = get_tensor(x)
                 next_g = get_tensor(self.subgoal_transition(x, sg, y))
                 state = self.clean_obs(get_tensor(x))
                 action = get_tensor(u)
@@ -501,8 +513,6 @@ class Controller(object):
                     debug_info["value"] = newvalue.mean().cpu()
                     debug_info["action_logprob"] = newlogprob.mean().cpu()
                     debug_info["ratio"] = ratio.mean().cpu()
-
-
 
                     with torch.no_grad():
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
@@ -573,6 +583,21 @@ class Controller(object):
                 critic_loss.backward()
                 self.critic_optimizer.step()
 
+                if self.safe_model:
+                    pred = self.safe_model(init_state)
+                    numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
+                    true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.long).to(device)
+
+                    # Compute safet_model loss
+                    safe_model_loss = self.safe_model_criterion(pred, true)
+
+                    # Optimize the safe_model
+                    self.safe_model_optimizer.zero_grad()
+                    safe_model_loss.backward()
+                    self.safe_model_optimizer.step()
+
+                    debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
+
                 # Compute actor loss
                 actor_loss = self.actor_loss(state, sg)
 
@@ -594,6 +619,9 @@ class Controller(object):
             if self.PPO:
                 avg_act_loss = avg_act_loss / num_minibatches
                 avg_crit_loss = avg_crit_loss / num_minibatches
+
+        if self.safe_model:
+            debug_info["safe_model_loss"] = np.mean(debug_info["safe_model_loss"])
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 

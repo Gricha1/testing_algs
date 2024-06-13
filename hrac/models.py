@@ -109,6 +109,35 @@ class Critic(nn.Module):
         x1 = F.relu(self.l2(x1))
         x1 = self.l3(x1)
         return x1
+    
+
+class SafeCritic(nn.Module):
+    def __init__(self, state_dim):
+        super().__init__()
+
+        self.l1 = nn.Linear(state_dim, 300)
+        self.l2 = nn.Linear(300, 300)
+        self.l3 = nn.Linear(300, 1)
+
+    def forward(self, x):
+        x1 = F.relu(self.l1(x))
+        x1 = F.relu(self.l2(x1))
+        x1 = self.l3(x1)
+
+        return x1
+
+
+class ControllerSafeModel(nn.Module):
+    def __init__(self, state_dim):
+        super().__init__()
+
+        self.critic = SafeCritic(state_dim)
+    
+    def forward(self, x):
+        return self.critic(x)
+    
+    def predict(self, x):
+        return torch.sigmoid(self.critic(x))
 
 
 class ControllerActor(nn.Module):

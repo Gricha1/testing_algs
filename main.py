@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=1_000, type=float) # 300_000
+    parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", default=True, type=bool)
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
@@ -87,6 +87,7 @@ if __name__ == "__main__":
     parser.add_argument("--safety_loss_coef", default=200., type=float)
     parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--testing_safety_subgoal", action='store_true', default=False)
+    parser.add_argument("--controller_safe_model", action='store_true', default=False)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)

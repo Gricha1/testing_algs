@@ -18,6 +18,7 @@ from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal, SafeMazeAnt
 from envs.create_maze_env import create_maze_env
 from envs.create_gather_env import create_gather_env
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
+from render_utils.plots import plot_values
 
 
 """
@@ -26,7 +27,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 """
 
 class CustomVideoRendered:
-    def __init__(self, env, world_model):
+    def __init__(self, env, world_model, controller_safe_model, state_dim):
         self.render_info = {}
         self.render_info["fig"] = None
         self.render_info["ax_states"] = None
@@ -34,6 +35,14 @@ class CustomVideoRendered:
         self.add_mesurements = True
         self.env = env
         self.world_model_comparsion = world_model
+        self.controller_safe_model = controller_safe_model
+        self.shift_x = env.render_info["shift_x"]
+        self.shift_y = env.render_info["shift_y"]
+        self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20
+        self.render_info["env_min_y"], self.render_info["env_max_y"] = -20, 20
+        self.render_info["grid_resolution_x"] = 20
+        self.render_info["grid_resolution_y"] = 20
+        self.render_info["state_dim"] = state_dim
         if self.world_model_comparsion:
             self.robot_poses = None
             self.world_model_poses = None
@@ -41,31 +50,32 @@ class CustomVideoRendered:
             assert 1 == 0, "didnt implement"
     
     def setup_renderer(self):
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
             self.robot_poses = []
             self.world_model_poses = []
     
     def delete_data(self):
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
             del self.robot_poses
             del self.world_model_poses
 
     def custom_render(self, current_step_info, positions_render=False, 
-                      plot_goal=True, debug_info={}, shape=(600, 600), env_name=""):    
+                      plot_goal=True, debug_info={}, shape=(600, 600), 
+                      env_name="", safe_model=None):    
         assert "robot_pos" in current_step_info and \
                "subgoal_pos" in current_step_info and \
                "goal_pos" in current_step_info and \
                "robot_radius" in current_step_info
 
-        shift_x, shift_y = -8, -8
-        env_min_x, env_max_x = -20, 20
-        env_min_y, env_max_y = -20, 20
+        shift_x, shift_y = self.shift_x, self.shift_y
+        env_min_x, env_max_x = self.render_info["env_min_x"], self.render_info["env_max_x"]
+        env_min_y, env_max_y = self.render_info["env_min_y"], self.render_info["env_max_y"]
         if self.render_info["fig"] is None:
             if self.add_subgoal_values:
                 self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
                 self.render_info["ax_subgoal_values"] = self.render_info["fig"].add_subplot(122)
-            elif self.world_model_comparsion:
+            elif self.world_model_comparsion or self.controller_safe_model:
                 self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
                 self.render_info["ax_world_model_robot_trajectories"] = self.render_info["fig"].add_subplot(122)
@@ -74,7 +84,7 @@ class CustomVideoRendered:
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(111)
         self.render_info["ax_states"].set_ylim(bottom=env_min_y, top=env_max_y)
         self.render_info["ax_states"].set_xlim(left=env_min_x, right=env_max_x)
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
             self.render_info["ax_world_model_robot_trajectories"].set_ylim(bottom=env_min_y, top=env_max_y)
             self.render_info["ax_world_model_robot_trajectories"].set_xlim(left=env_min_x, right=env_max_x)
 
@@ -85,7 +95,7 @@ class CustomVideoRendered:
         self.render_info["ax_states"].add_patch(circle_robot) 
         self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
         # world model comparsion
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
             self.robot_poses.append((x, y))   
 
         # robot imagined pose
@@ -116,17 +126,28 @@ class CustomVideoRendered:
             self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")  
 
         # world model comparsion
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
             xA, yA = zip(*self.robot_poses)
-            xB, yB = zip(*self.world_model_poses)
-            self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
             self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
+            if self.world_model_comparsion:
+                xB, yB = zip(*self.world_model_poses)
+                self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
+
+        if self.controller_safe_model:
+            cb = plot_values(self.render_info["fig"], 
+                        self.render_info["ax_world_model_robot_trajectories"], 
+                        safe_model, render_info=self.render_info, return_cb=True)
 
         # safety boundary
         safety_boundary = self.env.get_safety_bounds()
         xs = [point.render_x for point in safety_boundary]
         ys = [point.render_y for point in safety_boundary]
         self.render_info["ax_states"].plot(xs, ys, 'b')
+        if self.world_model_comparsion or self.controller_safe_model:
+            xs = [point.render_x for point in safety_boundary]
+            ys = [point.render_y for point in safety_boundary]
+            self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
+
             
         # print maze
         if env_name != "AntGather":
@@ -182,7 +203,9 @@ class CustomVideoRendered:
         data = np.frombuffer(self.render_info["fig"].canvas.tostring_rgb(), dtype=np.uint8)
         data = data.reshape(self.render_info["fig"].canvas.get_width_height()[::-1] + (3,))
         self.render_info["ax_states"].clear()
-        if self.world_model_comparsion:
+        if self.world_model_comparsion or self.controller_safe_model:
+            if self.controller_safe_model:
+                cb.remove()
             self.render_info["ax_world_model_robot_trajectories"].clear()
         if self.add_subgoal_values:
             self.render_info["ax_subgoal_values"].clear()
@@ -293,7 +316,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     screen = renderer.custom_render(current_step_info, 
                                                     debug_info=debug_info, 
                                                     plot_goal=True,
-                                                    env_name=env_name)
+                                                    env_name=env_name,
+                                                    safe_model=controller_policy.safe_model)
                     positions_screens.append(screen.transpose(2, 0, 1))
 
                 goal = new_obs["desired_goal"]
@@ -482,9 +506,6 @@ def run_hrac(args):
     else:
         raise NotImplementedError
     
-    # render
-    renderer = CustomVideoRendered(env, world_model=args.world_model)
-    
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
     max_action = float(env.action_space.high[0])
@@ -527,6 +548,12 @@ def run_hrac(args):
     else:
         goal_dim = 0
 
+    # render
+    renderer = CustomVideoRendered(env, 
+                                   world_model=args.world_model, 
+                                   controller_safe_model=args.controller_safe_model,
+                                   state_dim=state_dim)
+
     print("*******")
     print("env name:", args.env_name)
     print("state_dim:", state_dim)
@@ -550,6 +577,8 @@ def run_hrac(args):
         PPO=args.PPO,
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
+        cost_function=env.cost_func,
+        safe_model=args.controller_safe_model,
     )
 
     manager_policy = hrac.Manager(

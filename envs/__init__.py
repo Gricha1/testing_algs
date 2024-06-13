@@ -228,6 +228,9 @@ class SafeMazeAnt:
     def __init__(self, env):
         self.env = env
         self.safety_bounds = self.get_safety_bounds()
+        self.render_info = {}
+        self.render_info["shift_x"] = SHIFT_X
+        self.render_info["shift_y"] = SHIFT_Y
 
     def seed(self, seed):
         self.env.seed(seed)
