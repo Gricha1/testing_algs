@@ -247,6 +247,12 @@ class SafeMazeAnt:
     def action_space(self):
         return self.env.action_space
     
+    def set_state_dim(self, x):
+        self.state_dim = x
+    
+    def set_goal_dim(self, x):
+        self.goal_dim = x
+    
     def get_maze(self):
         return self.env.get_maze()
     
@@ -293,8 +299,9 @@ class SafeMazeAnt:
             
         return cost
     
+
     
-    def get_safety_bounds(self):
+    def get_safety_bounds(self, get_safe_unsafe_dataset=False):
         """
         8-------------------1=9
         |                    |
@@ -322,4 +329,52 @@ class SafeMazeAnt:
                            safety_point_4, safety_point_5, 
                            safety_point_6, safety_point_7,
                            safety_point_8, safety_point_9]
-        return safety_boundary
+        
+        # dataset = (
+        #             [(x11, x12), (x21, x22), ... ], 
+        #             [y1, y2, ... ]
+        #           )
+        xs = []
+        ys = []
+        # usafe states
+        xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+        xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
+        xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
+        xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
+        xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
+        xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
+        xs.append((safety_point_2.x + 1, safety_point_2.y - 1))
+        xs.append((safety_point_3.x - 1, safety_point_3.y - 1))
+        xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+        def extrapolate_points(l):
+            extrapolated_points = []
+            for i in range(len(l) - 1):
+                x1, y1 = l[i]
+                x2, y2 = l[i + 1]
+                dx = (x2 - x1) / 5
+                dy = (y2 - y1) / 5
+                extrapolated_points.append((x1, y1))
+                for j in range(1, 5):
+                    extrapolated_points.append((x1 + j * dx, y1 + j * dy))
+            return extrapolated_points
+        xs = extrapolate_points(xs)
+        for i in range(len(xs)):
+            ys.append(1)
+        num_unsafe_states = len(xs)
+        # safe states
+        xs_safe = []
+        xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
+        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
+        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
+        xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
+        xs_safe = extrapolate_points(xs_safe)
+        xs.extend(xs_safe)
+        for i in range(len(xs_safe)):
+            ys.append(0)
+        dataset = [xs, ys]
+        
+        if get_safe_unsafe_dataset:
+            assert len(dataset[0]) == len(dataset[1])
+            return safety_boundary, dataset
+        else:
+            return safety_boundary

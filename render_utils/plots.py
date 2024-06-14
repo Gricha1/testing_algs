@@ -24,9 +24,9 @@ def plot_values(fig, ax_values, safe_model, render_info={}, return_cb=True):
     grid_states = torch.FloatTensor(np.array(grid_states)).to(device)
     grid_vs = safe_model.predict(grid_states)
     grid_vs = grid_vs.detach().cpu().numpy().reshape(grid_resolution_x, grid_resolution_y)[::-1]
-    mask = grid_vs >= 0.5
-    grid_vs[mask] = 1
-    grid_vs[1 - mask] = 0
+    #mask = grid_vs >= 0.5
+    #grid_vs[mask] = 1
+    #grid_vs[1 - mask] = 0
     img = ax_values.imshow(grid_vs, extent=[env_min_x,env_max_x, env_min_y,env_max_y])
     if return_cb:
         cb = fig.colorbar(img)

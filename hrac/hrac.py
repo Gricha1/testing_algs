@@ -144,22 +144,25 @@ class Manager(object):
         if self.safety_subgoals:
             assert self.testing_safety_subgoal or (not self.testing_safety_subgoal and not(self.predict_env is None)), "world model must be initialized"
             if self.testing_safety_subgoal:
-                copy_state = state.cpu().detach().numpy()
-                copy_actions = actions.cpu().detach().numpy()
-                if self.absolute_goal:
-                        manager_absolute_goal = copy_actions[:, :self.action_dim]
-                else:
-                    manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
-                cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
-                cost_violate_indexes = (cost_indexes).bool()
-                safe_indexes = (1 - cost_indexes).bool()
+                #copy_state = state.cpu().detach().numpy()
+                #copy_actions = actions.cpu().detach().numpy()
+                #if self.absolute_goal:
+                #        manager_absolute_goal = copy_actions[:, :self.action_dim]
+                #else:
+                #    manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
+                #cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
+                #cost_violate_indexes = (cost_indexes).bool()
+                #safe_indexes = (1 - cost_indexes).bool()
                 # if unsafe state loss = 1, loss = 0 otherwise
-                safety_loss = torch.abs(actions[:, 0]) + torch.abs(actions[:, 1])
-                zero_indexes = (safety_loss == 0).cpu().detach()
-                cost_violate_indexes[zero_indexes] = False
-                safe_indexes[zero_indexes] = True
-                safety_loss[cost_violate_indexes] = safety_loss[cost_violate_indexes] / safety_loss[cost_violate_indexes]
-                safety_loss[safe_indexes] = safety_loss[safe_indexes] * 0
+                #safety_loss = torch.abs(actions[:, 0]) + torch.abs(actions[:, 1])
+                #zero_indexes = (safety_loss == 0).cpu().detach()
+                #cost_violate_indexes[zero_indexes] = False
+                #safe_indexes[zero_indexes] = True
+                #safety_loss[cost_violate_indexes] = safety_loss[cost_violate_indexes] / safety_loss[cost_violate_indexes]
+                #safety_loss[safe_indexes] = safety_loss[safe_indexes] * 0
+                manager_absolute_goal = state
+                manager_absolute_goal[:, :actions.shape[1]] += actions[:, :actions.shape[1]]
+                safety_loss = controller_policy.safe_model(manager_absolute_goal)
                 safety_loss = safety_loss.mean()
             else:
                 safety_loss = 0
@@ -353,7 +356,7 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None, safe_model=False, cost_function=None,
+                 weight_decay_ppo=None, use_safe_model=False, cost_function=None,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -367,8 +370,8 @@ class Controller(object):
         self.criterion = nn.SmoothL1Loss()    
         # self.criterion = nn.MSELoss()
 
-        self.safe_model = safe_model
-        if safe_model:
+        self.use_safe_model = use_safe_model
+        if use_safe_model:
             assert not(cost_function is None)
             self.cost_function = cost_function
             self.safe_model = ControllerSafeModel(state_dim).to(device)
@@ -467,7 +470,7 @@ class Controller(object):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
         debug_batch_data = True
-        if self.safe_model:
+        if self.use_safe_model:
             debug_info["safe_model_loss"] = []
             if debug_batch_data:
                 debug_info["safe_model_mean_true"] = [] 
@@ -587,7 +590,7 @@ class Controller(object):
                 critic_loss.backward()
                 self.critic_optimizer.step()
 
-                if self.safe_model:
+                if self.use_safe_model:
                     pred = self.safe_model(init_state)
                     numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
                     true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
@@ -626,7 +629,7 @@ class Controller(object):
                 avg_act_loss = avg_act_loss / num_minibatches
                 avg_crit_loss = avg_crit_loss / num_minibatches
 
-        if self.safe_model:
+        if self.use_safe_model:
             for key_ in debug_info:
                 debug_info[key_] = np.mean(debug_info[key_])    
 
@@ -640,6 +643,8 @@ class Controller(object):
             torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
             torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
             torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
+            if self.use_safe_model:
+                torch.save(self.safe_model.state_dict(), "{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo))
             # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo))
             # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo))
 
@@ -651,5 +656,7 @@ class Controller(object):
             self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
             self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
             self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
+            if self.use_safe_model:
+                self.safe_model.load_state_dict(torch.load("{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo)))
             # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo)))
             # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo)))

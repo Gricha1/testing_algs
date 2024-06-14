@@ -20,6 +20,8 @@ from envs.create_gather_env import create_gather_env
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
 from render_utils.plots import plot_values
 
+from sklearn.metrics import f1_score
+
 
 """
 HIRO part adapted from
@@ -27,7 +29,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 """
 
 class CustomVideoRendered:
-    def __init__(self, env, world_model, controller_safe_model, state_dim):
+    def __init__(self, env, world_model, controller_safe_model):
         self.render_info = {}
         self.render_info["fig"] = None
         self.render_info["ax_states"] = None
@@ -42,7 +44,7 @@ class CustomVideoRendered:
         self.render_info["env_min_y"], self.render_info["env_max_y"] = -20, 20
         self.render_info["grid_resolution_x"] = 20
         self.render_info["grid_resolution_y"] = 20
-        self.render_info["state_dim"] = state_dim
+        self.render_info["state_dim"] = env.state_dim
         if self.world_model_comparsion:
             self.robot_poses = None
             self.world_model_poses = None
@@ -96,7 +98,7 @@ class CustomVideoRendered:
         self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
         # world model comparsion
         if self.world_model_comparsion or self.controller_safe_model:
-            self.robot_poses.append((x, y))   
+            self.robot_poses.append((x - shift_x, y - shift_y))   
 
         # robot imagined pose
         if self.world_model_comparsion:
@@ -105,7 +107,7 @@ class CustomVideoRendered:
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
             self.render_info["ax_states"].add_patch(circle_robot) 
             self.render_info["ax_states"].text(x, y + 0.05, "i_s")
-            self.world_model_poses.append((x, y))   
+            self.world_model_poses.append((x - shift_x, y - shift_y))   
 
         # subgoal
         x = current_step_info["subgoal_pos"][0] + shift_x
@@ -139,14 +141,33 @@ class CustomVideoRendered:
                         safe_model, render_info=self.render_info, return_cb=True)
 
         # safety boundary
-        safety_boundary = self.env.get_safety_bounds()
+        safety_boundary = debug_info["safety_boundary"]
+        if self.controller_safe_model:
+            safe_dataset = debug_info["safe_dataset"]
         xs = [point.render_x for point in safety_boundary]
         ys = [point.render_y for point in safety_boundary]
         self.render_info["ax_states"].plot(xs, ys, 'b')
         if self.world_model_comparsion or self.controller_safe_model:
-            xs = [point.render_x for point in safety_boundary]
-            ys = [point.render_y for point in safety_boundary]
+            xs = [point.x for point in safety_boundary]
+            ys = [point.y for point in safety_boundary]
             self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
+            # safe dataset check
+            if self.controller_safe_model:
+                xs_dataset = safe_dataset[0]
+                ys_dataset = safe_dataset[1]
+                x1s_unsafe = []
+                x2s_unsafe = []
+                x1s_safe = []
+                x2s_safe = []
+                for i in range(len(ys_dataset)):
+                    if ys_dataset[i] == 1:
+                        x1s_unsafe.append(xs_dataset[i][0])
+                        x2s_unsafe.append(xs_dataset[i][1])
+                    else:
+                        x1s_safe.append(xs_dataset[i][0])
+                        x2s_safe.append(xs_dataset[i][1])
+                self.render_info["ax_world_model_robot_trajectories"].plot(x1s_unsafe, x2s_unsafe, 'r')
+                self.render_info["ax_world_model_robot_trajectories"].plot(x1s_safe, x2s_safe, 'g')
 
             
         # print maze
@@ -218,15 +239,34 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     renderer=None, writer=None, total_timesteps=0, a_net=None):
     print("Starting evaluation number {}...".format(eval_idx))
     env.evaluate = True
-
+    validation_date = {}
     with torch.no_grad():
         avg_reward = 0.
-        avg_cost = 0.
         avg_controller_rew = 0.
         global_steps = 0
         goals_achieved = 0
         eval_image_ep = 0
-        avg_episode_safety_subgoal_rate = 0
+        if env_name == "SafeAntMaze":
+            avg_cost = 0.
+            avg_episode_safety_subgoal_rate = 0
+            safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            if controller_policy.use_safe_model:
+                x = safe_dataset[0]
+                true = safe_dataset[1]
+                x_np = np.array(x, dtype=np.float32)
+                x_with_zeros = np.concatenate((x_np, 
+                                               np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
+                                               axis=1)
+                x_tensor = torch.tensor(x_with_zeros)
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                x_tensor = x_tensor.to(device)
+                pred = controller_policy.safe_model(x_tensor)
+                pred = (pred > 0.5).int().squeeze().tolist()
+                val_safe_model_f1 = f1_score(true, pred)
+                validation_date["safe_model_true_mean"] = np.mean(true)
+                validation_date["safe_model_pred_mean"] = np.mean(pred)
+                validation_date["safe_model_f1"] = val_safe_model_f1
+
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
@@ -269,7 +309,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
                 new_obs, reward, done, info = env.step(action)
-                cost = info["safety_cost"]
+                if env_name == "SafeAntMaze":
+                    cost = info["safety_cost"]
                 if env_name != "AntGather" and env.success_fn(reward):
                     env_goals_achieved += 1
                     goals_achieved += 1
@@ -280,6 +321,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     if step_count == 1:
                         renderer.setup_renderer()
                     debug_info = {}
+                    if env_name == "SafeAntMaze":
+                        debug_info["safety_boundary"] = safety_boundary
+                        debug_info["safe_dataset"] = safe_dataset
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
@@ -326,16 +370,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
 
                 avg_reward += reward
-                avg_cost += cost
+                if env_name == "SafeAntMaze":
+                    avg_cost += cost
+                    episode_cost += cost
                 avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
                 episode_reward += reward
-                episode_cost += cost
                 episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
 
                 state = new_state
                 prev_action = action
 
-            avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
+            if env_name == "SafeAntMaze":
+                avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
 
         if not (renderer is None) and not (writer is None):
             writer.add_video(
@@ -347,11 +393,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             renderer.delete_data()
             
         avg_reward /= eval_episodes
-        avg_cost /= eval_episodes
+        if env_name == "SafeAntMaze":
+            avg_cost /= eval_episodes
+            avg_episode_safety_subgoal_rate /= eval_episodes
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
         avg_env_finish = goals_achieved / eval_episodes
-        avg_episode_safety_subgoal_rate /= eval_episodes
 
         print("---------------------------------------")
         print("Evaluation over {} episodes:\nAvg Ctrl Reward: {:.3f}".format(eval_episodes, avg_controller_rew))
@@ -363,7 +410,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         print("---------------------------------------")
 
         env.evaluate = False
-        return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, avg_episode_safety_subgoal_rate
+        if env_name == "SafeAntMaze":
+            return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date
+        else:
+            return avg_reward, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
 
 
 def get_reward_function(dims, absolute_goal=False, binary_reward=False):
@@ -443,6 +493,8 @@ def run_hrac(args):
         if args.PPO:
             wandb_run_name = f"HRAC_PPO_{args.env_name}"
         wandb_run_name = wandb_run_name + "_" + args.wandb_postfix
+        if args.validate:
+            wandb_run_name = "validate_" + wandb_run_name + "_" + args.wandb_postfix
         run = wandb.init(
             project="safe_subgoal_model_based",
             sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
@@ -549,10 +601,11 @@ def run_hrac(args):
         goal_dim = 0
 
     # render
+    env.set_state_dim(state_dim)
+    env.set_goal_dim(goal_dim)
     renderer = CustomVideoRendered(env, 
                                    world_model=args.world_model, 
-                                   controller_safe_model=args.controller_safe_model,
-                                   state_dim=state_dim)
+                                   controller_safe_model=args.controller_safe_model)
 
     print("*******")
     print("env name:", args.env_name)
@@ -578,7 +631,7 @@ def run_hrac(args):
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
         cost_function=env.cost_func,
-        safe_model=args.controller_safe_model,
+        use_safe_model=args.controller_safe_model,
     )
 
     manager_policy = hrac.Manager(
@@ -728,296 +781,315 @@ def run_hrac(args):
     else:
         just_loaded = False
 
-    # Pretrain adj network for PPO controller
-    if controller_policy.PPO:
-        done = True
-        print("collecting random episodes for adj network...")
-        if not just_loaded:
-            while not traj_buffer.full():
-                if done:
-                    obs = env.reset()
-                    state = obs["observation"]
-                    done = False
-                    traj_buffer.create_new_trajectory()
-                    traj_buffer.append(state)
-                action = env.action_space.sample()
-                next_tup, manager_reward, done, info = env.step(action)   
-                next_state = next_tup["observation"]
-                traj_buffer.append(next_state)
-                state = next_state
+    if args.validate:
+        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date = evaluate_policy(
+            env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
+            args.ctrl_rew_scale, args.manager_propose_freq, 0, 
+            renderer=renderer, writer=writer, total_timesteps=0,
+            a_net=a_net)
+        
+        writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, 0)
+        writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, 0)
+        writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, 0)
+        writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, 0)
+        for key_ in validation_date:
+            if type(validation_date[key_]) == list:
+                validation_date[key_] = np.mean(validation_date[key_])
+            writer.add_scalar(f"eval/{key_}", validation_date[key_], 0)
 
-    # Collect transitions with random policy
-    done = True
-    print("collecting random episodes...")
-    if not just_loaded:
-        exploration_total_timesteps = 0
-        if args.world_model:
-            while exploration_total_timesteps < args.wm_n_initial_exploration_steps:
-                if done:
-                    obs = env.reset()
-                    state = obs["observation"]
-                    done = False
-                action = env.action_space.sample()
-                next_tup, manager_reward, done, info = env.step(action)   
-                next_state = next_tup["observation"]
-                world_model_buffer.add(
-                    (state, next_state, None, action, None, None, [], [])) 
-                state = next_state
-                exploration_total_timesteps += 1
+        writer.close()
 
-    # Logging Parameters
-    total_timesteps = 0
-    timesteps_since_eval = 0
-    timesteps_since_manager = 0
-    episode_timesteps = 0
-    timesteps_since_subgoal = 0
-    episode_num = 0
-    done = True
-    evaluations = []
-
-    # Train
-    print("start training...")
-    while total_timesteps < args.max_timesteps:
-        if done:
-            if total_timesteps != 0 and not just_loaded:
-                print("episode num:", episode_num)
-                if episode_num % 10 == 0:
-                    print("Episode {}".format(episode_num))
-                # Train TD3 or PPO controller
-                train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
-                                    ep_controller_reward, controller_episode_cost, episode_cost, 
-                                    episode_safety_subgoal_rate/episode_subgoals_count, 
-                                    ep_manager_reward, total_timesteps)
-                    
-                # Train World Model
-                if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
-                    train_predict_model(world_model_buffer, acc_wm_imagination_episode_metric)
-
-                # Train manager
-                if timesteps_since_manager >= args.train_manager_freq:
-                    timesteps_since_manager = 0
-                    r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
-
-                    man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss = manager_policy.train(controller_policy,
-                        manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
-                        batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
-                        a_net=a_net, r_margin=r_margin)
-                    
-                    writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
-                    writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
-                    writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
-                    if not(man_safety_loss is None):
-                        writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
-
-                    if episode_num % 10 == 0:
-                        print("Manager actor loss: {:.3f}".format(man_act_loss))
-                        print("Manager critic loss: {:.3f}".format(man_crit_loss))
-                        print("Manager goal loss: {:.3f}".format(man_goal_loss))
-                        if not(man_safety_loss is None):
-                            print("Manager safety loss: {:.3f}".format(man_safety_loss))
-
-                print("*************")
-                print()
-
-                # Evaluate
-                if timesteps_since_eval >= args.eval_freq:
-                    timesteps_since_eval = 0
-                    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate =\
-                        evaluate_policy(env, args.env_name, manager_policy, controller_policy,
-                            calculate_controller_reward, args.ctrl_rew_scale, 
-                            args.manager_propose_freq, len(evaluations), 
-                            renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-                            a_net=a_net)
-
-                    writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
-                    writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
-                    writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
-                    writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, total_timesteps)
-
-                    evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
-                    output_data["frames"].append(total_timesteps)
-                    if args.env_name == "AntGather":
-                        output_data["reward"].append(avg_ep_rew)
-                    else:
-                        output_data["reward"].append(avg_env_finish)
-                        writer.add_scalar("eval/avg_steps_to_finish", avg_steps, total_timesteps)
-                        writer.add_scalar("eval/perc_env_goal_achieved", avg_env_finish, total_timesteps)
-                    output_data["dist"].append(-avg_controller_rew)
-
-                    if args.save_models:
-                        controller_policy.save("./models", args.env_name, args.algo, exp_num)
-                        manager_policy.save("./models", args.env_name, args.algo, exp_num)
-
-                if traj_buffer.full():
-                     n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
-                        optimizer_r, controller_goal_dim, device, args, exp_num)
-                     
-                     writer.add_scalar("data/a_net_loss", a_loss, total_timesteps)
-
-
-                if len(manager_transition[-2]) != 1:                    
-                    manager_transition[1] = state
-                    manager_transition[5] = float(True)
-                    manager_buffer.add(manager_transition)
-
-            obs = env.reset()
-            goal = obs["desired_goal"]
-            state = obs["observation"]
-            traj_buffer.create_new_trajectory()
-            traj_buffer.append(state)
-            done = False
-            ep_controller_reward = 0
-            ep_manager_reward = 0
-            episode_timesteps = 0
-            just_loaded = False
-            episode_num += 1
-            if args.env_name == "SafeAntMaze":
-                episode_cost = 0
-                controller_episode_cost = 0
-                episode_safety_subgoal_rate = 0
-                episode_subgoals_count = 0
-            prev_action = None
-            if args.world_model:
-                prev_imagined_state = None
-                imagined_state_freq = args.img_horizon
-                acc_wm_imagination_episode_metric = 0
-                wm_imagination_episode_metric = 0
-
-            subgoal = manager_policy.sample_goal(state, goal)
-            # testing
-            subgoal[0] = 5
-            subgoal[1] = 0
-            if not args.absolute_goal:
-                subgoal = man_noise.perturb_action(subgoal,
-                    min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
-            else:
-                subgoal = man_noise.perturb_action(subgoal,
-                    min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
-
-            timesteps_since_subgoal = 0
-            manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
-
-        if controller_policy.PPO:
-            with torch.no_grad():
-                action, logprob, _, value = controller_policy.select_action_logprob_value(state, subgoal)
-            action = action.cpu().numpy().squeeze()
-            logprob = logprob.cpu().numpy()
-            value = value.cpu().numpy().squeeze(axis=0)
-        else:
-            action = controller_policy.select_action(state, subgoal)
-            action = ctrl_noise.perturb_action(action, -max_action, max_action)
-
-        action_copy = action.copy()
-
-        next_tup, manager_reward, done, info = env.step(action_copy)
-        cost = info["safety_cost"]
-
-        manager_transition[4] += manager_reward * args.man_rew_scale
-        ep_manager_reward += manager_reward * args.man_rew_scale
-        manager_transition[-1].append(action)
-
-        next_goal = next_tup["desired_goal"]
-        next_state = next_tup["observation"]
-
-        manager_transition[-2].append(next_state)
-        traj_buffer.append(next_state)
-
-        controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
-        subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
-
-        controller_goal = subgoal
-        ep_controller_reward += controller_reward
-        controller_episode_cost += 0
-        if args.env_name == "SafeAntMaze":
-            episode_cost += cost
-        else:
-            episode_cost += 0
-
-        if args.inner_dones:
-            ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
-        else:
-            ctrl_done = done
-
-
-        if args.world_model:
-            assert not controller_policy.PPO, "didnt implement wm + ppo controller"
-            world_model_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
-        if controller_policy.PPO:
-            controller_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), logprob, value, [], []))
-        else:
-            controller_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
-
-        state = next_state
-        goal = next_goal
-
-        episode_timesteps += 1
-        total_timesteps += 1
-        timesteps_since_eval += 1
-        timesteps_since_manager += 1
-        timesteps_since_subgoal += 1
-
-        # logging world model performance
-        if args.world_model and episode_num > 1:
-            imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
-            prev_imagined_state = imagined_state
-            cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state[:2] - state[:2]) ** 2))
-            wm_imagination_episode_metric += cur_wm_imagination_episode_metric
-            if episode_timesteps % imagined_state_freq == 0:
-                acc_wm_imagination_episode_metric += wm_imagination_episode_metric / imagined_state_freq
-                wm_imagination_episode_metric = 0
-
-        prev_action = action_copy
-
-        if timesteps_since_subgoal % args.manager_propose_freq == 0:
-            manager_transition[1] = state
-            manager_transition[5] = float(done)
-
-            manager_buffer.add(manager_transition)
-            subgoal = manager_policy.sample_goal(state, goal)
-            # testing
-            subgoal[0] = 5
-            subgoal[1] = 0
-
-            if args.env_name == "SafeAntMaze":
-                if manager_policy.absolute_goal:
-                        episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
-                else:
-                    episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
-                episode_subgoals_count += 1
-
-            if not args.absolute_goal:
-                subgoal = man_noise.perturb_action(subgoal,
-                    min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
-            else:
-                subgoal = man_noise.perturb_action(subgoal,
-                    min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
-
-            timesteps_since_subgoal = 0
-            manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
-
-    # Final evaluation
-    avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate = evaluate_policy(
-        env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
-        args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
-        renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-        a_net=a_net)
-    evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
-    output_data["frames"].append(total_timesteps)
-    if args.env_name == 'AntGather':
-        output_data["reward"].append(avg_ep_rew)
     else:
-        output_data["reward"].append(avg_env_finish)
-    output_data["dist"].append(-avg_controller_rew)
+        # Pretrain adj network for PPO controller
+        if controller_policy.PPO:
+            done = True
+            print("collecting random episodes for adj network...")
+            if not just_loaded:
+                while not traj_buffer.full():
+                    if done:
+                        obs = env.reset()
+                        state = obs["observation"]
+                        done = False
+                        traj_buffer.create_new_trajectory()
+                        traj_buffer.append(state)
+                    action = env.action_space.sample()
+                    next_tup, manager_reward, done, info = env.step(action)   
+                    next_state = next_tup["observation"]
+                    traj_buffer.append(next_state)
+                    state = next_state
 
-    if args.save_models:
-        controller_policy.save("./models", args.env_name, args.algo, exp_num)
-        manager_policy.save("./models", args.env_name, args.algo, exp_num)
+        # Collect transitions with random policy
+        done = True
+        print("collecting random episodes...")
+        if not just_loaded:
+            exploration_total_timesteps = 0
+            if args.world_model:
+                while exploration_total_timesteps < args.wm_n_initial_exploration_steps:
+                    if done:
+                        obs = env.reset()
+                        state = obs["observation"]
+                        done = False
+                    action = env.action_space.sample()
+                    next_tup, manager_reward, done, info = env.step(action)   
+                    next_state = next_tup["observation"]
+                    world_model_buffer.add(
+                        (state, next_state, None, action, None, None, [], [])) 
+                    state = next_state
+                    exploration_total_timesteps += 1
 
-    writer.close()
+        # Logging Parameters
+        total_timesteps = 0
+        timesteps_since_eval = 0
+        timesteps_since_manager = 0
+        episode_timesteps = 0
+        timesteps_since_subgoal = 0
+        episode_num = 0
+        done = True
+        evaluations = []
 
-    output_df = pd.DataFrame(output_data)
-    output_df.to_csv(os.path.join("./results", file_name+".csv"), float_format="%.4f", index=False)
-    print("Training finished.")
+        # Train
+        print("start training...")
+        while total_timesteps < args.max_timesteps:
+            if done:
+                if total_timesteps != 0 and not just_loaded:
+                    print("episode num:", episode_num)
+                    if episode_num % 10 == 0:
+                        print("Episode {}".format(episode_num))
+                    # Train TD3 or PPO controller
+                    train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
+                                        ep_controller_reward, controller_episode_cost, episode_cost, 
+                                        episode_safety_subgoal_rate/episode_subgoals_count, 
+                                        ep_manager_reward, total_timesteps)
+                        
+                    # Train World Model
+                    if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
+                        train_predict_model(world_model_buffer, acc_wm_imagination_episode_metric)
+
+                    # Train manager
+                    if timesteps_since_manager >= args.train_manager_freq:
+                        timesteps_since_manager = 0
+                        r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
+
+                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss = manager_policy.train(controller_policy,
+                            manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
+                            batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
+                            a_net=a_net, r_margin=r_margin)
+                        
+                        writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
+                        writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
+                        writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
+                        if not(man_safety_loss is None):
+                            writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
+
+                        if episode_num % 10 == 0:
+                            print("Manager actor loss: {:.3f}".format(man_act_loss))
+                            print("Manager critic loss: {:.3f}".format(man_crit_loss))
+                            print("Manager goal loss: {:.3f}".format(man_goal_loss))
+                            if not(man_safety_loss is None):
+                                print("Manager safety loss: {:.3f}".format(man_safety_loss))
+
+                    print("*************")
+                    print()
+
+                    # Evaluate
+                    if timesteps_since_eval >= args.eval_freq:
+                        timesteps_since_eval = 0
+                        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date =\
+                            evaluate_policy(env, args.env_name, manager_policy, controller_policy,
+                                calculate_controller_reward, args.ctrl_rew_scale, 
+                                args.manager_propose_freq, len(evaluations), 
+                                renderer=renderer, writer=writer, total_timesteps=total_timesteps,
+                                a_net=a_net)
+
+                        writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
+                        writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
+                        writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
+                        writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, total_timesteps)
+
+                        evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
+                        output_data["frames"].append(total_timesteps)
+                        if args.env_name == "AntGather":
+                            output_data["reward"].append(avg_ep_rew)
+                        else:
+                            output_data["reward"].append(avg_env_finish)
+                            writer.add_scalar("eval/avg_steps_to_finish", avg_steps, total_timesteps)
+                            writer.add_scalar("eval/perc_env_goal_achieved", avg_env_finish, total_timesteps)
+                        output_data["dist"].append(-avg_controller_rew)
+
+                        if args.save_models:
+                            controller_policy.save("./models", args.env_name, args.algo, exp_num)
+                            manager_policy.save("./models", args.env_name, args.algo, exp_num)
+
+                    if traj_buffer.full():
+                        n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
+                            optimizer_r, controller_goal_dim, device, args, exp_num)
+                        
+                        writer.add_scalar("data/a_net_loss", a_loss, total_timesteps)
+
+
+                    if len(manager_transition[-2]) != 1:                    
+                        manager_transition[1] = state
+                        manager_transition[5] = float(True)
+                        manager_buffer.add(manager_transition)
+
+                obs = env.reset()
+                goal = obs["desired_goal"]
+                state = obs["observation"]
+                traj_buffer.create_new_trajectory()
+                traj_buffer.append(state)
+                done = False
+                ep_controller_reward = 0
+                ep_manager_reward = 0
+                episode_timesteps = 0
+                just_loaded = False
+                episode_num += 1
+                if args.env_name == "SafeAntMaze":
+                    episode_cost = 0
+                    controller_episode_cost = 0
+                    episode_safety_subgoal_rate = 0
+                    episode_subgoals_count = 0
+                prev_action = None
+                if args.world_model:
+                    prev_imagined_state = None
+                    imagined_state_freq = args.img_horizon
+                    acc_wm_imagination_episode_metric = 0
+                    wm_imagination_episode_metric = 0
+
+                subgoal = manager_policy.sample_goal(state, goal)
+                # testing
+                subgoal[0] = 5
+                subgoal[1] = 0
+                if not args.absolute_goal:
+                    subgoal = man_noise.perturb_action(subgoal,
+                        min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
+                else:
+                    subgoal = man_noise.perturb_action(subgoal,
+                        min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
+
+                timesteps_since_subgoal = 0
+                manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+
+            if controller_policy.PPO:
+                with torch.no_grad():
+                    action, logprob, _, value = controller_policy.select_action_logprob_value(state, subgoal)
+                action = action.cpu().numpy().squeeze()
+                logprob = logprob.cpu().numpy()
+                value = value.cpu().numpy().squeeze(axis=0)
+            else:
+                action = controller_policy.select_action(state, subgoal)
+                action = ctrl_noise.perturb_action(action, -max_action, max_action)
+
+            action_copy = action.copy()
+
+            next_tup, manager_reward, done, info = env.step(action_copy)
+            cost = info["safety_cost"]
+
+            manager_transition[4] += manager_reward * args.man_rew_scale
+            ep_manager_reward += manager_reward * args.man_rew_scale
+            manager_transition[-1].append(action)
+
+            next_goal = next_tup["desired_goal"]
+            next_state = next_tup["observation"]
+
+            manager_transition[-2].append(next_state)
+            traj_buffer.append(next_state)
+
+            controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
+            subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+
+            controller_goal = subgoal
+            ep_controller_reward += controller_reward
+            controller_episode_cost += 0
+            if args.env_name == "SafeAntMaze":
+                episode_cost += cost
+            else:
+                episode_cost += 0
+
+            if args.inner_dones:
+                ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
+            else:
+                ctrl_done = done
+
+
+            if args.world_model:
+                assert not controller_policy.PPO, "didnt implement wm + ppo controller"
+                world_model_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+            if controller_policy.PPO:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), logprob, value, [], []))
+            else:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+
+            state = next_state
+            goal = next_goal
+
+            episode_timesteps += 1
+            total_timesteps += 1
+            timesteps_since_eval += 1
+            timesteps_since_manager += 1
+            timesteps_since_subgoal += 1
+
+            # logging world model performance
+            if args.world_model and episode_num > 1:
+                imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
+                prev_imagined_state = imagined_state
+                cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state[:2] - state[:2]) ** 2))
+                wm_imagination_episode_metric += cur_wm_imagination_episode_metric
+                if episode_timesteps % imagined_state_freq == 0:
+                    acc_wm_imagination_episode_metric += wm_imagination_episode_metric / imagined_state_freq
+                    wm_imagination_episode_metric = 0
+
+            prev_action = action_copy
+
+            if timesteps_since_subgoal % args.manager_propose_freq == 0:
+                manager_transition[1] = state
+                manager_transition[5] = float(done)
+
+                manager_buffer.add(manager_transition)
+                subgoal = manager_policy.sample_goal(state, goal)
+                # testing
+                subgoal[0] = 5
+                subgoal[1] = 0
+
+                if args.env_name == "SafeAntMaze":
+                    if manager_policy.absolute_goal:
+                            episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                    else:
+                        episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                    episode_subgoals_count += 1
+
+                if not args.absolute_goal:
+                    subgoal = man_noise.perturb_action(subgoal,
+                        min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
+                else:
+                    subgoal = man_noise.perturb_action(subgoal,
+                        min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
+
+                timesteps_since_subgoal = 0
+                manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+
+        # Final evaluation
+        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date = evaluate_policy(
+            env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
+            args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
+            renderer=renderer, writer=writer, total_timesteps=total_timesteps,
+            a_net=a_net)
+        evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
+        output_data["frames"].append(total_timesteps)
+        if args.env_name == 'AntGather':
+            output_data["reward"].append(avg_ep_rew)
+        else:
+            output_data["reward"].append(avg_env_finish)
+        output_data["dist"].append(-avg_controller_rew)
+
+        if args.save_models:
+            controller_policy.save("./models", args.env_name, args.algo, exp_num)
+            manager_policy.save("./models", args.env_name, args.algo, exp_num)
+
+        writer.close()
+
+        output_df = pd.DataFrame(output_data)
+        output_df.to_csv(os.path.join("./results", file_name+".csv"), float_format="%.4f", index=False)
+        print("Training finished.")

@@ -5,6 +5,9 @@ from hrac.train import run_hrac
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("--validate", action="store_true", default=False)
+    
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
