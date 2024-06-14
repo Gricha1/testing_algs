@@ -236,7 +236,7 @@ class CustomVideoRendered:
 def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
-                    renderer=None, writer=None, total_timesteps=0, a_net=None):
+                    renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
     print("Starting evaluation number {}...".format(eval_idx))
     env.evaluate = True
     validation_date = {}
@@ -278,7 +278,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
             # render env
             if eval_ep == eval_image_ep:
-                positions_screens = []
+                if not args.validation_without_image:
+                    positions_screens = []
                 imagined_state_freq = 100
                 prev_imagined_state = None
 
@@ -317,7 +318,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     done = True
 
                 # render env
-                if not (renderer is None) and eval_ep == eval_image_ep:
+                if not args.validation_without_image and not (renderer is None) and eval_ep == eval_image_ep:
                     if step_count == 1:
                         renderer.setup_renderer()
                     debug_info = {}
@@ -357,12 +358,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     if env_name =="AntGather":
                         current_step_info["apples_and_bombs"] = env.get_apples_and_bombs()
                         current_step_info["apple_bomb_radius"] = 1.0
-                    screen = renderer.custom_render(current_step_info, 
-                                                    debug_info=debug_info, 
-                                                    plot_goal=True,
-                                                    env_name=env_name,
-                                                    safe_model=controller_policy.safe_model)
-                    positions_screens.append(screen.transpose(2, 0, 1))
+                    if not args.validation_without_image:
+                        screen = renderer.custom_render(current_step_info, 
+                                                        debug_info=debug_info, 
+                                                        plot_goal=True,
+                                                        env_name=env_name,
+                                                        safe_model=controller_policy.safe_model)
+                        positions_screens.append(screen.transpose(2, 0, 1))
 
                 goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
@@ -383,7 +385,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             if env_name == "SafeAntMaze":
                 avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
 
-        if not (renderer is None) and not (writer is None):
+        if not args.validation_without_image and not (renderer is None) and not (writer is None):
             writer.add_video(
                 "eval/pos_video",
                 torch.ByteTensor([positions_screens]),
@@ -632,6 +634,7 @@ def run_hrac(args):
         weight_decay_ppo=args.ppo_weight_decay,
         cost_function=env.cost_func,
         use_safe_model=args.controller_safe_model,
+        train_safe_model_with_world_model=args.train_safe_model_with_world_model,
     )
 
     manager_policy = hrac.Manager(
@@ -749,25 +752,41 @@ def run_hrac(args):
     cost_size = 0
     env_name = 'safepg2'
     model_type='pytorch'
-    world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)
-    if args.world_model:
-        with TensorWrapper():
-            env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
-                                            reward_size, cost_size, pred_hidden_size,
-                                            use_decay=use_decay)
-            predict_env = PredictEnv(env_model, env_name, model_type)
-        manager_policy.set_predict_env(predict_env)
-        def train_predict_model(replay_buffer, acc_wm_imagination_episode_metric):
+    if args.world_model or args.controller_safe_model:
+        if args.world_model:
             with TensorWrapper():
-                print("train world model")
-                world_model_loss = manager_policy.train_world_model(replay_buffer)
-                
-                writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
-                if episode_num > 1:
-                    writer.add_scalar("data/world_model_euclid_dist", acc_wm_imagination_episode_metric, total_timesteps)
+                env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
+                                                reward_size, cost_size, pred_hidden_size,
+                                                use_decay=use_decay)
+                predict_env = PredictEnv(env_model, env_name, model_type)
+            manager_policy.set_predict_env(predict_env)
+        world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)
+        def train_predict_model(replay_buffer, acc_wm_imagination_episode_metric, 
+                                train_world_model=False, train_safe_model=False, 
+                                controller=None,
+                                cost_model_iterations=10):
+            if train_safe_model:
+                assert controller.use_safe_model
+                debug_info = manager_policy.train_world_model(replay_buffer, controller=controller, 
+                                                                train_safe_model=True,
+                                                                cost_model_iterations=cost_model_iterations,
+                                                                cost_model_batch_size=args.cost_model_batch_size)
+                for key_ in debug_info:
+                    if type(debug_info[key_]) == list:
+                        debug_info[key_] = np.mean(debug_info[key_])
+                    writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
+            if train_world_model:
+                with TensorWrapper():
+                    print("train world model")
+                    world_model_loss = manager_policy.train_world_model(replay_buffer)
+                    
+                    writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
+                    if episode_num > 1:
+                        writer.add_scalar("data/world_model_euclid_dist", acc_wm_imagination_episode_metric, total_timesteps)
 
-                if episode_num % 10 == 0:
-                    print("world model loss: {:.3f}".format(world_model_loss))
+                    if episode_num % 10 == 0:
+                        print("world model loss: {:.3f}".format(world_model_loss))
+            
 
     if args.load:
         try:
@@ -786,7 +805,7 @@ def run_hrac(args):
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
-            a_net=a_net)
+            a_net=a_net, args=args)
         
         writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, 0)
         writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, 0)
@@ -823,7 +842,7 @@ def run_hrac(args):
         print("collecting random episodes...")
         if not just_loaded:
             exploration_total_timesteps = 0
-            if args.world_model:
+            if args.world_model or args.controller_safe_model:
                 while exploration_total_timesteps < args.wm_n_initial_exploration_steps:
                     if done:
                         obs = env.reset()
@@ -861,9 +880,13 @@ def run_hrac(args):
                                         episode_safety_subgoal_rate/episode_subgoals_count, 
                                         ep_manager_reward, total_timesteps)
                         
-                    # Train World Model
-                    if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
-                        train_predict_model(world_model_buffer, acc_wm_imagination_episode_metric)
+                    # Train World Model or Cost Model
+                    if (args.world_model or args.train_safe_model_with_world_model) and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
+                        train_predict_model(world_model_buffer, acc_wm_imagination_episode_metric,
+                                            train_world_model=args.world_model, 
+                                            train_safe_model=args.train_safe_model_with_world_model,
+                                            controller=controller_policy,
+                                            cost_model_iterations=episode_timesteps)
 
                     # Train manager
                     if timesteps_since_manager >= args.train_manager_freq:
@@ -899,12 +922,16 @@ def run_hrac(args):
                                 calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
                                 renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-                                a_net=a_net)
+                                a_net=a_net, args=args)
 
                         writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
                         writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
                         writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
                         writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, total_timesteps)
+                        for key_ in validation_date:
+                            if type(validation_date[key_]) == list:
+                                validation_date[key_] = np.mean(validation_date[key_])
+                            writer.add_scalar(f"eval/{key_}", validation_date[key_], 0)
 
                         evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
                         output_data["frames"].append(total_timesteps)
@@ -949,7 +976,7 @@ def run_hrac(args):
                     episode_safety_subgoal_rate = 0
                     episode_subgoals_count = 0
                 prev_action = None
-                if args.world_model:
+                if args.world_model or args.train_safe_model_with_world_model:
                     prev_imagined_state = None
                     imagined_state_freq = args.img_horizon
                     acc_wm_imagination_episode_metric = 0
@@ -1011,7 +1038,7 @@ def run_hrac(args):
                 ctrl_done = done
 
 
-            if args.world_model:
+            if args.world_model or args.controller_safe_model:
                 assert not controller_policy.PPO, "didnt implement wm + ppo controller"
                 world_model_buffer.add(
                     (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
@@ -1075,7 +1102,7 @@ def run_hrac(args):
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-            a_net=a_net)
+            a_net=a_net, args=args)
         evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
         output_data["frames"].append(total_timesteps)
         if args.env_name == 'AntGather':

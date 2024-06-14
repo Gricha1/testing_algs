@@ -95,21 +95,40 @@ class Manager(object):
                 imagined_state = self.predict_env.step(prev_imagined_state, prev_action)
         return imagined_state
 
-    def train_world_model(self, replay_buffer):
-        x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        state = get_tensor(x, to_device=False)
-        action = get_tensor(u, to_device=False)
-        next_state = get_tensor(y, to_device=False)
-
-        delta_state = next_state - state
-        inputs = np.concatenate((state, action), axis=-1)
-
-        labels = delta_state.numpy()
-
-        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
-        del state, action, next_state
+    def train_world_model(self, replay_buffer, controller=None, 
+                          train_safe_model=False, cost_model_iterations=10, 
+                          cost_model_batch_size=128):
+        if train_safe_model:
+            debug_info = {}
+            assert not(controller is None)
+            debug_info["safe_model_loss"] = []
+            debug_info["safe_model_mean_true"] = []
+            debug_info["safe_model_mean_pred"] = []
+            for i in range(cost_model_iterations):
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(x, to_device=False)
+                state_device = state.to(device)
+                safe_model_loss, true, pred = controller.train_cost_model(state_device)
+                debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
+                debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
+                debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
+            return debug_info
         
-        return loss
+        else:
+            x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
+            state = get_tensor(x, to_device=False)
+            state_device = state.to(device)
+            action = get_tensor(u, to_device=False)
+            next_state = get_tensor(y, to_device=False)
+
+            delta_state = next_state - state
+            inputs = np.concatenate((state, action), axis=-1)
+
+            labels = delta_state.numpy()
+            epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+            del state, action, next_state
+            
+            return loss
 
     def set_eval(self):
         self.actor.set_eval()
@@ -357,6 +376,7 @@ class Controller(object):
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
                  weight_decay_ppo=None, use_safe_model=False, cost_function=None,
+                 train_safe_model_with_world_model=False,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -371,6 +391,7 @@ class Controller(object):
         # self.criterion = nn.MSELoss()
 
         self.use_safe_model = use_safe_model
+        self.train_safe_model = use_safe_model and not train_safe_model_with_world_model
         if use_safe_model:
             assert not(cost_function is None)
             self.cost_function = cost_function
@@ -462,6 +483,21 @@ class Controller(object):
         subgoals = (subgoal + states[:, 0, :self.goal_dim])[:, None] - \
                    states[:, :, :self.goal_dim]
         return subgoals
+    
+    def train_cost_model(self, init_state):
+        pred = self.safe_model(init_state)
+        numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
+        true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
+
+        # Compute safet_model loss
+        safe_model_loss = self.safe_model_criterion(pred, true)
+
+        # Optimize the safe_model
+        self.safe_model_optimizer.zero_grad()
+        safe_model_loss.backward()
+        self.safe_model_optimizer.step()
+
+        return safe_model_loss, true, pred
 
     def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, 
               minibatch_size=None, clip_coef=None, clip_vloss=None,
@@ -470,7 +506,7 @@ class Controller(object):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
         debug_batch_data = True
-        if self.use_safe_model:
+        if self.train_safe_model:
             debug_info["safe_model_loss"] = []
             if debug_batch_data:
                 debug_info["safe_model_mean_true"] = [] 
@@ -590,19 +626,8 @@ class Controller(object):
                 critic_loss.backward()
                 self.critic_optimizer.step()
 
-                if self.use_safe_model:
-                    pred = self.safe_model(init_state)
-                    numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
-                    true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
-
-                    # Compute safet_model loss
-                    safe_model_loss = self.safe_model_criterion(pred, true)
-
-                    # Optimize the safe_model
-                    self.safe_model_optimizer.zero_grad()
-                    safe_model_loss.backward()
-                    self.safe_model_optimizer.step()
-
+                if self.train_safe_model:
+                    safe_model_loss, true, pred = self.train_cost_model(init_state)
                     debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
                     debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
                     debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
@@ -629,7 +654,7 @@ class Controller(object):
                 avg_act_loss = avg_act_loss / num_minibatches
                 avg_crit_loss = avg_crit_loss / num_minibatches
 
-        if self.use_safe_model:
+        if self.train_safe_model:
             for key_ in debug_info:
                 debug_info[key_] = np.mean(debug_info[key_])    
 
