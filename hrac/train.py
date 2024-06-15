@@ -633,8 +633,7 @@ def run_hrac(args):
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
         cost_function=env.cost_func,
-        use_safe_model=args.controller_safe_model,
-        train_safe_model_with_world_model=args.train_safe_model_with_world_model,
+        use_safe_model=args.controller_safe_model
     )
 
     manager_policy = hrac.Manager(
@@ -761,7 +760,7 @@ def run_hrac(args):
                 predict_env = PredictEnv(env_model, env_name, model_type)
             manager_policy.set_predict_env(predict_env)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)
-        def train_predict_model(replay_buffer, acc_wm_imagination_episode_metric, 
+        def train_world_cost_model(replay_buffer, acc_wm_imagination_episode_metric, 
                                 train_world_model=False, train_safe_model=False, 
                                 controller=None,
                                 cost_model_iterations=10):
@@ -775,6 +774,7 @@ def run_hrac(args):
                     if type(debug_info[key_]) == list:
                         debug_info[key_] = np.mean(debug_info[key_])
                     writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
+
             if train_world_model:
                 with TensorWrapper():
                     print("train world model")
@@ -881,10 +881,16 @@ def run_hrac(args):
                                         ep_manager_reward, total_timesteps)
                         
                     # Train World Model or Cost Model
-                    if (args.world_model or args.train_safe_model_with_world_model) and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
-                        train_predict_model(world_model_buffer, acc_wm_imagination_episode_metric,
-                                            train_world_model=args.world_model, 
-                                            train_safe_model=args.train_safe_model_with_world_model,
+                    if args.train_safe_model:
+                        train_world_cost_model(world_model_buffer, acc_wm_imagination_episode_metric,
+                                            train_world_model=False, 
+                                            train_safe_model=True,
+                                            controller=controller_policy,
+                                            cost_model_iterations=episode_timesteps)
+                    if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
+                        train_world_cost_model(world_model_buffer, acc_wm_imagination_episode_metric,
+                                            train_world_model=True, 
+                                            train_safe_model=False,
                                             controller=controller_policy,
                                             cost_model_iterations=episode_timesteps)
 
@@ -976,7 +982,7 @@ def run_hrac(args):
                     episode_safety_subgoal_rate = 0
                     episode_subgoals_count = 0
                 prev_action = None
-                if args.world_model or args.train_safe_model_with_world_model:
+                if args.world_model or args.train_safe_model:
                     prev_imagined_state = None
                     imagined_state_freq = args.img_horizon
                     acc_wm_imagination_episode_metric = 0

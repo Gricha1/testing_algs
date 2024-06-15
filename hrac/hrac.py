@@ -163,24 +163,12 @@ class Manager(object):
         if self.safety_subgoals:
             assert self.testing_safety_subgoal or (not self.testing_safety_subgoal and not(self.predict_env is None)), "world model must be initialized"
             if self.testing_safety_subgoal:
-                #copy_state = state.cpu().detach().numpy()
-                #copy_actions = actions.cpu().detach().numpy()
-                #if self.absolute_goal:
-                #        manager_absolute_goal = copy_actions[:, :self.action_dim]
-                #else:
-                #    manager_absolute_goal = copy_state[:, :self.action_dim] + copy_actions[:, :self.action_dim]
-                #cost_indexes = torch.tensor(self.cost_function(manager_absolute_goal), dtype=torch.int)
-                #cost_violate_indexes = (cost_indexes).bool()
-                #safe_indexes = (1 - cost_indexes).bool()
-                # if unsafe state loss = 1, loss = 0 otherwise
-                #safety_loss = torch.abs(actions[:, 0]) + torch.abs(actions[:, 1])
-                #zero_indexes = (safety_loss == 0).cpu().detach()
-                #cost_violate_indexes[zero_indexes] = False
-                #safe_indexes[zero_indexes] = True
-                #safety_loss[cost_violate_indexes] = safety_loss[cost_violate_indexes] / safety_loss[cost_violate_indexes]
-                #safety_loss[safe_indexes] = safety_loss[safe_indexes] * 0
-                manager_absolute_goal = state
-                manager_absolute_goal[:, :actions.shape[1]] += actions[:, :actions.shape[1]]
+                copy_state = state.detach()
+                manager_absolute_goal = actions.clone()
+                manager_absolute_goal += copy_state[:, :actions.shape[1]]
+                zeros_to_add = torch.zeros(actions.shape[0], 
+                                           state.shape[1] - actions.shape[1]).to(device)
+                manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
                 safety_loss = controller_policy.safe_model(manager_absolute_goal)
                 safety_loss = safety_loss.mean()
             else:
@@ -317,7 +305,7 @@ class Manager(object):
             #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
-            
+
             self.actor_optimizer.step()
 
             avg_act_loss += actor_loss
@@ -375,8 +363,7 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None, use_safe_model=False, cost_function=None,
-                 train_safe_model_with_world_model=False,
+                 weight_decay_ppo=None, use_safe_model=False, cost_function=None
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -391,12 +378,11 @@ class Controller(object):
         # self.criterion = nn.MSELoss()
 
         self.use_safe_model = use_safe_model
-        self.train_safe_model = use_safe_model and not train_safe_model_with_world_model
+        self.train_safe_model = False
         if use_safe_model:
             assert not(cost_function is None)
             self.cost_function = cost_function
             self.safe_model = ControllerSafeModel(state_dim).to(device)
-            #self.safe_model_criterion = nn.CrossEntropyLoss()
             self.safe_model_criterion = nn.BCELoss()
             self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
                                                  lr=critic_lr, weight_decay=0.0001)

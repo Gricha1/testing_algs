@@ -80,7 +80,7 @@ if __name__ == "__main__":
     # WorldModel Parameters
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)
-    parser.add_argument("--wm_train_freq", default=1, type=int) # 20 episodes
+    parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--num_networks", default=8, type=int)
     parser.add_argument("--num_elites", default=6, type=int)
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     # Safety model Parameters
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
-    parser.add_argument("--train_safe_model_with_world_model", action='store_true', default=False)
+    parser.add_argument("--train_safe_model", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
 
     # Noise Parameters
