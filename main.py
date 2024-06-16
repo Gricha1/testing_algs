@@ -35,9 +35,9 @@ if __name__ == "__main__":
     parser.add_argument("--r_batch_size", default=64, type=int)
     parser.add_argument("--r_hidden_dim", default=128, type=int)
     parser.add_argument("--r_embedding_dim", default=32, type=int)
-    parser.add_argument("--goal_loss_coeff", default=20., type=float)
 
     # Manager Parameters
+    parser.add_argument("--goal_loss_coeff", default=20., type=float)
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
     parser.add_argument("--train_manager_freq", default=10, type=int) # 10
     parser.add_argument("--man_soft_sync_rate", default=0.005, type=float)

@@ -989,9 +989,6 @@ def run_hrac(args):
                     wm_imagination_episode_metric = 0
 
                 subgoal = manager_policy.sample_goal(state, goal)
-                # testing
-                subgoal[0] = 5
-                subgoal[1] = 0
                 if not args.absolute_goal:
                     subgoal = man_noise.perturb_action(subgoal,
                         min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
@@ -1082,9 +1079,6 @@ def run_hrac(args):
 
                 manager_buffer.add(manager_transition)
                 subgoal = manager_policy.sample_goal(state, goal)
-                # testing
-                subgoal[0] = 5
-                subgoal[1] = 0
 
                 if args.env_name == "SafeAntMaze":
                     if manager_policy.absolute_goal:

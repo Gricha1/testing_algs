@@ -517,18 +517,7 @@ class Controller(object):
 
             b_inds = np.arange(batch_size)
             clipfracs = []
-        for it in range(iterations):
-            if not self.PPO:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
-                init_state = get_tensor(x)
-                next_g = get_tensor(self.subgoal_transition(x, sg, y))
-                state = self.clean_obs(get_tensor(x))
-                action = get_tensor(u)
-                sg = get_tensor(sg)
-                done = get_tensor(1 - d)
-                reward = get_tensor(r)
-                next_state = self.clean_obs(get_tensor(y))                
-
+        for it in range(iterations):              
             if self.PPO:
                  # Optimizing the policy and value network
                 np.random.shuffle(b_inds)
@@ -589,6 +578,18 @@ class Controller(object):
                 if target_kl is not None and approx_kl > target_kl:
                     break
             else:
+
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+                init_state = get_tensor(x)
+                next_g = get_tensor(self.subgoal_transition(x, sg, y))
+                state = self.clean_obs(get_tensor(x))
+                action = get_tensor(u)
+                sg = get_tensor(sg)
+                done = get_tensor(1 - d)
+                reward = get_tensor(r)
+                next_state = self.clean_obs(get_tensor(y)) 
+
+                
                 noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
                 noise = noise.clamp(-self.noise_clip, self.noise_clip)
                 next_action = (self.actor_target(next_state, next_g) + noise)
