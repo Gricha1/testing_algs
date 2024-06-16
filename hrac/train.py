@@ -238,14 +238,17 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
                     renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
     print("Starting evaluation number {}...".format(eval_idx))
-    env.evaluate = True
+    if args.test_train_dataset:
+        env.evaluate = False
+    else:
+        env.evaluate = True
     validation_date = {}
     with torch.no_grad():
         avg_reward = 0.
         avg_controller_rew = 0.
         global_steps = 0
         goals_achieved = 0
-        eval_image_ep = 0
+        eval_image_ep = args.visulazied_episode
         if env_name == "SafeAntMaze":
             avg_cost = 0.
             avg_episode_safety_subgoal_rate = 0
@@ -559,6 +562,9 @@ def run_hrac(args):
         env.seed(args.seed)
     else:
         raise NotImplementedError
+    
+    if args.env_name == "SafeAntMaze" and args.random_start_pose:
+        env.test_start_random_pose()
     
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))

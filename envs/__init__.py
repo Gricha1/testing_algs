@@ -140,11 +140,11 @@ class EnvWithGoal(object):
     def seed(self, seed):
         self.base_env.seed(seed)
 
-    def reset(self, validate=False):
+    def reset(self, validate=False, start_point=None):
         # self.viewer_setup()
         self.early_stop_flag = False
         self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate, maze_id=self.maze_id)
-        obs = self.base_env.reset(validate=validate)
+        obs = self.base_env.reset(validate=validate, start_point=start_point)
         self.count = 0
         self.goal = self.goal_sample_fn()
         self.desired_goal = self.goal if self.env_name in ['AntMaze', 'AntPush', 'AntFall', "AntMazeMultiMap"] else None
@@ -231,6 +231,14 @@ class SafeMazeAnt:
         self.render_info = {}
         self.render_info["shift_x"] = SHIFT_X
         self.render_info["shift_y"] = SHIFT_Y
+        # test
+        self.test_start_pose = False
+        self.set_start_pose(random_start_pose=False)
+
+    # test
+    def test_start_random_pose(self):
+        self.test_start_pose = True
+        self.set_start_pose(random_start_pose=True)
 
     def seed(self, seed):
         self.env.seed(seed)
@@ -242,6 +250,12 @@ class SafeMazeAnt:
     @evaluate.setter
     def evaluate(self, val):
         self.env.evaluate = val
+        # test
+        if self.test_start_pose:
+            if val == True:
+                self.set_start_pose(random_start_pose=False)
+            else:
+                self.set_start_pose(random_start_pose=True)
 
     @property
     def action_space(self):
@@ -261,9 +275,31 @@ class SafeMazeAnt:
         
     def get_maze(self):
         return self.env.get_maze()
+    
+    def set_start_pose(self, random_start_pose=False):
+        if random_start_pose:
+            self.random_start_pose = True
+        else:
+            self.random_start_pose = False
 
     def reset(self):
-        return self.env.reset()
+        if self.random_start_pose:
+            if self.env.maze_id == "MazeSafe_map_1":
+                safe_start_point_found = False
+                n_points = 1000
+                while not safe_start_point_found:
+                    x = np.random.uniform(0, 16, n_points)
+                    y = np.random.uniform(0, 16, n_points)
+                    points = np.column_stack((x, y))
+                    cost_idx = self.cost_func(points)
+                    safety_states = (1 - cost_idx) == True
+                    if safety_states.any():
+                        safe_ind = np.where(safety_states)[0][0]
+                        safe_start_point_found = True
+                xy = tuple(points[safe_ind])
+            return self.env.reset(start_point=xy)
+        else:
+            return self.env.reset()
 
     def step(self, action):
         next_tup, rew, done, info = self.env.step(action)
@@ -291,11 +327,6 @@ class SafeMazeAnt:
             cost = cost + (robot_y <= self.safety_bounds[3-1].y) + (robot_y >= self.safety_bounds[1-1].y)
             cost = cost + (robot_y <= self.safety_bounds[7-1].y) * (robot_y >= self.safety_bounds[4-1].y) * (robot_x <= self.safety_bounds[5-1].x)
             cost = (cost >= 1)
-            #print("cost:", cost)
-            #print("cost:", cost.shape)
-            #cost = cost.astype(float)
-            #cost = cost.to(float)
-            #assert (cost <= 1.0).all()
             
         return cost
     

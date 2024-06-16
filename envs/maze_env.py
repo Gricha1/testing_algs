@@ -201,9 +201,10 @@ class MazeEnv(gym.Env):
     return np.concatenate([self.wrapped_env._get_obs(),
                            [self.t * 0.001]])
 
-  def reset(self, validate=False):
+  def reset(self, validate=False, start_point=None):
     self.t = 0
     self.wrapped_env.reset()
+    assert (validate == start_point == False) or (validate != start_point)
     if validate:
       if self._maze_id == "Maze_map_1":
         xy = (16, 0) # right bottom
@@ -214,6 +215,10 @@ class MazeEnv(gym.Env):
       if self._maze_id == "Maze_map_4":
         xy = (16, 16) # right bottom
       self.wrapped_env.set_xy(xy)
+    if not (start_point is None):
+        assert type(start_point) == tuple
+        xy = start_point
+        self.wrapped_env.set_xy(xy)
     if len(self._init_positions) > 1:
       idx = self.rng.randint(len(self._init_positions))
       xy = self._init_positions[idx]

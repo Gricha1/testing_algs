@@ -9,7 +9,11 @@ if __name__ == "__main__":
     # validation 
     parser.add_argument("--validate", action="store_true", default=False)
     parser.add_argument("--validation_without_image", action="store_true", default=False)
+    parser.add_argument("--visulazied_episode", default=0, type=int)
+    parser.add_argument("--test_train_dataset", action="store_true", default=False)
     
+    # environment
+    parser.add_argument("--random_start_pose", action="store_true", default=False)
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
@@ -21,7 +25,6 @@ if __name__ == "__main__":
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
-    parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 
@@ -37,6 +40,7 @@ if __name__ == "__main__":
     parser.add_argument("--r_embedding_dim", default=32, type=int)
 
     # Manager Parameters
+    parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
     parser.add_argument("--train_manager_freq", default=10, type=int) # 10
