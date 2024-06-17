@@ -796,13 +796,14 @@ def run_hrac(args):
 
     if args.load:
         try:
-            manager_policy.load("./models", exp_num=args.loaded_exp_num)
-            controller_policy.load("./models", exp_num=args.loaded_exp_num)
+            manager_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
         except Exception as e:
             just_loaded = False
             print(e, "Loading failed.")
+            assert 1 == 0
     else:
         just_loaded = False
 
