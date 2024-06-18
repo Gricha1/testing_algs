@@ -179,7 +179,8 @@ class OUNoise(object):
 
 
 def train_adj_net(a_net, states, adj_mat, optimizer, margin_pos, margin_neg,
-                  n_epochs=100, batch_size=64, device='cpu', verbose=False):
+                  n_epochs=100, batch_size=64, device='cpu', verbose=False,
+                  args=None):
     if verbose:
         print('Generating training data...')
     dataset = MetricDataset(states, adj_mat)
@@ -200,7 +201,7 @@ def train_adj_net(a_net, states, adj_mat, optimizer, margin_pos, margin_neg,
             label = label.long().to(device)
             x = a_net(x)
             y = a_net(y)
-            loss = loss_func(x, y, label)
+            loss = args.adj_loss_coef * loss_func(x, y, label)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

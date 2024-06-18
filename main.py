@@ -29,6 +29,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 
     # Adjacency Network Parameters
+    parser.add_argument("--adj_loss_coef", default=1., type=float)
     parser.add_argument("--gid", default=0, type=int)
     parser.add_argument("--traj_buffer_size", default=50_000, type=int) # 50_000
     parser.add_argument("--lr_r", default=2e-4, type=float)
@@ -92,6 +93,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_decay", default=True, type=bool)
 
     # Safety Subgoal Parameters
+    parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     parser.add_argument("--safety_subgoals", action='store_true', default=False)
     parser.add_argument("--safety_loss_coef", default=200., type=float)
     parser.add_argument("--img_horizon", default=20, type=int)

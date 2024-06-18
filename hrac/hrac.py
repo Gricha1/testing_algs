@@ -363,7 +363,8 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None, use_safe_model=False, cost_function=None
+                 weight_decay_ppo=None, use_safe_model=False, cost_function=None,
+                 safe_model_loss_coef=1.0,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -382,6 +383,7 @@ class Controller(object):
         if use_safe_model:
             assert not(cost_function is None)
             self.cost_function = cost_function
+            self.safe_model_loss_coef = safe_model_loss_coef
             self.safe_model = ControllerSafeModel(state_dim).to(device)
             self.safe_model_criterion = nn.BCELoss()
             self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
@@ -476,7 +478,7 @@ class Controller(object):
         true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
 
         # Compute safet_model loss
-        safe_model_loss = self.safe_model_criterion(pred, true)
+        safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)
 
         # Optimize the safe_model
         self.safe_model_optimizer.zero_grad()

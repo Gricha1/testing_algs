@@ -479,7 +479,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
                         optimizer_r, args.r_margin_pos, args.r_margin_neg,
                         n_epochs=args.r_training_epochs, batch_size=args.r_batch_size,
-                        device=device, verbose=False)
+                        device=device, verbose=False, args=args)
 
     if args.save_models:
         r_filename = os.path.join(f"./models/{exp_num}", "{}_{}_a_network.pth".format(args.env_name, args.algo))
@@ -640,7 +640,8 @@ def run_hrac(args):
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
         cost_function=env.cost_func,
-        use_safe_model=args.controller_safe_model
+        use_safe_model=args.controller_safe_model,
+        safe_model_loss_coef=args.safe_model_loss_coef,
     )
 
     manager_policy = hrac.Manager(
@@ -745,7 +746,7 @@ def run_hrac(args):
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:
         print("Loading adjacency network...")
-        a_net.load_state_dict(torch.load("./models/{args.loaded_exp_num}/a_network.pth"))
+        a_net.load_state_dict(torch.load(f"./models/{args.loaded_exp_num}/{args.env_name}_{args.algo}_a_network.pth"))
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
