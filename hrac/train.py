@@ -38,6 +38,7 @@ class CustomVideoRendered:
         self.env = env
         self.world_model_comparsion = world_model
         self.controller_safe_model = controller_safe_model
+        self.plot_safe_dataset = False
         self.shift_x = env.render_info["shift_x"]
         self.shift_y = env.render_info["shift_y"]
         self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20
@@ -152,7 +153,7 @@ class CustomVideoRendered:
             ys = [point.y for point in safety_boundary]
             self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
             # safe dataset check
-            if self.controller_safe_model:
+            if self.controller_safe_model and self.plot_safe_dataset:
                 xs_dataset = safe_dataset[0]
                 ys_dataset = safe_dataset[1]
                 x1s_unsafe = []
@@ -274,7 +275,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
             else:
-                obs = env.reset()
+                obs = env.reset(eval_idx=eval_ep)
 
             goal = obs["desired_goal"]
             state = obs["observation"]
@@ -564,7 +565,7 @@ def run_hrac(args):
         raise NotImplementedError
     
     if args.env_name == "SafeAntMaze" and args.random_start_pose:
-        env.test_start_random_pose()
+        env.set_train_start_pose_to_random()
     
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
@@ -822,6 +823,9 @@ def run_hrac(args):
             if type(validation_date[key_]) == list:
                 validation_date[key_] = np.mean(validation_date[key_])
             writer.add_scalar(f"eval/{key_}", validation_date[key_], 0)
+        if args.env_name != "AntGather":
+            writer.add_scalar("eval/avg_steps_to_finish", avg_steps, 0)
+            writer.add_scalar("eval/perc_env_goal_achieved", avg_env_finish, 0)
 
         writer.close()
 

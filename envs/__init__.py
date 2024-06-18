@@ -30,7 +30,10 @@ class Point:
     def y(self, y):
         self._y = y
 
-def get_goal_sample_fn(env_name, evaluate, maze_id=None):
+def get_goal_sample_fn(env_name, evaluate, maze_id=None, goal_xy=None):
+    # test
+    if not(goal_xy is None):
+        return lambda: np.array([goal_xy[0], goal_xy[1]])
     if env_name == 'AntMaze':
         if evaluate:
             return lambda: np.array([0., 16.])
@@ -140,10 +143,10 @@ class EnvWithGoal(object):
     def seed(self, seed):
         self.base_env.seed(seed)
 
-    def reset(self, validate=False, start_point=None):
+    def reset(self, validate=False, start_point=None, goal_xy=None):
         # self.viewer_setup()
         self.early_stop_flag = False
-        self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate, maze_id=self.maze_id)
+        self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate, maze_id=self.maze_id, goal_xy=goal_xy)
         obs = self.base_env.reset(validate=validate, start_point=start_point)
         self.count = 0
         self.goal = self.goal_sample_fn()
@@ -231,13 +234,11 @@ class SafeMazeAnt:
         self.render_info = {}
         self.render_info["shift_x"] = SHIFT_X
         self.render_info["shift_y"] = SHIFT_Y
-        # test
-        self.test_start_pose = False
+        self.train_random_start_pose = False
         self.set_start_pose(random_start_pose=False)
 
-    # test
-    def test_start_random_pose(self):
-        self.test_start_pose = True
+    def set_train_start_pose_to_random(self):
+        self.train_random_start_pose = True
         self.set_start_pose(random_start_pose=True)
 
     def seed(self, seed):
@@ -250,8 +251,7 @@ class SafeMazeAnt:
     @evaluate.setter
     def evaluate(self, val):
         self.env.evaluate = val
-        # test
-        if self.test_start_pose:
+        if self.train_random_start_pose:
             if val == True:
                 self.set_start_pose(random_start_pose=False)
             else:
@@ -282,7 +282,7 @@ class SafeMazeAnt:
         else:
             self.random_start_pose = False
 
-    def reset(self):
+    def reset(self, xy=None, goal_xy=None, eval_idx=None):
         if self.random_start_pose:
             if self.env.maze_id == "MazeSafe_map_1":
                 safe_start_point_found = False
@@ -297,9 +297,16 @@ class SafeMazeAnt:
                         safe_ind = np.where(safety_states)[0][0]
                         safe_start_point_found = True
                 xy = tuple(points[safe_ind])
-            return self.env.reset(start_point=xy)
+            return self.env.reset(start_point=xy, goal_xy=goal_xy)
         else:
-            return self.env.reset()
+            # test
+            if not(eval_idx is None):
+                eval_dataset = self.get_eval_dataset()
+                if len(eval_dataset) == 0:
+                    print("!!!!!! eval dataset size 0 !!!!!!!!!")
+                else:
+                    xy, goal_xy = eval_dataset[eval_idx%len(eval_dataset)]
+            return self.env.reset(start_point=xy, goal_xy=goal_xy)
 
     def step(self, action):
         next_tup, rew, done, info = self.env.step(action)
@@ -329,6 +336,36 @@ class SafeMazeAnt:
             cost = (cost >= 1)
             
         return cost
+
+
+    def get_eval_dataset(self):
+        # return: 
+        # [
+        #   [(start_x_1, start_y_1), (goal_x_1, goal_y_1)],
+        #   [(start_x_2, start_y_2), (goal_x_2, goal_y_2)],
+        #    ...         
+        # ]
+        dataset = []
+        if self.env.maze_id == "MazeSafe_map_1":
+            xy = (0, 0)
+            goal_xy = (0, 16)
+            dataset.append([xy, goal_xy])
+            xy = (0, 16)
+            goal_xy = (0, 0)
+            dataset.append([xy, goal_xy])
+            xy = (0, 0)
+            goal_xy = (16, 16)
+            dataset.append([xy, goal_xy])
+            xy = (16, 16)
+            goal_xy = (0, 0)
+            dataset.append([xy, goal_xy])
+            xy = (0, 16)
+            goal_xy = (16, 0)
+            dataset.append([xy, goal_xy])
+            xy = (16, 0)
+            goal_xy = (0, 16)
+            dataset.append([xy, goal_xy])
+        return dataset
     
 
     
