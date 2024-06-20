@@ -30,15 +30,17 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 
 class CustomVideoRendered:
     def __init__(self, env, world_model, controller_safe_model):
+        # config
+        self.add_subgoal_values = False
+        self.add_mesurements = True
+        self.plot_safe_dataset = False        
+
         self.render_info = {}
         self.render_info["fig"] = None
         self.render_info["ax_states"] = None
-        self.add_subgoal_values = False
-        self.add_mesurements = True
         self.env = env
         self.world_model_comparsion = world_model
         self.controller_safe_model = controller_safe_model
-        self.plot_safe_dataset = False
         self.shift_x = env.render_info["shift_x"]
         self.shift_y = env.render_info["shift_y"]
         self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20

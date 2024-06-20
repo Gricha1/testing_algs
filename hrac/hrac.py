@@ -162,6 +162,9 @@ class Manager(object):
             next_img_state = self.predict_env.step(img_state, ctrl_actions, 
                                                 deterministic=True, 
                                                 torch_deviced=True)
+            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
+                                                                         manager_proposed_goal, 
+                                                                         next_img_state)
             h += 1
         return controller_policy.safe_model(state)    
             
@@ -187,8 +190,10 @@ class Manager(object):
                 safety_loss = controller_policy.safe_model(manager_absolute_goal)
                 safety_loss = safety_loss.mean()
             else:
+                # test
                 h_limit = random.randint(1, self.img_horizon)
-                safety_loss = self.state_safety_on_horizon(state, actions, controller_policy, h_limit)
+                safety_loss = self.state_safety_on_horizon(state, actions, 
+                                                           controller_policy, h_limit)
                 safety_loss = safety_loss.mean()
         return eval + norm, goal_loss, safety_loss
 
