@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -149,7 +151,20 @@ class Manager(object):
 
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
-
+    
+    def state_safety_on_horizon(self, state, actions, controller_policy, horizon):
+        h = 0
+        manager_proposed_goal = actions.clone()
+        next_img_state = state.clone()
+        while h < horizon:
+            img_state = next_img_state.clone().detach()
+            ctrl_actions = controller_policy.actor(img_state, manager_proposed_goal) 
+            next_img_state = self.predict_env.step(img_state, ctrl_actions, 
+                                                deterministic=True, 
+                                                torch_deviced=True)
+            h += 1
+        return controller_policy.safe_model(state)    
+            
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
         actions = self.actor(state, goal)
         
@@ -172,20 +187,9 @@ class Manager(object):
                 safety_loss = controller_policy.safe_model(manager_absolute_goal)
                 safety_loss = safety_loss.mean()
             else:
-                safety_loss = 0
-                h = 0
-                img_state = state
-                acc_costs = np.zeros(img_state.shape[0]) # (batch_size,)
-                while h < self.img_horizon:
-                    # subgoals = actions
-                    ctrl_actions = controller_policy.actor(img_state, actions) 
-                    img_state = img_state.cpu().numpy()
-                    img_actions = img_actions.cpu().numpy()
-                    #acc_costs += self.cost_function(img_state)
-                    img_state = self.predict_env.step(img_state, ctrl_actions)
-                    img_state = torch.from_numpy(img_state).float().to(device)
-                    h += 1
-                safety_loss = (acc_costs/self.img_horizon).mean()
+                h_limit = random.randint(1, self.img_horizon)
+                safety_loss = self.state_safety_on_horizon(state, actions, controller_policy, h_limit)
+                safety_loss = safety_loss.mean()
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):

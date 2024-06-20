@@ -39,7 +39,7 @@ class StandardScaler(object):
         self.std = np.std(data, axis=0, keepdims=True)
         self.std[self.std < 1e-12] = 1.0
 
-    def transform(self, data):
+    def transform(self, data, torch_deviced=False):
         """Transforms the input matrix data using the parameters of this scaler.
 
         Arguments:
@@ -47,7 +47,12 @@ class StandardScaler(object):
 
         Returns: (np.array) The transformed dataset.
         """
-        return (data - self.mu) / self.std
+        if torch_deviced:
+            mu_tensor = torch.tensor(self.mu, device=device)
+            std_tensor = torch.tensor(self.std, device=device)
+            return (data - mu_tensor) / std_tensor
+        else:
+            return (data - self.mu) / self.std
 
     def inverse_transform(self, data):
         """Undoes the transformation performed by this scaler.
@@ -307,16 +312,27 @@ class EnsembleDynamicsModel():
         else:
             return False
 
-    def predict(self, inputs, batch_size=1024, factored=True):
-        inputs = self.scaler.transform(inputs)
+    def predict(self, inputs, batch_size=1024, factored=True, torch_deviced=False):
+        inputs = self.scaler.transform(inputs, torch_deviced=torch_deviced)
         ensemble_mean, ensemble_var = [], []
         for i in range(0, inputs.shape[0], batch_size):
-            input = torch.from_numpy(inputs[i:min(i + batch_size, inputs.shape[0])]).float().to(device)
+            if torch_deviced:
+                input = inputs[i:min(i + batch_size, inputs.shape[0]), :]
+            else:
+                input = torch.from_numpy(inputs[i:min(i + batch_size, inputs.shape[0])]).float().to(device)
             b_mean, b_var = self.ensemble_model(input[None, :, :].repeat([self.network_size, 1, 1]), ret_log_var=False)
-            ensemble_mean.append(b_mean.detach().cpu().numpy())
-            ensemble_var.append(b_var.detach().cpu().numpy())
-        ensemble_mean = np.hstack(ensemble_mean)
-        ensemble_var = np.hstack(ensemble_var)
+            if torch_deviced:
+                ensemble_mean.append(b_mean)
+                ensemble_var.append(b_var)
+            else:
+                ensemble_mean.append(b_mean.detach().cpu().numpy())
+                ensemble_var.append(b_var.detach().cpu().numpy())
+        if torch_deviced:
+            ensemble_mean = torch.cat(ensemble_mean, dim=-1)
+            ensemble_var = torch.cat(ensemble_var, dim=-1)
+        else:
+            ensemble_mean = np.hstack(ensemble_mean)
+            ensemble_var = np.hstack(ensemble_var)
 
         if factored:
             return ensemble_mean, ensemble_var
@@ -403,7 +419,7 @@ class PredictEnv:
 
         return log_prob, stds
 
-    def step(self, obs, act, single=False, deterministic=False):
+    def step(self, obs, act, single=False, deterministic=False, torch_deviced=False):
         if len(obs.shape) == 1:
             obs = obs[None]
             act = act[None]
@@ -411,15 +427,23 @@ class PredictEnv:
         else:
             return_single = False
 
-        inputs = np.concatenate((obs, act), axis=-1)
+        if torch_deviced:
+            inputs = torch.cat((obs, act), dim=-1)
+        else:
+            inputs = np.concatenate((obs, act), axis=-1)
         if self.model_type == 'pytorch':
-            ensemble_model_means, ensemble_model_vars = self.model.predict(inputs)
+            ensemble_model_means, ensemble_model_vars = self.model.predict(inputs, torch_deviced=torch_deviced)
         else:
             ensemble_model_means, ensemble_model_vars = self.model.predict(inputs, factored=True)
         #print(ensemble_model_means.shape, ensemble_model_vars.shape)
         #random_idx = np.random.randint(5,size=1)#
         # ensemble_model_means[random_idx] += obs
-        ensemble_model_stds = np.sqrt(ensemble_model_vars)
+        # test
+        if not deterministic:
+            if torch_deviced:
+                ensemble_model_stds = torch.sqrt(ensemble_model_vars)
+            else:
+                ensemble_model_stds = np.sqrt(ensemble_model_vars)
 
         if deterministic:
             ensemble_samples = ensemble_model_means
@@ -435,9 +459,11 @@ class PredictEnv:
 
         samples = ensemble_samples[model_idxes, batch_idxes]
         model_means = ensemble_model_means[model_idxes, batch_idxes]
-        model_stds = ensemble_model_stds[model_idxes, batch_idxes]
+        # test
+        #model_stds = ensemble_model_stds[model_idxes, batch_idxes]
 
-        log_prob, dev = self._get_logprob(samples, ensemble_model_means, ensemble_model_vars)
+        # test
+        #log_prob, dev = self._get_logprob(samples, ensemble_model_means, ensemble_model_vars)
 
         next_obs_delta = samples
         #print(obs, samples)
