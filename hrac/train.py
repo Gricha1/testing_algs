@@ -22,6 +22,7 @@ from render_utils.plots import plot_values
 
 from sklearn.metrics import f1_score
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 """
 HIRO part adapted from
@@ -211,16 +212,9 @@ class CustomVideoRendered:
                 t = debug_info["t"]
                 dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
                 dist_a_net_s_g = debug_info["dist_a_net_s_g"]
-                #acc_cost = debug_info["acc_cost"]
-                #self.render_info["ax_states"].text(env_max_x - 4.5, env_max_y - 0.3, f"a0:{int(a0*100)/100}")
-                #self.render_info["ax_states"].text(env_max_x - 3.5, env_max_y - 0.3, f"a1:{int(a1*100)/100}")
-                #self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 0.3, f"C:{int(acc_cost*10)/10}")
-                #self.render_info["ax_states"].text(env_max_x - 10.5, env_max_y - 0.3, f"a_net(s, sg):{dist_a_net_s_sg}")
-                #self.render_info["ax_states"].text(env_max_x - 22.5, env_max_y - 2, f"a_net(s, g):{dist_a_net_s_g}")
                 self.render_info["ax_states"].text(env_max_x - 28.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
-                #self.render_info["ax_states"].text(env_max_x - 10.5, env_max_y - 2, f"t:{t}")
 
         # render img
         self.render_info["fig"].canvas.draw()
@@ -255,6 +249,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         if env_name == "SafeAntMaze":
             avg_cost = 0.
             avg_episode_safety_subgoal_rate = 0
+            avg_episode_imagine_subgoal_safety = 0
             safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             if controller_policy.use_safe_model:
                 x = safe_dataset[0]
@@ -264,7 +259,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                                                np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
                                                axis=1)
                 x_tensor = torch.tensor(x_with_zeros)
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 x_tensor = x_tensor.to(device)
                 pred = controller_policy.safe_model(x_tensor)
                 pred = (pred > 0.5).int().squeeze().tolist()
@@ -297,14 +291,27 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             episode_cost = 0
             episode_controller_rew = 0
             episode_safety_subgoal_rate = 0
+            episode_imagine_subgoal_safety = 0
             episode_subgoals_count = 0
             while not done:
                 if step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
+                    # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
                         episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                        if args.world_model:
+                            with torch.no_grad():
+                                state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
+                                subgoal_torch = torch.tensor(subgoal, dtype=torch.float32).to(device).unsqueeze(0)
+                                episode_imagine_subgoal_safety += manager_policy.state_safety_on_horizon(
+                                                        state_torch, subgoal_torch, 
+                                                        controller_policy, 
+                                                        max_horizon=manager_policy.img_horizon,
+                                                        safety_cost=controller_policy.safe_model,
+                                                        all_steps_safety=True
+                                                        )
                     episode_subgoals_count += 1
 
                 step_count += 1
@@ -390,6 +397,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
             if env_name == "SafeAntMaze":
                 avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
+                avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
 
         if not args.validation_without_image and not (renderer is None) and not (writer is None):
             writer.add_video(
@@ -404,6 +412,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         if env_name == "SafeAntMaze":
             avg_cost /= eval_episodes
             avg_episode_safety_subgoal_rate /= eval_episodes
+            validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
+            if args.world_model:
+                avg_episode_imagine_subgoal_safety /= eval_episodes
+                validation_date["imagine_subgoal_safety"] = avg_episode_imagine_subgoal_safety
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
         avg_env_finish = goals_achieved / eval_episodes
@@ -419,7 +431,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
 
         env.evaluate = False
         if env_name == "SafeAntMaze":
-            return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date
+            return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
         else:
             return avg_reward, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
 
@@ -662,7 +674,8 @@ def run_hrac(args):
         safety_loss_coef=args.safety_loss_coef,
         img_horizon=args.img_horizon,
         cost_function=env.cost_func,
-        testing_safety_subgoal=args.testing_safety_subgoal
+        testing_safety_subgoal=args.testing_safety_subgoal,
+        testing_mean_wm=args.testing_mean_wm,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -812,7 +825,7 @@ def run_hrac(args):
         just_loaded = False
 
     if args.validate:
-        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date = evaluate_policy(
+        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
@@ -821,7 +834,6 @@ def run_hrac(args):
         writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, 0)
         writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, 0)
         writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, 0)
-        writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, 0)
         for key_ in validation_date:
             if type(validation_date[key_]) == list:
                 validation_date[key_] = np.mean(validation_date[key_])
@@ -937,7 +949,7 @@ def run_hrac(args):
                     # Evaluate
                     if timesteps_since_eval >= args.eval_freq:
                         timesteps_since_eval = 0
-                        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date =\
+                        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date =\
                             evaluate_policy(env, args.env_name, manager_policy, controller_policy,
                                 calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
@@ -947,7 +959,6 @@ def run_hrac(args):
                         writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
                         writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
                         writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
-                        writer.add_scalar("eval/safety_subgoal_rate", avg_episode_safety_subgoal_rate, total_timesteps)
                         for key_ in validation_date:
                             if type(validation_date[key_]) == list:
                                 validation_date[key_] = np.mean(validation_date[key_])
@@ -1112,7 +1123,7 @@ def run_hrac(args):
                 manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
         # Final evaluation
-        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, avg_episode_safety_subgoal_rate, validation_date = evaluate_policy(
+        avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,

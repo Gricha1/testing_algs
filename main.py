@@ -91,12 +91,15 @@ if __name__ == "__main__":
     parser.add_argument("--num_elites", default=6, type=int)
     parser.add_argument("--pred_hidden_size", default=200, type=int)
     parser.add_argument("--use_decay", default=True, type=bool)
+    parser.add_argument("--testing_mean_wm", action='store_true', default=False)
 
     # Safety Subgoal Parameters
+    # test
+    parser.add_argument("--imagined_safety_subgoal", action='store_true', default=False)
+    parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     parser.add_argument("--safety_subgoals", action='store_true', default=False)
     parser.add_argument("--safety_loss_coef", default=200., type=float)
-    parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--testing_safety_subgoal", action='store_true', default=False)
 
     # Safety model Parameters

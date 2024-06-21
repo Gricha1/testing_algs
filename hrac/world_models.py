@@ -419,7 +419,7 @@ class PredictEnv:
 
         return log_prob, stds
 
-    def step(self, obs, act, single=False, deterministic=False, torch_deviced=False):
+    def step(self, obs, act, single=False, deterministic=False, torch_deviced=False, testing_mean_pred=False):
         if len(obs.shape) == 1:
             obs = obs[None]
             act = act[None]
@@ -457,7 +457,10 @@ class PredictEnv:
             model_idxes = self.model.random_inds(batch_size)
         batch_idxes = np.arange(0, batch_size)
 
-        samples = ensemble_samples[model_idxes, batch_idxes]
+        if testing_mean_pred:
+            samples = ensemble_samples.mean(0)
+        else:
+            samples = ensemble_samples[model_idxes, batch_idxes]
         model_means = ensemble_model_means[model_idxes, batch_idxes]
         # test
         #model_stds = ensemble_model_stds[model_idxes, batch_idxes]
@@ -466,9 +469,7 @@ class PredictEnv:
         #log_prob, dev = self._get_logprob(samples, ensemble_model_means, ensemble_model_vars)
 
         next_obs_delta = samples
-        #print(obs, samples)
         next_obs = next_obs_delta + obs
-        #print(next_obs)
         terminals = self._termination_fn(self.env_name, obs, act, next_obs)
 
         # batch_size = model_means.shape[0]

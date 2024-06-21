@@ -49,7 +49,7 @@ class Manager(object):
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
                  wm_no_xy=False, safety_subgoals=False, safety_loss_coef=1, img_horizon=10, 
-                 cost_function=None, testing_safety_subgoal=False):
+                 cost_function=None, testing_safety_subgoal=False, testing_mean_wm=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -78,8 +78,12 @@ class Manager(object):
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
 
+        # WorldModel
         self.predict_env = None
         self.no_xy = wm_no_xy
+        self.testing_mean_wm = testing_mean_wm
+
+        # Safety
         self.safety_subgoals = safety_subgoals
         self.safety_loss_coef = safety_loss_coef
         self.img_horizon = img_horizon
@@ -94,7 +98,10 @@ class Manager(object):
             if prev_imagined_state is None or current_step % imagined_state_freq == 0:
                 imagined_state = current_state
             else:
-                imagined_state = self.predict_env.step(prev_imagined_state, prev_action)
+                imagined_state = self.predict_env.step(prev_imagined_state, 
+                                                       prev_action, 
+                                                       deterministic=True, 
+                                                       testing_mean_pred=self.testing_mean_wm)
         return imagined_state
 
     def train_world_model(self, replay_buffer, controller=None, 
@@ -152,21 +159,36 @@ class Manager(object):
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
     
-    def state_safety_on_horizon(self, state, actions, controller_policy, horizon):
+    def state_safety_on_horizon(self, state, actions, controller_policy, 
+                                max_horizon, safety_cost, 
+                                all_steps_safety=False):
+        manager_proposed_goal = actions
+        next_img_state = state
+
         h = 0
-        manager_proposed_goal = actions.clone()
-        next_img_state = state.clone()
+        if all_steps_safety:
+            horizon = self.img_horizon
+        else:
+            horizon = random.randint(1, self.img_horizon)
         while h < horizon:
-            img_state = next_img_state.clone().detach()
+            img_state = next_img_state
             ctrl_actions = controller_policy.actor(img_state, manager_proposed_goal) 
             next_img_state = self.predict_env.step(img_state, ctrl_actions, 
                                                 deterministic=True, 
-                                                torch_deviced=True)
+                                                torch_deviced=True,
+                                                testing_mean_pred=self.testing_mean_wm)
+            if all_steps_safety:
+                if h == 0:
+                    safety = safety_cost(next_img_state)
+                else:
+                    safety += safety_cost(next_img_state)
             manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
                                                                          manager_proposed_goal, 
                                                                          next_img_state)
             h += 1
-        return controller_policy.safe_model(state)    
+        if not all_steps_safety:
+            safety = safety_cost(next_img_state)
+        return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
         actions = self.actor(state, goal)
@@ -190,10 +212,11 @@ class Manager(object):
                 safety_loss = controller_policy.safe_model(manager_absolute_goal)
                 safety_loss = safety_loss.mean()
             else:
-                # test
-                h_limit = random.randint(1, self.img_horizon)
                 safety_loss = self.state_safety_on_horizon(state, actions, 
-                                                           controller_policy, h_limit)
+                                                           controller_policy, 
+                                                           max_horizon=self.img_horizon,
+                                                           safety_cost=controller_policy.safe_model,
+                                                           all_steps_safety=False)
                 safety_loss = safety_loss.mean()
         return eval + norm, goal_loss, safety_loss
 
@@ -309,9 +332,9 @@ class Manager(object):
             self.actor_optimizer.zero_grad()
 
             # test
-            #actor_loss.retain_grad() 
-            #goal_loss.retain_grad() 
-            #safety_subgoals_loss.retain_grad() 
+            actor_loss.retain_grad() 
+            goal_loss.retain_grad() 
+            safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
 
