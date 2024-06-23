@@ -925,7 +925,7 @@ def run_hrac(args):
                         timesteps_since_manager = 0
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
-                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss = manager_policy.train(controller_policy,
+                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = manager_policy.train(controller_policy,
                             manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
                             batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
                             a_net=a_net, r_margin=r_margin)
@@ -933,6 +933,10 @@ def run_hrac(args):
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
                         writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
+                        for key_ in debug_maganer_info:
+                            if type(debug_maganer_info[key_]) == list:
+                                debug_maganer_info[key_] = np.mean(debug_maganer_info[key_])
+                            writer.add_scalar(f"data/{key_}", debug_maganer_info[key_], 0)
                         if not(man_safety_loss is None):
                             writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
 

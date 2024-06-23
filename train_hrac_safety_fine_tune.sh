@@ -12,7 +12,9 @@ python main.py --load_adj_net --load --loaded_exp_num 278 \
                --world_model \
                --safety_subgoals --train_safe_model --controller_safe_model \
                --ctrl_crit_lr 0.0 --ctrl_act_lr 0.0 --safe_model_loss_coef 0.0 \
-               --adj_loss_coef 0.0 --safety_loss_coef 400 --max_timesteps 1500000 \
+               --adj_loss_coef 0.0 \
+               --man_rew_scale 1 --goal_loss_coeff 20.0 --safety_loss_coef 400 \
+               --max_timesteps 1500000 \
                --wandb_postfix ""
 
 

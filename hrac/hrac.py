@@ -270,6 +270,7 @@ class Manager(object):
               tau=0.005, a_net=None, r_margin=None):
         print("train subgoal policy")
         avg_act_loss, avg_crit_loss = 0., 0.
+        debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
         if self.safety_subgoals:
@@ -332,11 +333,17 @@ class Manager(object):
             self.actor_optimizer.zero_grad()
 
             # test
-            actor_loss.retain_grad() 
-            goal_loss.retain_grad() 
-            safety_subgoals_loss.retain_grad() 
+            #actor_loss.retain_grad() 
+            #goal_loss.retain_grad() 
+            #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
+
+            with torch.no_grad():
+                manager_actor_grad_norm = (
+                    sum(p.grad.data.norm(2).item() ** 2 for p in self.actor.parameters() if p.grad is not None) ** 0.5
+                )
+                debug_maganer_info["sum_manager_actor_grad_norm"] += manager_actor_grad_norm                
 
             self.actor_optimizer.step()
 
@@ -356,9 +363,10 @@ class Manager(object):
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
+        debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
         if self.safety_subgoals:
             avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
-        return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss
+        return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss, debug_maganer_info
 
     def load_pretrained_weights(self, filename):
         state = torch.load(filename)
