@@ -7,6 +7,7 @@
 
 
 python main.py --load_adj_net --load --loaded_exp_num 278 \
+               --safe_model_grad_clip 200 \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
                --world_model \

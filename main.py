@@ -96,6 +96,7 @@ if __name__ == "__main__":
     # Safety Subgoal Parameters
     # test
     parser.add_argument("--imagined_safety_subgoal", action='store_true', default=False)
+    parser.add_argument("--safe_model_grad_clip", default=0, type=float)
     parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     parser.add_argument("--safety_subgoals", action='store_true', default=False)

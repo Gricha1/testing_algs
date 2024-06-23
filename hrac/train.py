@@ -11,6 +11,9 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from stable_baselines3.common.logger import Video
 
+# test
+#from env_utils import SafetyGymEnv
+
 import hrac.utils as utils
 import hrac.hrac as hrac
 from hrac.models import ANet
@@ -508,43 +511,8 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
 def run_hrac(args):
     print("args:", args)
 
-    if args.use_wandb:
-        wandb_run_name = f"HRAC_{args.env_name}"
-        if args.PPO:
-            wandb_run_name = f"HRAC_PPO_{args.env_name}"
-        wandb_run_name = wandb_run_name + "_" + args.wandb_postfix
-        if args.validate:
-            wandb_run_name = "validate_" + wandb_run_name + "_" + args.wandb_postfix
-        run = wandb.init(
-            project="safe_subgoal_model_based",
-            sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-            name=wandb_run_name,
-            config=args
-        )
-    
-    if not os.path.exists("./results"):
-        os.makedirs("./results")
-    if args.save_models:
-        exp_num = 0
-        while os.path.exists(f"./models/{exp_num}"):
-            exp_num += 1
-        os.makedirs(f"./models/{exp_num}")
-        wandb.config["model_save_path"] = f"./models/{exp_num}"
-    if not os.path.exists(args.log_dir):
-        os.makedirs(args.log_dir)
-    output_dir = os.path.join(args.log_dir, args.algo)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    output_dir += "/" + args.env_name
-    if args.PPO:
-        output_dir += "PPO"
-    output_dir += "_1"    
-    while os.path.exists(output_dir):
-        run_number = int(output_dir.split("_")[-1])
-        output_dir = "_".join(output_dir.split("_")[:-1])
-        output_dir = output_dir + "_" + str(run_number + 1)
-    print("Logging in {}".format(output_dir))
-
+    # Environment initialization
+    ## Ant envs
     if args.env_name == "AntGather":
         env = GatherEnv(create_gather_env(args.env_name, args.seed), args.env_name)
         env.seed(args.seed)   
@@ -563,6 +531,8 @@ def run_hrac(args):
             assert 1 == 0
         if args.env_name == "SafeAntMaze":
             env = SafeMazeAnt(EnvWithGoal(create_maze_env("AntMaze", args.seed, maze_id=maze_id), "AntMaze", maze_id=maze_id))
+            if args.random_start_pose:
+                env.set_train_start_pose_to_random()
         else:
             env = EnvWithGoal(create_maze_env(args.env_name, args.seed, maze_id=maze_id), args.env_name, maze_id=maze_id)
         env.seed(args.seed)
@@ -575,11 +545,27 @@ def run_hrac(args):
             envs.append(env)
             env = MultyEnvWithGoal(envs)
         env.seed(args.seed)
+    ## Safety gym envs
+    elif "Point" in args.env_name:
+        # test
+        DEFAULT_ENV_CONFIG_POINT = dict(
+            action_repeat=1,
+            max_episode_length=750,
+            use_dist_reward=False,
+            stack_obs=False,
+        )
+        robot = 'Point'
+        eplen = 750
+        num_steps = 4.5e5
+        steps_per_epoch = 30000
+        epochs = 60
+        DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
+        env_config=DEFAULT_ENV_CONFIG_POINT
+        #env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
+        #state_dim, action_dim = env.observation_size, env.action_size
+        assert 1 == 0
     else:
         raise NotImplementedError
-    
-    if args.env_name == "SafeAntMaze" and args.random_start_pose:
-        env.set_train_start_pose_to_random()
     
     low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
@@ -601,21 +587,8 @@ def run_hrac(args):
     action_dim = env.action_space.shape[0]
 
     obs = env.reset()
-
     goal = obs["desired_goal"]
     state = obs["observation"]
-
-    writer = SummaryWriter(log_dir=output_dir)
-    torch.cuda.set_device(args.gid)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    file_name = "{}_{}_{}".format(args.env_name, args.algo, args.seed)
-    output_data = {"frames": [], "reward": [], "dist": []}    
-
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
     state_dim = state.shape[0]
     if args.env_name in ["SafeAntMaze", "AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
@@ -623,7 +596,6 @@ def run_hrac(args):
     else:
         goal_dim = 0
 
-    # render
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
     renderer = CustomVideoRendered(env, 
@@ -638,6 +610,58 @@ def run_hrac(args):
     print("*******")
     print()
 
+
+    # Set logger(Wandb logger, SummaryWriter logger) and seeds
+    if args.use_wandb:
+        wandb_run_name = f"HRAC_{args.env_name}"
+        if args.PPO:
+            wandb_run_name = f"HRAC_PPO_{args.env_name}"
+        wandb_run_name = wandb_run_name + "_" + args.wandb_postfix
+        if args.validate:
+            wandb_run_name = "validate_" + wandb_run_name + "_" + args.wandb_postfix
+        run = wandb.init(
+            project="safe_subgoal_model_based",
+            sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+            name=wandb_run_name,
+            config=args
+        )
+    if not os.path.exists("./results"):
+        os.makedirs("./results")
+    if args.save_models:
+        exp_num = 0
+        while os.path.exists(f"./models/{exp_num}"):
+            exp_num += 1
+        os.makedirs(f"./models/{exp_num}")
+        wandb.config["model_save_path"] = f"./models/{exp_num}"
+    if not os.path.exists(args.log_dir):
+        os.makedirs(args.log_dir)
+    output_dir = os.path.join(args.log_dir, args.algo)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    output_dir += "/" + args.env_name
+    if args.PPO:
+        output_dir += "PPO"
+    output_dir += "_1"    
+    while os.path.exists(output_dir):
+        run_number = int(output_dir.split("_")[-1])
+        output_dir = "_".join(output_dir.split("_")[:-1])
+        output_dir = output_dir + "_" + str(run_number + 1)
+
+    print("Logging in {}".format(output_dir))
+    writer = SummaryWriter(log_dir=output_dir)
+    torch.cuda.set_device(args.gid)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    file_name = "{}_{}_{}".format(args.env_name, args.algo, args.seed)
+    output_data = {"frames": [], "reward": [], "dist": []}    
+
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+    # Initialize models
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -676,6 +700,7 @@ def run_hrac(args):
         cost_function=env.cost_func,
         testing_safety_subgoal=args.testing_safety_subgoal,
         testing_mean_wm=args.testing_mean_wm,
+        safe_model_grad_clip=args.safe_model_grad_clip,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -702,8 +727,7 @@ def run_hrac(args):
     manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, ppo_memory=args.PPO)
 
-
-    # Train HRAC or PPO controller
+    ## Train HRAC or PPO controller
     def train_controller(PPO, controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
                          ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
                          ep_manager_reward, total_timesteps):
@@ -752,7 +776,7 @@ def run_hrac(args):
         writer.add_scalar("data/manager_ep_cost", man_episode_cost, total_timesteps)
         writer.add_scalar("data/manager_ep_safety_subgoal_rate", episode_safety_subgoal_rate, total_timesteps)
 
-    # Initialize adjacency matrix and adjacency network
+    ## Initialize adjacency matrix and adjacency network
     n_states = 0
     state_list = []
     state_dict = {}
@@ -765,7 +789,7 @@ def run_hrac(args):
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
-    # initialize world model
+    ## Initialize world model
     num_networks = args.num_networks
     num_elites = args.num_elites
     pred_hidden_size = args.pred_hidden_size
@@ -825,6 +849,7 @@ def run_hrac(args):
         just_loaded = False
 
     if args.validate:
+        # Start validation ...
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
@@ -845,7 +870,8 @@ def run_hrac(args):
         writer.close()
 
     else:
-        # Pretrain adj network for PPO controller
+        # Start training ...
+        ## Pretrain adj network for PPO controller
         if controller_policy.PPO:
             done = True
             print("collecting random episodes for adj network...")
@@ -863,9 +889,9 @@ def run_hrac(args):
                     traj_buffer.append(next_state)
                     state = next_state
 
-        # Collect transitions with random policy
+        ## Collect transitions with random policy for world model, cost model
         done = True
-        print("collecting random episodes...")
+        print("collecting random episodes for world model, cost model...")
         if not just_loaded:
             exploration_total_timesteps = 0
             if args.world_model or args.controller_safe_model:
@@ -882,7 +908,7 @@ def run_hrac(args):
                     state = next_state
                     exploration_total_timesteps += 1
 
-        # Logging Parameters
+        ## Logging Parameters
         total_timesteps = 0
         timesteps_since_eval = 0
         timesteps_since_manager = 0
@@ -892,7 +918,7 @@ def run_hrac(args):
         done = True
         evaluations = []
 
-        # Train
+        ## Main training ...
         print("start training...")
         while total_timesteps < args.max_timesteps:
             if done:
@@ -900,13 +926,13 @@ def run_hrac(args):
                     print("episode num:", episode_num)
                     if episode_num % 10 == 0:
                         print("Episode {}".format(episode_num))
-                    # Train TD3 or PPO controller
+                    ## Train TD3 or PPO controller
                     train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
                                         ep_controller_reward, controller_episode_cost, episode_cost, 
                                         episode_safety_subgoal_rate/episode_subgoals_count, 
                                         ep_manager_reward, total_timesteps)
                         
-                    # Train World Model or Cost Model
+                    ## Train World Model or Cost Model
                     if args.train_safe_model:
                         train_world_cost_model(world_model_buffer, acc_wm_imagination_episode_metric,
                                             train_world_model=False, 
@@ -920,7 +946,7 @@ def run_hrac(args):
                                             controller=controller_policy,
                                             cost_model_iterations=episode_timesteps)
 
-                    # Train manager
+                    ## Train manager
                     if timesteps_since_manager >= args.train_manager_freq:
                         timesteps_since_manager = 0
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
@@ -950,7 +976,7 @@ def run_hrac(args):
                     print("*************")
                     print()
 
-                    # Evaluate
+                    ## Evaluate
                     if timesteps_since_eval >= args.eval_freq:
                         timesteps_since_eval = 0
                         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date =\
@@ -1090,7 +1116,7 @@ def run_hrac(args):
             timesteps_since_manager += 1
             timesteps_since_subgoal += 1
 
-            # logging world model performance
+            ## logging world model performance
             if args.world_model and episode_num > 1:
                 imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
                 prev_imagined_state = imagined_state
@@ -1126,7 +1152,7 @@ def run_hrac(args):
                 timesteps_since_subgoal = 0
                 manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
-        # Final evaluation
+        ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
             env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 

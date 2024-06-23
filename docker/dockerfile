@@ -56,6 +56,12 @@ RUN pip install numpy==1.23.4
 RUN pip install imageio-ffmpeg==0.4.9
 RUN pip install scikit-learn
 
+# Install Safety-Gym
+RUN mkdir -p /usr/home/workspace/safety-gym
+COPY safety-gym /usr/home/workspace/safety-gym
+RUN cd /usr/home/workspace/safety-gym \
+    && pip install -e .
+
 # mb rce deps
 #RUN apt-get install libopenmpi-dev
 #ADD requirements.txt /tmp/

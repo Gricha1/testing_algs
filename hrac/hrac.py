@@ -49,7 +49,8 @@ class Manager(object):
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
                  wm_no_xy=False, safety_subgoals=False, safety_loss_coef=1, img_horizon=10, 
-                 cost_function=None, testing_safety_subgoal=False, testing_mean_wm=False):
+                 cost_function=None, testing_safety_subgoal=False, testing_mean_wm=False,
+                 safe_model_grad_clip=0):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -89,6 +90,7 @@ class Manager(object):
         self.img_horizon = img_horizon
         self.cost_function = cost_function
         self.testing_safety_subgoal = testing_safety_subgoal
+        self.safe_model_grad_clip = safe_model_grad_clip
 
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
@@ -338,6 +340,10 @@ class Manager(object):
             #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
+
+            if self.safe_model_grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
+                                      max_norm=self.safe_model_grad_clip)
 
             with torch.no_grad():
                 manager_actor_grad_norm = (
