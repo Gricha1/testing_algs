@@ -201,7 +201,7 @@ class EnsembleModel(nn.Module):
 
 class EnsembleDynamicsModel():
     #@profile
-    def __init__(self, network_size, elite_size, state_size, action_size, reward_size=0, cost_size=0, hidden_size=200, use_decay=False):
+    def __init__(self, network_size, elite_size, state_size, action_size, reward_size=0, cost_size=0, hidden_size=200, learning_rate=1e-3, use_decay=False):
         self.network_size = network_size
         self.elite_size = elite_size
         self.model_list = []
@@ -211,7 +211,7 @@ class EnsembleDynamicsModel():
         self.cost_size = cost_size
         self.network_size = network_size
         self.elite_model_idxes = []
-        self.ensemble_model = EnsembleModel(state_size, action_size, reward_size, cost_size, network_size, hidden_size, use_decay=use_decay)
+        self.ensemble_model = EnsembleModel(state_size, action_size, reward_size, cost_size, network_size, hidden_size, learning_rate=learning_rate, use_decay=use_decay)
         self.scaler = StandardScaler()
     #@profile
     def train(self, inputs, labels, batch_size=256, holdout_ratio=0., max_epochs_since_update=5):

@@ -694,13 +694,14 @@ def run_hrac(args):
         goal_loss_coeff=args.goal_loss_coeff,
         absolute_goal=args.absolute_goal,
         wm_no_xy=no_xy,
-        safety_subgoals=args.safety_subgoals,
+        modelbased_safety=args.modelbased_safety,
         safety_loss_coef=args.safety_loss_coef,
         img_horizon=args.img_horizon,
         cost_function=env.cost_func,
-        testing_safety_subgoal=args.testing_safety_subgoal,
+        modelfree_safety=args.modelfree_safety,
         testing_mean_wm=args.testing_mean_wm,
         safe_model_grad_clip=args.safe_model_grad_clip,
+        cumul_modelbased_safety=args.cumul_modelbased_safety,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -793,6 +794,7 @@ def run_hrac(args):
     num_networks = args.num_networks
     num_elites = args.num_elites
     pred_hidden_size = args.pred_hidden_size
+    learning_rate = args.wm_learning_rate
     use_decay = args.use_decay
     reward_size = 0
     cost_size = 0
@@ -803,7 +805,7 @@ def run_hrac(args):
             with TensorWrapper():
                 env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
                                                 reward_size, cost_size, pred_hidden_size,
-                                                use_decay=use_decay)
+                                                learning_rate=learning_rate, use_decay=use_decay)
                 predict_env = PredictEnv(env_model, env_name, model_type)
             manager_policy.set_predict_env(predict_env)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)

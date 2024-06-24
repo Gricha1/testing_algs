@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_models", default=True, type=bool)
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
     parser.add_argument("--load", action="store_true", default=False)
-    parser.add_argument("--loaded_exp_num", default=0, type=int)
+    parser.add_argument("--loaded_exp_num", default=0, type=str)
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
@@ -84,6 +84,7 @@ if __name__ == "__main__":
 
     # WorldModel Parameters
     parser.add_argument("--world_model", action='store_true', default=False)
+    parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)
     parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
@@ -95,13 +96,13 @@ if __name__ == "__main__":
 
     # Safety Subgoal Parameters
     # test
-    parser.add_argument("--imagined_safety_subgoal", action='store_true', default=False)
+    parser.add_argument("--modelbased_safety", action='store_true', default=False)
+    parser.add_argument("--modelfree_safety", action='store_true', default=False)
+    parser.add_argument("--cumul_modelbased_safety", action='store_true', default=False)
     parser.add_argument("--safe_model_grad_clip", default=0, type=float)
     parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
-    parser.add_argument("--safety_subgoals", action='store_true', default=False)
     parser.add_argument("--safety_loss_coef", default=200., type=float)
-    parser.add_argument("--testing_safety_subgoal", action='store_true', default=False)
 
     # Safety model Parameters
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
@@ -120,9 +121,9 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    assert not args.safety_subgoals or (args.world_model and args.safety_subgoals or args.testing_safety_subgoal), \
+    assert not args.modelbased_safety or (args.world_model and args.modelbased_safety), \
             " to train safety you need world model"
-    assert not args.testing_safety_subgoal or (args.safety_subgoals and args.testing_safety_subgoal)
+    assert not args.cumul_modelbased_safety or (args.modelbased_safety and args.cumul_modelbased_safety)
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)

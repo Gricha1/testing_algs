@@ -48,9 +48,10 @@ class Manager(object):
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False, safety_subgoals=False, safety_loss_coef=1, img_horizon=10, 
-                 cost_function=None, testing_safety_subgoal=False, testing_mean_wm=False,
-                 safe_model_grad_clip=0):
+                 wm_no_xy=False, modelbased_safety=False, safety_loss_coef=1, img_horizon=10, 
+                 cost_function=None, modelfree_safety=False, testing_mean_wm=False,
+                 safe_model_grad_clip=0,
+                 cumul_modelbased_safety=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -85,11 +86,12 @@ class Manager(object):
         self.testing_mean_wm = testing_mean_wm
 
         # Safety
-        self.safety_subgoals = safety_subgoals
+        self.modelbased_safety = modelbased_safety
+        self.cumul_modelbased_safety = cumul_modelbased_safety
         self.safety_loss_coef = safety_loss_coef
         self.img_horizon = img_horizon
         self.cost_function = cost_function
-        self.testing_safety_subgoal = testing_safety_subgoal
+        self.modelfree_safety = modelfree_safety
         self.safe_model_grad_clip = safe_model_grad_clip
 
     def set_predict_env(self, predict_env):
@@ -164,11 +166,12 @@ class Manager(object):
     def state_safety_on_horizon(self, state, actions, controller_policy, 
                                 max_horizon, safety_cost, 
                                 all_steps_safety=False):
-        manager_proposed_goal = actions
-        next_img_state = state
+        manager_proposed_goal = actions.clone()
+        next_img_state = state.clone()
 
         h = 0
         if all_steps_safety:
+            intermediate_img_states = []
             horizon = self.img_horizon
         else:
             horizon = random.randint(1, self.img_horizon)
@@ -180,16 +183,20 @@ class Manager(object):
                                                 torch_deviced=True,
                                                 testing_mean_pred=self.testing_mean_wm)
             if all_steps_safety:
-                if h == 0:
-                    safety = safety_cost(next_img_state)
-                else:
-                    safety += safety_cost(next_img_state)
+                intermediate_img_states.append(next_img_state.clone())
             manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
                                                                          manager_proposed_goal, 
                                                                          next_img_state)
             h += 1
         if not all_steps_safety:
             safety = safety_cost(next_img_state)
+        else:
+            for idx, state in enumerate(intermediate_img_states):
+                if idx == 0:
+                    safety = safety_cost(state)
+                else:
+                    safety += safety_cost(state)
+
         return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
@@ -202,24 +209,26 @@ class Manager(object):
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
-        if self.safety_subgoals:
-            assert self.testing_safety_subgoal or (not self.testing_safety_subgoal and not(self.predict_env is None)), "world model must be initialized"
-            if self.testing_safety_subgoal:
-                copy_state = state.detach()
-                manager_absolute_goal = actions.clone()
-                manager_absolute_goal += copy_state[:, :actions.shape[1]]
-                zeros_to_add = torch.zeros(actions.shape[0], 
-                                           state.shape[1] - actions.shape[1]).to(device)
-                manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
-                safety_loss = controller_policy.safe_model(manager_absolute_goal)
-                safety_loss = safety_loss.mean()
-            else:
-                safety_loss = self.state_safety_on_horizon(state, actions, 
-                                                           controller_policy, 
-                                                           max_horizon=self.img_horizon,
-                                                           safety_cost=controller_policy.safe_model,
-                                                           all_steps_safety=False)
-                safety_loss = safety_loss.mean()
+        safety_model_based_loss = 0
+        safety_model_free_loss = 0
+        if self.modelbased_safety:
+            assert not(self.predict_env is None), "world model must be initialized"
+            safety_model_based_loss = self.state_safety_on_horizon(state, actions, 
+                                                        controller_policy, 
+                                                        max_horizon=self.img_horizon,
+                                                        safety_cost=controller_policy.safe_model,
+                                                        all_steps_safety=self.cumul_modelbased_safety)
+            safety_model_based_loss = safety_model_based_loss.mean()
+        elif self.modelfree_safety:
+            copy_state = state.detach()
+            manager_absolute_goal = actions.clone()
+            manager_absolute_goal += copy_state[:, :actions.shape[1]]
+            zeros_to_add = torch.zeros(actions.shape[0], 
+                                        state.shape[1] - actions.shape[1]).to(device)
+            manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
+            safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
+            safety_model_free_loss = safety_model_free_loss.mean()
+        safety_loss = safety_model_based_loss + safety_model_free_loss 
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
@@ -275,7 +284,7 @@ class Manager(object):
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
-        if self.safety_subgoals:
+        if self.modelbased_safety or self.modelfree_safety:
             avg_safety_subgoals_loss = 0.
         else:
             avg_safety_subgoals_loss = None
@@ -328,7 +337,7 @@ class Manager(object):
             actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, controller_policy)
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
-            if self.safety_subgoals:
+            if self.modelbased_safety or self.modelfree_safety:
                 actor_loss = actor_loss + self.safety_loss_coef * safety_subgoals_loss
 
             # Optimize the actor
@@ -357,7 +366,7 @@ class Manager(object):
             avg_crit_loss += critic_loss
             if a_net is not None:
                 avg_goal_loss += goal_loss
-            if self.safety_subgoals:
+            if self.modelbased_safety or self.modelfree_safety:
                 avg_safety_subgoals_loss += safety_subgoals_loss
 
             # Update the frozen target models
@@ -370,7 +379,7 @@ class Manager(object):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
         debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
-        if self.safety_subgoals:
+        if self.modelbased_safety or self.modelfree_safety:
             avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
         return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss, debug_maganer_info
 
