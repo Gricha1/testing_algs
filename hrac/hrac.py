@@ -165,7 +165,7 @@ class Manager(object):
     
     def state_safety_on_horizon(self, state, actions, controller_policy, 
                                 max_horizon, safety_cost, 
-                                all_steps_safety=False):
+                                all_steps_safety=False, train=False):
         manager_proposed_goal = actions.clone()
         next_img_state = state.clone()
 
@@ -195,7 +195,8 @@ class Manager(object):
             safety = 0
             for el in safeties:
                 safety += el
-            safety /= self.img_horizon
+            if train:
+                safety /= self.img_horizon
         return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
@@ -216,7 +217,8 @@ class Manager(object):
                                                         controller_policy, 
                                                         max_horizon=self.img_horizon,
                                                         safety_cost=controller_policy.safe_model,
-                                                        all_steps_safety=self.cumul_modelbased_safety)
+                                                        all_steps_safety=self.cumul_modelbased_safety,
+                                                        train=True)
             safety_model_based_loss = safety_model_based_loss.mean()
         elif self.modelfree_safety:
             copy_state = state.detach()
