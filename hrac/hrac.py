@@ -195,6 +195,7 @@ class Manager(object):
             safety = 0
             for el in safeties:
                 safety += el
+            safety /= self.img_horizon
         return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
