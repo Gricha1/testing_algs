@@ -10,8 +10,15 @@ else
     docker_container_idx=$2
 fi
 
+if [ -z "$3" ]; then
+    image_name=hrac_safety_img
+else
+    image_name=$3
+fi
+
 echo "start dockergpu device: $device"
 echo "start docker name: hrac_$docker_container_idx"
+echo "start docker image: $image_name"
 
 cd ..
-docker run -it --rm --name hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace hrac_safety_img "bash"
+docker run -it --rm --name hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace $image_name "bash"
