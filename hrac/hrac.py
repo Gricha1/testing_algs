@@ -50,7 +50,7 @@ class Manager(object):
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
                  wm_no_xy=False, modelbased_safety=False, safety_loss_coef=1, img_horizon=10, 
                  cost_function=None, modelfree_safety=False, testing_mean_wm=False,
-                 safe_model_grad_clip=0,
+                 subgoal_grad_clip=0,
                  cumul_modelbased_safety=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
@@ -92,7 +92,7 @@ class Manager(object):
         self.img_horizon = img_horizon
         self.cost_function = cost_function
         self.modelfree_safety = modelfree_safety
-        self.safe_model_grad_clip = safe_model_grad_clip
+        self.subgoal_grad_clip = subgoal_grad_clip
 
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
@@ -191,11 +191,11 @@ class Manager(object):
         if not all_steps_safety:
             safety = safety_cost(next_img_state)
         else:
-            for idx, state in enumerate(intermediate_img_states):
+            for idx, img_state_ in enumerate(intermediate_img_states):
                 if idx == 0:
-                    safety = safety_cost(state)
+                    safety = safety_cost(img_state_)
                 else:
-                    safety += safety_cost(state)
+                    safety += safety_cost(img_state_)
 
         return safety
             
@@ -350,9 +350,9 @@ class Manager(object):
 
             actor_loss.backward()
 
-            if self.safe_model_grad_clip > 0:
+            if self.subgoal_grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
-                                      max_norm=self.safe_model_grad_clip)
+                                      max_norm=self.subgoal_grad_clip)
 
             with torch.no_grad():
                 manager_actor_grad_norm = (

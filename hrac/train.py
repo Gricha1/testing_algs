@@ -215,7 +215,10 @@ class CustomVideoRendered:
                 t = debug_info["t"]
                 dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
                 dist_a_net_s_g = debug_info["dist_a_net_s_g"]
-                self.render_info["ax_states"].text(env_max_x - 28.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
+                if "imagine_subgoal_safety" in debug_info:
+                    imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
+                    self.render_info["ax_states"].text(env_max_x - 34.5, env_max_y - 2, f"Is:{int(imagine_subgoal_safety*100)/100}")
+                self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
 
@@ -253,6 +256,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             avg_cost = 0.
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
+            avg_episode_real_subgoal_safety = 0
             safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             if controller_policy.use_safe_model:
                 x = safe_dataset[0]
@@ -341,6 +345,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     if env_name == "SafeAntMaze":
                         debug_info["safety_boundary"] = safety_boundary
                         debug_info["safe_dataset"] = safe_dataset
+                        if args.world_model:
+                            debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
@@ -401,6 +407,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             if env_name == "SafeAntMaze":
                 avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
                 avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
+                avg_episode_real_subgoal_safety += episode_cost / episode_subgoals_count
 
         if not args.validation_without_image and not (renderer is None) and not (writer is None):
             writer.add_video(
@@ -413,12 +420,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             
         avg_reward /= eval_episodes
         if env_name == "SafeAntMaze":
-            avg_cost /= eval_episodes
             avg_episode_safety_subgoal_rate /= eval_episodes
             validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
             if args.world_model:
                 avg_episode_imagine_subgoal_safety /= eval_episodes
+                avg_episode_real_subgoal_safety /= eval_episodes
                 validation_date["imagine_subgoal_safety"] = avg_episode_imagine_subgoal_safety
+                validation_date["real_subgoal_safety"] = avg_episode_real_subgoal_safety
+            avg_cost /= eval_episodes
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
         avg_env_finish = goals_achieved / eval_episodes
@@ -700,7 +709,7 @@ def run_hrac(args):
         cost_function=env.cost_func,
         modelfree_safety=args.modelfree_safety,
         testing_mean_wm=args.testing_mean_wm,
-        safe_model_grad_clip=args.safe_model_grad_clip,
+        subgoal_grad_clip=args.subgoal_grad_clip,
         cumul_modelbased_safety=args.cumul_modelbased_safety,
     )
 

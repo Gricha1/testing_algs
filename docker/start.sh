@@ -14,4 +14,4 @@ echo "start dockergpu device: $device"
 echo "start docker name: hrac_$docker_container_idx"
 
 cd ..
-docker run -it --rm --name hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace hrac_img "bash"
+docker run -it --rm --name hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace hrac_safety_img "bash"
