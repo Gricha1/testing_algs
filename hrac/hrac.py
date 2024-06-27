@@ -171,7 +171,7 @@ class Manager(object):
 
         h = 0
         if all_steps_safety:
-            intermediate_img_states = []
+            safeties = []    
             horizon = self.img_horizon
         else:
             horizon = random.randint(1, self.img_horizon)
@@ -183,7 +183,8 @@ class Manager(object):
                                                 torch_deviced=True,
                                                 testing_mean_pred=self.testing_mean_wm)
             if all_steps_safety:
-                intermediate_img_states.append(next_img_state.clone())
+                safety = safety_cost(next_img_state)
+                safeties.append(safety)
             manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
                                                                          manager_proposed_goal, 
                                                                          next_img_state)
@@ -191,12 +192,9 @@ class Manager(object):
         if not all_steps_safety:
             safety = safety_cost(next_img_state)
         else:
-            for idx, img_state_ in enumerate(intermediate_img_states):
-                if idx == 0:
-                    safety = safety_cost(img_state_)
-                else:
-                    safety += safety_cost(img_state_)
-
+            safety = 0
+            for el in safeties:
+                safety += el
         return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
