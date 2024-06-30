@@ -621,7 +621,7 @@ def run_hrac(args):
 
 
     # Set logger(Wandb logger, SummaryWriter logger) and seeds
-    if args.use_wandb:
+    if not args.not_use_wandb:
         wandb_run_name = f"HRAC_{args.env_name}"
         if args.PPO:
             wandb_run_name = f"HRAC_PPO_{args.env_name}"
@@ -641,7 +641,8 @@ def run_hrac(args):
         while os.path.exists(f"./models/{exp_num}"):
             exp_num += 1
         os.makedirs(f"./models/{exp_num}")
-        wandb.config["model_save_path"] = f"./models/{exp_num}"
+        if not args.not_use_wandb:
+            wandb.config["model_save_path"] = f"./models/{exp_num}"
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
     output_dir = os.path.join(args.log_dir, args.algo)
@@ -655,9 +656,13 @@ def run_hrac(args):
         run_number = int(output_dir.split("_")[-1])
         output_dir = "_".join(output_dir.split("_")[:-1])
         output_dir = output_dir + "_" + str(run_number + 1)
+        output_dir += "_" + args.tensorboard_descript
+        output_dir += "_model: " + str(exp_num)
 
     print("Logging in {}".format(output_dir))
     writer = SummaryWriter(log_dir=output_dir)
+    config_text = '\t'.join([f"{key}: {value}" for key, value in vars(args).items()])
+    writer.add_text('Training Configuration', config_text)
     torch.cuda.set_device(args.gid)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -1003,7 +1008,7 @@ def run_hrac(args):
                         for key_ in validation_date:
                             if type(validation_date[key_]) == list:
                                 validation_date[key_] = np.mean(validation_date[key_])
-                            writer.add_scalar(f"eval/{key_}", validation_date[key_], 0)
+                            writer.add_scalar(f"eval/{key_}", validation_date[key_], total_timesteps)
 
                         evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
                         output_data["frames"].append(total_timesteps)

@@ -18,3 +18,7 @@ sh run_exps.sh
 
 # Train AntMaze
 python main.py --env_name AntMaze
+
+
+# Tensorboard logging
+tensorboard --logdir logs --bind_all

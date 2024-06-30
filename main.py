@@ -114,8 +114,10 @@ if __name__ == "__main__":
     parser.add_argument("--man_noise_sigma", default=1., type=float)
 
     # logger
-    parser.add_argument("--use_wandb", default=True, type=bool)
+    parser.add_argument("--not_use_wandb", action='store_true', default=False)
     parser.add_argument("--wandb_postfix", default="", type=str)
+
+    parser.add_argument("--tensorboard_descript", default="", type=str)
 
     # Run the algorithm
     args = parser.parse_args()
