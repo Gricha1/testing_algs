@@ -101,6 +101,8 @@ if __name__ == "__main__":
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--img_horizon", default=20, type=int)
     parser.add_argument("--safety_loss_coef", default=200., type=float)
+    parser.add_argument("--coef_safety_modelbased", default=1.0, type=float)    
+    parser.add_argument("--coef_safety_modelfree", default=1.0, type=float)
 
     # Safety model Parameters
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
@@ -126,6 +128,12 @@ if __name__ == "__main__":
             " to train safety you need world model"
     assert not args.cumul_modelbased_safety or (args.modelbased_safety and args.cumul_modelbased_safety)
     assert args.img_horizon <= args.manager_propose_freq
+
+    if args.modelbased_safety == args.modelfree_safety == True:
+        assert (args.coef_safety_modelbased + args.coef_safety_modelfree) == 1.0
+    if args.modelbased_safety != args.modelfree_safety:
+        assert args.coef_safety_modelbased == 1.0
+        assert args.coef_safety_modelfree == 1.0
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)

@@ -51,7 +51,9 @@ class Manager(object):
                  wm_no_xy=False, modelbased_safety=False, safety_loss_coef=1, img_horizon=10, 
                  cost_function=None, modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
-                 cumul_modelbased_safety=False):
+                 cumul_modelbased_safety=False,
+                 coef_safety_modelbased=1.0,
+                 coef_safety_modelfree=1.0):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -93,6 +95,8 @@ class Manager(object):
         self.cost_function = cost_function
         self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
+        self.coef_safety_modelbased = coef_safety_modelbased
+        self.coef_safety_modelfree = coef_safety_modelfree
 
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
@@ -229,7 +233,14 @@ class Manager(object):
             manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
             safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
-        safety_loss = safety_model_based_loss + safety_model_free_loss 
+        safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
+        safety_norm_factor = 0
+        if self.modelbased_safety:
+            safety_norm_factor += self.coef_safety_modelbased
+        if self.modelfree_safety:
+            safety_norm_factor += self.coef_safety_modelfree
+        if self.modelbased_safety or self.modelfree_safety:
+            safety_loss /= safety_norm_factor
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):

@@ -713,6 +713,8 @@ def run_hrac(args):
         img_horizon=args.img_horizon,
         cost_function=env.cost_func,
         modelfree_safety=args.modelfree_safety,
+        coef_safety_modelbased=args.coef_safety_modelbased,
+        coef_safety_modelfree=args.coef_safety_modelfree,
         testing_mean_wm=args.testing_mean_wm,
         subgoal_grad_clip=args.subgoal_grad_clip,
         cumul_modelbased_safety=args.cumul_modelbased_safety,
