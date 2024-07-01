@@ -652,12 +652,12 @@ def run_hrac(args):
     if args.PPO:
         output_dir += "PPO"
     output_dir += "_1"    
-    while os.path.exists(output_dir):
+    while os.path.exists(output_dir + "_" + args.tensorboard_descript + "_model_" + str(exp_num)):
         run_number = int(output_dir.split("_")[-1])
         output_dir = "_".join(output_dir.split("_")[:-1])
         output_dir = output_dir + "_" + str(run_number + 1)
-        output_dir += "_" + args.tensorboard_descript
-        output_dir += "_model: " + str(exp_num)
+    output_dir += "_" + args.tensorboard_descript
+    output_dir += "_model_" + str(exp_num)
 
     print("Logging in {}".format(output_dir))
     writer = SummaryWriter(log_dir=output_dir)
@@ -980,7 +980,7 @@ def run_hrac(args):
                         for key_ in debug_maganer_info:
                             if type(debug_maganer_info[key_]) == list:
                                 debug_maganer_info[key_] = np.mean(debug_maganer_info[key_])
-                            writer.add_scalar(f"data/{key_}", debug_maganer_info[key_], 0)
+                            writer.add_scalar(f"data/{key_}", debug_maganer_info[key_], total_timesteps)
                         if not(man_safety_loss is None):
                             writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
 
