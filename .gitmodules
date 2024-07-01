@@ -1,0 +1,3 @@
+[submodule "envs"]
+	path = envs
+	url = https://github.com/Gricha1/testing_algs/tree/ant_safety
