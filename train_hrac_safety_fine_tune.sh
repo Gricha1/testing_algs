@@ -8,14 +8,14 @@
 
 python main.py --load_adj_net --load --loaded_exp_num 58_ml5 \
                --modelbased_safety --cumul_modelbased_safety \
-               --safe_model_grad_clip 200 \
+               --subgoal_grad_clip 600 \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
                --world_model --wm_learning_rate 0.0 \
                --train_safe_model --controller_safe_model \
                --ctrl_crit_lr 0.0 --ctrl_act_lr 0.0 --safe_model_loss_coef 0.0 \
                --adj_loss_coef 0.0 \
-               --man_rew_scale 0.1 --goal_loss_coeff 20.0 --safety_loss_coef 1000 \
+               --man_rew_scale 0.1 --goal_loss_coeff 20.0 --safety_loss_coef 1600 \
                --max_timesteps 1500000 \
                --wandb_postfix ""
 

@@ -17,5 +17,5 @@ python main.py --modelbased_safety --modelfree_safety \
                --max_timesteps 1500000 \
                --wandb_postfix "" \
                --not_use_wandb \
-               --tensorboard_descript "safety_mb=0.5, safety_mf=0.5, safety=3000, grad=600"
+               --tensorboard_descript "safety_mb=0.5,_safety_mf=0.5,_safety=3000,_grad=600"
 
