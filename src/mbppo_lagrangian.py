@@ -1,4 +1,7 @@
 #This code is modified for research purpose from Open AI Spinning Up implementation of PPO https://github.com/openai/spinningup (MIT LICENSE which allows for private use, attached  in ./src folder)
+import sys
+import collections
+
 import numpy as np
 import torch
 import wandb
@@ -6,25 +9,24 @@ from torch.optim import Adam
 import safety_gym
 import gym
 import time
-import  core
+import core
+from torch.nn.functional import softplus
+from mpi4py import MPI
+
 from utils.logx import EpochLogger
 from utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
-from torch.nn.functional import softplus
 from env_utils import SafetyGymEnv
-from mpi4py import MPI
+from envs.create_env_utils import create_env
 from aux import dist_xy, get_reward_cost, get_goal_flag, ego_xy, obs_lidar_pseudo, make_observation, generate_lidar
-import random
 from model import EnsembleDynamicsModel
 from predict_env import PredictEnv
 from replay_memory import ReplayMemory
 from tqdm import tqdm
-import sys
+from stable_baselines3.common.logger import Video
 #import lightgbm as lgb
 #from sklearn.ensemble import GradientBoostingClassifier
 #from sklearn.metrics import mean_squared_error,roc_auc_score,precision_score
-import collections
-# import wandb
 
 class PPOBuffer:
     """
@@ -132,7 +134,7 @@ class PPOBuffer:
 def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=dict(), save_freq=1,exp_name='default',beta=1,
+        target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default',beta=1,
         args=None):
     """
     Proximal Policy Optimization (by clipping),
@@ -240,7 +242,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     # Special function to avoid certain slowdowns from PyTorch + MPI combo.
     setup_pytorch_for_mpi()
 
-    # Set up logger and save configuration
     logger = EpochLogger(**logger_kwargs)
     if not logger.use_wandb:
         logger.save_config(locals())
@@ -253,7 +254,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     # Instantiate environment
     env = env_fn()
 
-    obs_dim = env.observation_space.shape
+    #obs_dim = env.observation_space.shape
     #-----------------This dimension size is specific for our use-case in our modified Safety Gym envs-----------------------
     obs_dim = (26,)
     #------------------------------------------------------------------------------------------------------------------------
@@ -458,6 +459,92 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 #-----------------------------------------------------------------------------------------------
         #return cost_clf
 
+    if args.validate:
+        validate_world_model = True
+        start_time = time.time()
+
+        print("validating .....")
+        val_episode = 0
+        screens = []
+        ep_ret, ep_len =  0, 0
+        ep_cost = 0
+        violations = 0
+        epoch = 0
+        megaiter = 0
+        max_training_steps = 0
+
+        if args.exp_name == "SafeAntMaze":
+            assert 1 == 0
+        else:
+            o, static = env.reset()
+            goal_pos = static['goal']
+            hazards_pos = static['hazards']
+        ld = dist_xy(o[40:],goal_pos)
+        val_episode = 0
+        screens = []
+        ep_ret = 0
+        pep_ret = 0
+        ep_cost = 0
+        pep_cost = 0
+        ep_len = 0
+        t = 0
+        max_ep_len2 = 80
+        while True:
+            t += 1
+            #generate hazard lidar
+            obs_vec = generate_lidar(o,hazards_pos)
+            obs_vec = np.array(obs_vec)
+
+            ot = torch.as_tensor(obs_vec,device=cpudevice, dtype=torch.float32)
+            a, v, vc, logp = ac.step(ot)
+            if validate_world_model:
+                with torch.no_grad():
+                    pass
+            del ot
+
+            next_o, r, d, info = env.step(a)
+
+            c = info['cost']
+            violations += c
+            ep_ret += r
+            ep_cost += c
+            ep_len += 1
+
+            dubug_info = {"acc_reward": ep_ret,
+                            "acc_cost": ep_cost,
+                            "t": ep_len}
+            screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+            screens.append(screen.transpose(2, 0, 1))
+
+            # Update obs (critical!)
+            o = next_o
+
+            timeout = ep_len == max_ep_len
+            terminal = d or timeout
+
+            timeout_mixer = ep_len==max_ep_len2
+            terminal_mixer = d or timeout_mixer
+
+            if terminal:
+                logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
+                             PEPRet=pep_ret, PEPCost=pep_cost)
+                break
+                o,static= env.reset()
+                goal_pos = static['goal']
+                hazards_pos = static['hazards']
+                ld = dist_xy(o[40:],goal_pos)
+                ep_ret, ep_len =  0, 0
+                pep_ret,pep_cost  = 0,0
+                ep_cost = 0
+                val_episode += 1
+
+        logger.save_video(screens)
+        logging(logger, epoch, megaiter, 
+                start_time, violations, 
+                max_training_steps, validate=True)
+        print("end validation")
+        return
+
     # Prepare for interaction with environment
     start_time = time.time()
     ep_ret, ep_len =  0, 0
@@ -468,7 +555,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     #------------------Collecting data from real environment----------------------------
     max_training_steps = int(10000/num_procs())
     outer_loop_epochs = int(num_steps/max_training_steps)
-    # custom validation
     validation_episode = 1
     validate_each_epoch = 5
     validate_world_model = True
@@ -476,15 +562,11 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
     for epoch in range(outer_loop_epochs):
         o, static = env.reset()
-
-        # custom validation
-        train_episode = 0
-        logger.custom_video = None
-        screens = []
-
         goal_pos = static['goal']
         hazards_pos = static['hazards']
         ld = dist_xy(o[40:],goal_pos)
+        train_episode = 0
+        screens = []
         ep_ret = 0
         pep_ret = 0
         ep_cost = 0
@@ -567,14 +649,10 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 ep_ret, ep_len =  0, 0
                 pep_ret,pep_cost  = 0,0
                 ep_cost = 0
-                # custom validation
                 train_episode += 1
 
-
-        # custom validation
         if (epoch % validate_each_epoch) == 0:
-            logger.custom_video = screens
-            logger.custom_video = np.transpose(np.array(logger.custom_video), axes=[0, 3, 1, 2])
+            logger.save_video(screens)
         #------------------------Train model dynamics--------------------------
 
         train_predict_model(env_pool, predict_env)
@@ -743,20 +821,35 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 update()
 
         # custom validation
-        if (epoch % validate_each_epoch) == 0:
+        if (epoch % validate_each_epoch) == 0 and not args.not_use_wandb:
             video = wandb.Video(logger.custom_video, fps=10, format="gif", caption=f"epoch: {epoch}")
             logger.wandb_dict["video"] = video
+        # test
+        #elif (epoch % validate_each_epoch) == 0:
+        #    writer.add_video(
+        #        "eval/pos_video",
+        #        torch.ByteTensor([positions_screens]),
+        #        total_timesteps,
+        #    )
             
-        logger.store(Megaiter=megaiter)
-        # Log info about epoch
-        logger.log_tabular('Epoch', epoch)
-        logger.log_tabular('EpRet', with_min_and_max=True)
-        logger.log_tabular('EpCost', with_min_and_max=True)
-        logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('PEPRet', with_min_and_max=True)
-        logger.log_tabular('PEPCost', with_min_and_max=True)
-        # logger.log_tabular('VVals', with_min_and_max=True)
-        #-------------no. of environment interaction per epoch = max_training_steps = 1e4 --------------------
+        logging(logger, epoch, megaiter, 
+                start_time, violations, 
+                max_training_steps)
+
+def logging(logger, epoch, megaiter, 
+            start_time, violations, 
+            max_training_steps, validate=False):
+    logger.store(Megaiter=megaiter)
+    # Log info about epoch
+    logger.log_tabular('Epoch', epoch)
+    logger.log_tabular('EpRet', with_min_and_max=True)
+    logger.log_tabular('EpCost', with_min_and_max=True)
+    logger.log_tabular('EpLen', average_only=True)
+    logger.log_tabular('PEPRet', with_min_and_max=True)
+    logger.log_tabular('PEPCost', with_min_and_max=True)
+    # logger.log_tabular('VVals', with_min_and_max=True)
+    #-------------no. of environment interaction per epoch = max_training_steps = 1e4 --------------------
+    if not validate:
         logger.log_tabular('TotalEnvInteracts', (epoch+1)*max_training_steps)
         logger.log_tabular('DynaEpRet', with_min_and_max=True)
         logger.log_tabular('DynaEpCost',with_min_and_max=True)
@@ -770,16 +863,22 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         logger.log_tabular('Entropy', average_only=True)
         logger.log_tabular('KL', average_only=True)
         logger.log_tabular('ClipFrac', average_only=True)
-        #logger.log_tabular('StopIter', average_only=True)
-        logger.log_tabular('Time', time.time()-start_time)
-        logger.log_tabular('Violations', violations)
+    #logger.log_tabular('StopIter', average_only=True)
+    logger.log_tabular('Time', time.time()-start_time)
+    logger.log_tabular('Violations', violations)
 
-        logger.dump_tabular()
+    logger.dump_tabular(epoch)
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='Safexp-PointGoal2-v0')
+    parser.add_argument('--validate', action='store_true', default=False)
+    parser.add_argument('--vizualize_validation', action='store_true', default=False)
+
+    # environment
+    parser.add_argument('--env_name', type=str, default='Safexp-PointGoal2-v0')
+    parser.add_argument("--random_start_pose", action="store_true", default=False)
+
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
@@ -793,12 +892,19 @@ if __name__ == '__main__':
     parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
     # world model
+    parser.add_argument("--world_model", default=True)
     parser.add_argument('--pred_hidden_size', default=200, type=int)
     parser.add_argument('--num_networks', default=8, type=int)
     parser.add_argument('--num_elites', default=6, type=int)
     # actor critic
+    parser.add_argument("--controller_safe_model", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
     parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
+
+    # logger
+    parser.add_argument("--log_dir", default="./data", type=str)
+    parser.add_argument("--not_use_wandb", action='store_true', default=False)
+    parser.add_argument("--tensorboard_descript", default="", type=str)
 
     args = parser.parse_args()
     print("config:", args)
@@ -810,10 +916,6 @@ if __name__ == '__main__':
 
 
     #if rank>0:
-
-    from utils.run_utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
-    logger_kwargs["config"] = args
     #=================safety gym benchmarks defaults==============================
     num_steps = 4.5e5
     steps_per_epoch = 30000
@@ -826,23 +928,27 @@ if __name__ == '__main__':
         use_dist_reward=False,
         stack_obs=False,
     )
-    if "Point" in args.env:
-        robot = 'Point'
-        eplen = 750
-        num_steps = 4.5e5
-        steps_per_epoch = 30000
-        epochs = 60
-        DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-    elif "Car" in args.env:
-        robot = 'Car'
-        eplen = 750
-        DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-        num_steps = 4.5e5
-        steps_per_epoch = 30000
-        epochs = 60
-    env_config=DEFAULT_ENV_CONFIG_POINT
-    env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
-    state_dim, action_dim = env.observation_size, env.action_size
+    if "Point" in args.env_name or "Car" in args.env_name:
+        if "Point" in args.env_name:
+            robot = 'Point'
+            eplen = 750
+            num_steps = 4.5e5
+            steps_per_epoch = 30000
+            epochs = 60
+            DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
+        elif "Car" in args.env_name:
+            robot = 'Car'
+            eplen = 750
+            DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
+            num_steps = 4.5e5
+            steps_per_epoch = 30000
+            epochs = 60
+        env_config=DEFAULT_ENV_CONFIG_POINT
+        env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
+        state_dim, action_dim = env.observation_size, env.action_size
+
+    else:
+        env, state_dim, goal_dim, action_dim, renderer = create_env(args)
 
     if proc_id()==0:
         num_networks = args.num_networks
@@ -861,6 +967,19 @@ if __name__ == '__main__':
         predict_env = PredictEnv(env_model, env_name, model_type)
     else:
         assert 1 == 0
+
+    # Set up logger and save configuration
+    from utils.run_utils import setup_logger_kwargs
+    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+    logger_kwargs["config"] = args
+    logger_kwargs["use_wandb"] = not args.not_use_wandb
+    logger_kwargs["tensorboard_log_dir"] = args.log_dir
+    logger_kwargs["tensorboard_env_name"] = args.env_name
+    logger_kwargs["tensorboard_descript"] = args.tensorboard_descript
+    logger_kwargs["vizualize_validation"] = args.vizualize_validation
+    # test
+    logger_kwargs["exp_num"] = 0
+
     #-----------------------------------------------------------------------------
 
     ppo(lambda : env, args.cost_limit, actor_critic=core.MLPActorCritic,

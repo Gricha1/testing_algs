@@ -15,6 +15,7 @@ import os.path as osp, time, atexit, os
 import warnings
 from .mpi_tools import proc_id, mpi_statistics_scalar
 from .serialization_utils import convert_json
+from torch.utils.tensorboard import SummaryWriter
 
 import wandb
 
@@ -78,7 +79,13 @@ class Logger:
     state of a training run, and the trained model.
     """
 
-    def __init__(self, output_dir=None, output_fname='progress.txt', exp_name=None, config=None):
+    def __init__(self, output_dir=None, output_fname='progress.txt', 
+                 exp_name=None, config=None, use_wandb=None,
+                 tensorboard_log_dir=None,
+                 tensorboard_env_name=None,
+                 tensorboard_descript=None,
+                 exp_num=0,
+                 vizualize_validation=False):
         """
         Initialize a Logger.
 
@@ -114,7 +121,23 @@ class Logger:
         self.log_current_row = {}
         self.exp_name = exp_name
         # add wandb logging
-        self.use_wandb = True
+        self.use_wandb = use_wandb
+        self.use_tensorboard = True
+        if self.use_tensorboard:
+            self.vizualize_validation = vizualize_validation
+            log_dir=tensorboard_log_dir
+            output_dir = os.path.join(log_dir)
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            output_dir += "/" + tensorboard_env_name
+            output_dir += "_1"    
+            while os.path.exists(output_dir + "_" + tensorboard_descript + "_model: " + str(exp_num)):
+                run_number = int(output_dir.split("_")[-1])
+                output_dir = "_".join(output_dir.split("_")[:-1])
+                output_dir = output_dir + "_" + str(run_number + 1)
+            output_dir += "_" + tensorboard_descript + "_model_" + str(exp_num)
+            self.writer = SummaryWriter(log_dir=output_dir)
+            self.tensorboard_dict = {}
         if self.use_wandb:
             self.custom_video = None
             if config:
@@ -152,6 +175,8 @@ class Logger:
             assert key in self.log_headers, "Trying to introduce a new key %s that you didn't include in the first iteration"%key
         assert key not in self.log_current_row, "You already set %s this iteration. Maybe you forgot to call dump_tabular()"%key
         self.log_current_row[key] = val
+        if self.use_tensorboard:
+            self.tensorboard_dict[key] = val
         if self.use_wandb:
             self.wandb_dict[key] = val
 
@@ -181,6 +206,10 @@ class Logger:
             print(output)
             with open(osp.join(self.output_dir, "config.json"), 'w') as out:
                 out.write(output)
+    
+    def save_video(self, screens):
+        self.custom_video = screens
+        #self.custom_video = np.transpose(np.array(custom_video), axes=[0, 3, 1, 2])
 
     def save_state(self, state_dict, itr=None):
         """
@@ -295,7 +324,7 @@ class Logger:
                 torch.save(self.pytorch_saver_elements, fname)
 
 
-    def dump_tabular(self):
+    def dump_tabular(self, epoch):
         """
         Write all of the diagnostics from the current iteration.
 
@@ -322,6 +351,17 @@ class Logger:
                 self.output_file.flush()
         self.log_current_row.clear()
         self.first_row=False
+        if self.use_tensorboard:
+            for key_ in self.tensorboard_dict:
+                self.writer.add_scalar(f"data/{key_}", self.tensorboard_dict[key], epoch)
+            if self.vizualize_validation:
+                print("self.custom_video:", len(self.custom_video))
+                print("video:", self.custom_video[0].shape)
+                self.writer.add_video(
+                    "data/pos_video",
+                    torch.ByteTensor(np.array([self.custom_video])),
+                    epoch,
+                )
         if self.use_wandb:
             self.run_wandb.log(self.wandb_dict)
             del self.custom_video
