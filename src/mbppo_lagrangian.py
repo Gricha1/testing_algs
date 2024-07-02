@@ -135,7 +135,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
         target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default',beta=1,
-        args=None):
+        args=None, state_dim=0, action_dim=0):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -256,9 +256,12 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
     #obs_dim = env.observation_space.shape
     #-----------------This dimension size is specific for our use-case in our modified Safety Gym envs-----------------------
-    obs_dim = (26,)
-    #------------------------------------------------------------------------------------------------------------------------
-    act_dim = env.action_space.shape
+    if args.env_name == "SafeAntMaze":
+        obs_dim = (state_dim, )
+        act_dim = action_dim
+    else:
+        obs_dim = (26,)
+        act_dim = env.action_space.shape
 
     # Create actor-critic module
     ac = actor_critic(obs_dim, env.action_space, **ac_kwargs)
@@ -295,12 +298,10 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
         clip_cadv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * cadv
         loss_cpi = (torch.max(ratio * cadv, clip_cadv)).mean()
-        #loss_cpi = ratio*cadv
         loss_cpi = loss_cpi.mean()
 
         p = softplus(penalty_param)
         penalty_item = p.item()
-        #wandb.log({'penalty':p.item()})
 
         pi_objective = loss_rpi - penalty_item*loss_cpi
         ent_coef = 0.0 #1*pi.entropy().mean()
@@ -323,9 +324,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     # Set up function for computing value loss
     def compute_loss_v(data):
         obs, ret, cret = data['obs'], data['ret'], data['cret']
-        # obs.to(cpudevice)
-        # ret.to(cpudevice)
-        # cret.to(cpudevice)
         return ((ac.v(obs) - ret)**2).mean(),((ac.vc(obs) - cret)**2).mean()
 
 
@@ -473,14 +471,15 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         megaiter = 0
         max_training_steps = 0
 
-        if args.exp_name == "SafeAntMaze":
-            assert 1 == 0
+        if args.env_name == "SafeAntMaze":
+            obs = env.reset(eval_idx=val_episode)
+            goal_pos = obs["desired_goal"]
+            o = obs["observation"]            
         else:
             o, static = env.reset()
             goal_pos = static['goal']
             hazards_pos = static['hazards']
-        ld = dist_xy(o[40:],goal_pos)
-        val_episode = 0
+        #ld = dist_xy(o[40:],goal_pos)        
         screens = []
         ep_ret = 0
         pep_ret = 0
@@ -491,10 +490,13 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         max_ep_len2 = 80
         while True:
             t += 1
-            #generate hazard lidar
-            obs_vec = generate_lidar(o,hazards_pos)
-            obs_vec = np.array(obs_vec)
-
+            if args.env_name == "SafeAntMaze":
+                obs_vec = o
+            else:
+                #generate hazard lidar
+                obs_vec = generate_lidar(o,hazards_pos)
+                obs_vec = np.array(obs_vec)
+            
             ot = torch.as_tensor(obs_vec,device=cpudevice, dtype=torch.float32)
             a, v, vc, logp = ac.step(ot)
             if validate_world_model:
@@ -504,7 +506,11 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
             next_o, r, d, info = env.step(a)
 
-            c = info['cost']
+            if args.env_name == "SafeAntMaze": 
+                next_o = next_o["observation"]               
+                c = info['safety_cost']
+            else:
+                c = info['cost']
             violations += c
             ep_ret += r
             ep_cost += c
@@ -513,8 +519,12 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             dubug_info = {"acc_reward": ep_ret,
                             "acc_cost": ep_cost,
                             "t": ep_len}
-            screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
-            screens.append(screen.transpose(2, 0, 1))
+            if args.env_name == "SafeAntMaze":
+                # test
+                pass    
+            else:
+                screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+                screens.append(screen.transpose(2, 0, 1))
 
             # Update obs (critical!)
             o = next_o
@@ -532,13 +542,17 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 o,static= env.reset()
                 goal_pos = static['goal']
                 hazards_pos = static['hazards']
-                ld = dist_xy(o[40:],goal_pos)
+                #ld = dist_xy(o[40:],goal_pos)
                 ep_ret, ep_len =  0, 0
                 pep_ret,pep_cost  = 0,0
                 ep_cost = 0
                 val_episode += 1
 
-        logger.save_video(screens)
+        # test
+        if args.env_name == "SafeAntMaze":
+            pass
+        else:
+            logger.save_video(screens)
         logging(logger, epoch, megaiter, 
                 start_time, violations, 
                 max_training_steps, validate=True)
@@ -592,16 +606,19 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             next_o, r, d, info = env.step(a)
 
             if not d and not info['goal_met']:
-                env_pool.push(o, a, r, info['cost'], next_o, d)
+                if args.env_name == "SafeAntMaze":
+                    env_pool.push(o, a, r, info['safety_cost'], next_o, d)
+                else:
+                    env_pool.push(o, a, r, info['cost'], next_o, d)
 
-
-            c = info['cost']
+            if args.env_name == "SafeAntMaze":
+                c = info['safety_cost']
+            else:
+                c = info['cost']
             violations += c
             ep_ret += r
             ep_cost += c
             ep_len += 1
-
-            # custom validation
             if train_episode == validation_episode and (epoch % validate_each_epoch) == 0:
                 dubug_info = {"acc_reward": ep_ret,
                               "acc_cost": ep_cost,
@@ -986,4 +1003,4 @@ if __name__ == '__main__':
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs,max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name=args.exp_name,beta=args.beta,
-        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args)
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, action_dim=action_dim)

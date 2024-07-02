@@ -49,6 +49,10 @@ RUN apt-get install libopenmpi-dev
 RUN pip install mpi4py
 RUN pip install matplotlib
 
+RUN pip install stable_baselines3 --no-deps
+RUN pip install gymnasium
+RUN pip install pandas
+
 WORKDIR /usr/home/workspace
 
 # install safety gym
