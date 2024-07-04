@@ -8,17 +8,21 @@ from envs.plots import plot_values
 
 
 class CustomVideoRendered:
-    def __init__(self, env, world_model, controller_safe_model):
+    def __init__(self, env, controller_safe_model, 
+                 world_model_comparsion=True, plot_subgoal=True, 
+                 plot_safety_boundary=True):
         # config
         self.add_subgoal_values = False
         self.add_mesurements = True
-        self.plot_safe_dataset = False        
+        self.plot_safe_dataset = False    
+        self.plot_subgoal = plot_subgoal  
+        self.plot_safety_boundary = plot_safety_boundary  
 
         self.render_info = {}
         self.render_info["fig"] = None
         self.render_info["ax_states"] = None
         self.env = env
-        self.world_model_comparsion = world_model
+        self.world_model_comparsion = world_model_comparsion
         self.controller_safe_model = controller_safe_model
         self.shift_x = env.render_info["shift_x"]
         self.shift_y = env.render_info["shift_y"]
@@ -47,9 +51,10 @@ class CustomVideoRendered:
                       plot_goal=True, debug_info={}, shape=(600, 600), 
                       env_name="", safe_model=None):    
         assert "robot_pos" in current_step_info and \
-               "subgoal_pos" in current_step_info and \
                "goal_pos" in current_step_info and \
                "robot_radius" in current_step_info
+        if self.plot_subgoal:
+            assert "subgoal_pos" in current_step_info
 
         shift_x, shift_y = self.shift_x, self.shift_y
         env_min_x, env_max_x = self.render_info["env_min_x"], self.render_info["env_max_x"]
@@ -92,14 +97,15 @@ class CustomVideoRendered:
             self.world_model_poses.append((x - shift_x, y - shift_y))   
 
         # subgoal
-        x = current_step_info["subgoal_pos"][0] + shift_x
-        y = current_step_info["subgoal_pos"][1] + shift_y
-        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
-        self.render_info["ax_states"].add_patch(circle_robot)
-        self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
-        if self.add_subgoal_values:
-            self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
-            self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
+        if self.plot_subgoal:
+            x = current_step_info["subgoal_pos"][0] + shift_x
+            y = current_step_info["subgoal_pos"][1] + shift_y
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+            self.render_info["ax_states"].add_patch(circle_robot)
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
+            if self.add_subgoal_values:
+                self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
+                self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
 
         # goal
         if env_name != "AntGather" and env_name != "AntMazeSparse" and plot_goal:
@@ -123,33 +129,34 @@ class CustomVideoRendered:
                         safe_model, render_info=self.render_info, return_cb=True)
 
         # safety boundary
-        safety_boundary = debug_info["safety_boundary"]
-        if self.controller_safe_model:
-            safe_dataset = debug_info["safe_dataset"]
-        xs = [point.render_x for point in safety_boundary]
-        ys = [point.render_y for point in safety_boundary]
-        self.render_info["ax_states"].plot(xs, ys, 'b')
-        if self.world_model_comparsion or self.controller_safe_model:
-            xs = [point.x for point in safety_boundary]
-            ys = [point.y for point in safety_boundary]
-            self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
-            # safe dataset check
-            if self.controller_safe_model and self.plot_safe_dataset:
-                xs_dataset = safe_dataset[0]
-                ys_dataset = safe_dataset[1]
-                x1s_unsafe = []
-                x2s_unsafe = []
-                x1s_safe = []
-                x2s_safe = []
-                for i in range(len(ys_dataset)):
-                    if ys_dataset[i] == 1:
-                        x1s_unsafe.append(xs_dataset[i][0])
-                        x2s_unsafe.append(xs_dataset[i][1])
-                    else:
-                        x1s_safe.append(xs_dataset[i][0])
-                        x2s_safe.append(xs_dataset[i][1])
-                self.render_info["ax_world_model_robot_trajectories"].plot(x1s_unsafe, x2s_unsafe, 'r')
-                self.render_info["ax_world_model_robot_trajectories"].plot(x1s_safe, x2s_safe, 'g')
+        if self.plot_safety_boundary:
+            safety_boundary = debug_info["safety_boundary"]
+            if self.controller_safe_model:
+                safe_dataset = debug_info["safe_dataset"]
+            xs = [point.render_x for point in safety_boundary]
+            ys = [point.render_y for point in safety_boundary]
+            self.render_info["ax_states"].plot(xs, ys, 'b')
+            if self.world_model_comparsion or self.controller_safe_model:
+                xs = [point.x for point in safety_boundary]
+                ys = [point.y for point in safety_boundary]
+                self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
+                # safe dataset check
+                if self.controller_safe_model and self.plot_safe_dataset:
+                    xs_dataset = safe_dataset[0]
+                    ys_dataset = safe_dataset[1]
+                    x1s_unsafe = []
+                    x2s_unsafe = []
+                    x1s_safe = []
+                    x2s_safe = []
+                    for i in range(len(ys_dataset)):
+                        if ys_dataset[i] == 1:
+                            x1s_unsafe.append(xs_dataset[i][0])
+                            x2s_unsafe.append(xs_dataset[i][1])
+                        else:
+                            x1s_safe.append(xs_dataset[i][0])
+                            x2s_safe.append(xs_dataset[i][1])
+                    self.render_info["ax_world_model_robot_trajectories"].plot(x1s_unsafe, x2s_unsafe, 'r')
+                    self.render_info["ax_world_model_robot_trajectories"].plot(x1s_safe, x2s_safe, 'g')
 
             
         # print maze
@@ -181,20 +188,27 @@ class CustomVideoRendered:
                 self.render_info["ax_states"].add_patch(item_)
                 
         
-        if self.add_mesurements:    
-            # debug info
+        if self.add_mesurements: 
+            assert "acc_reward" in debug_info 
+            assert "acc_cost" in debug_info
+            assert "t" in debug_info
             if len(debug_info) != 0:
+                # main
                 acc_reward = debug_info["acc_reward"]
                 acc_cost = debug_info["acc_cost"]
-                acc_controller_reward = debug_info["acc_controller_reward"]
                 t = debug_info["t"]
-                dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
-                dist_a_net_s_g = debug_info["dist_a_net_s_g"]
+                # option
+                if "acc_controller_reward" in debug_info:
+                    acc_controller_reward = debug_info["acc_controller_reward"]
+                    self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
+                if "dist_a_net_s_sg" in debug_info:
+                    dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
+                if "dist_a_net_s_g" in debug_info:
+                    dist_a_net_s_g = debug_info["dist_a_net_s_g"]
                 if "imagine_subgoal_safety" in debug_info:
                     imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
                     self.render_info["ax_states"].text(env_max_x - 34.5, env_max_y - 2, f"Is:{int(imagine_subgoal_safety*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
-                self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
 
         # render img
@@ -211,7 +225,7 @@ class CustomVideoRendered:
         return data
 
 
-def create_env(args):
+def create_env(args, renderer_args={}):
     # Env initialization
     ## Ant envs
     if args.env_name == "AntGather":
@@ -282,8 +296,8 @@ def create_env(args):
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
 
-    renderer = CustomVideoRendered(env, 
-                                   world_model=args.world_model, 
-                                   controller_safe_model=args.controller_safe_model)
+    renderer = CustomVideoRendered(env,  
+                                   controller_safe_model=args.controller_safe_model,
+                                   **renderer_args)
 
     return env, state_dim, goal_dim, action_dim, renderer
