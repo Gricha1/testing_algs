@@ -153,7 +153,7 @@ class SafetyGymEnv():
     def render(self):
         self.env.render()
 
-    def custom_render(self, positions_render=False, dubug_info={}, shape=(600, 600)):
+    def custom_render(self, positions_render=False, debug_info={}, shape=(600, 600)):
 
         # from src/aux.py
         hazards_size = 0.2

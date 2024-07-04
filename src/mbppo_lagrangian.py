@@ -135,7 +135,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
         target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default',beta=1,
-        args=None, state_dim=0, action_dim=0):
+        args=None, state_dim=0, action_dim=0, renderer=None):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -516,14 +516,27 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             ep_cost += c
             ep_len += 1
 
-            dubug_info = {"acc_reward": ep_ret,
-                            "acc_cost": ep_cost,
-                            "t": ep_len}
-            if args.env_name == "SafeAntMaze":
-                # test
-                pass    
+            debug_info = {"acc_reward": ep_ret,
+                          "acc_cost": ep_cost,
+                          "t": ep_len}
+            current_step_info = {}
+            current_step_info["robot_pos"] = np.array(o[:2])
+            if args.env_name != "AntGather" and args.env_name != "AntMazeSparse":
+                current_step_info["goal_pos"] = np.array(goal_pos[:2])
             else:
-                screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+                current_step_info["goal_pos"] = None
+            current_step_info["robot_radius"] = 1.5
+            if args.env_name == "SafeAntMaze" and args.vizualize_validation:
+                if t == 1:
+                    renderer.setup_renderer()
+                screen = renderer.custom_render(current_step_info, 
+                                                debug_info=debug_info, 
+                                                plot_goal=True,
+                                                env_name=args.env_name,
+                                                safe_model=None)
+                screens.append(screen.transpose(2, 0, 1)) 
+            elif args.vizualize_validation:
+                screen = env.custom_render(positions_render=True, debug_info=debug_info)
                 screens.append(screen.transpose(2, 0, 1))
 
             # Update obs (critical!)
@@ -548,11 +561,13 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 ep_cost = 0
                 val_episode += 1
 
-        # test
-        if args.env_name == "SafeAntMaze":
-            pass
-        else:
+        if args.env_name == "SafeAntMaze" and args.vizualize_validation:
             logger.save_video(screens)
+            del screens
+            renderer.delete_data()
+        elif args.vizualize_validation:
+            logger.save_video(screens)
+            del screens
         logging(logger, epoch, megaiter, 
                 start_time, violations, 
                 max_training_steps, validate=True)
@@ -620,10 +635,10 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             ep_cost += c
             ep_len += 1
             if train_episode == validation_episode and (epoch % validate_each_epoch) == 0:
-                dubug_info = {"acc_reward": ep_ret,
+                debug_info = {"acc_reward": ep_ret,
                               "acc_cost": ep_cost,
                               "t": ep_len}
-                screen = env.custom_render(positions_render=True, dubug_info=dubug_info)
+                screen = env.custom_render(positions_render=True, debug_info=debug_info)
                 screens.append(screen)
 
             #Mixing some real environment samples
@@ -965,7 +980,10 @@ if __name__ == '__main__':
         state_dim, action_dim = env.observation_size, env.action_size
 
     else:
-        env, state_dim, goal_dim, action_dim, renderer = create_env(args)
+        renderer_args = {"plot_subgoal": False, 
+                         "world_model_comparsion": False,
+                         "plot_safety_boundary": False}
+        env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
 
     if proc_id()==0:
         num_networks = args.num_networks
@@ -1003,4 +1021,5 @@ if __name__ == '__main__':
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs,max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name=args.exp_name,beta=args.beta,
-        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, action_dim=action_dim)
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, action_dim=action_dim,
+        renderer=renderer)
