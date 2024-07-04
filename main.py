@@ -55,6 +55,7 @@ if __name__ == "__main__":
     parser.add_argument("--man_discount", default=0.99, type=float)
 
     # TD3 Controller Parameters
+    parser.add_argument("--controller_grad_clip", default=0, type=float)
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
     parser.add_argument("--ctrl_batch_size", default=128, type=int)
     parser.add_argument("--ctrl_buffer_size", default=2e5, type=int)
@@ -105,6 +106,8 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelfree", default=1.0, type=float)
 
     # Safety model Parameters
+    parser.add_argument("--controller_safety_coef", default=4000., type=float)
+    parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     parser.add_argument("--train_safe_model", action='store_true', default=False)

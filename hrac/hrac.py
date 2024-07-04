@@ -170,6 +170,8 @@ class Manager(object):
     def state_safety_on_horizon(self, state, actions, controller_policy, 
                                 max_horizon, safety_cost, 
                                 all_steps_safety=False, train=False):
+
+        assert not(self.predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
         next_img_state = state.clone()
 
@@ -181,11 +183,11 @@ class Manager(object):
             horizon = random.randint(1, self.img_horizon)
         while h < horizon:
             img_state = next_img_state
-            ctrl_actions = controller_policy.actor(img_state, manager_proposed_goal) 
+            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
             next_img_state = self.predict_env.step(img_state, ctrl_actions, 
-                                                deterministic=True, 
-                                                torch_deviced=True,
-                                                testing_mean_pred=self.testing_mean_wm)
+                                                    deterministic=True, 
+                                                    torch_deviced=True,
+                                                    testing_mean_pred=self.testing_mean_wm)
             if all_steps_safety:
                 safety = safety_cost(next_img_state)
                 safeties.append(safety)
@@ -216,7 +218,6 @@ class Manager(object):
         safety_model_based_loss = 0
         safety_model_free_loss = 0
         if self.modelbased_safety:
-            assert not(self.predict_env is None), "world model must be initialized"
             safety_model_based_loss = self.state_safety_on_horizon(state, actions, 
                                                         controller_policy, 
                                                         max_horizon=self.img_horizon,
@@ -291,7 +292,6 @@ class Manager(object):
 
     def train(self, controller_policy, replay_buffer, iterations, batch_size=100, discount=0.99,
               tau=0.005, a_net=None, r_margin=None):
-        print("train subgoal policy")
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
@@ -431,7 +431,8 @@ class Controller(object):
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
                  weight_decay_ppo=None, use_safe_model=False, cost_function=None,
-                 safe_model_loss_coef=1.0,
+                 safe_model_loss_coef=1.0, controller_imagination_safety_loss=False,
+                 manager=None, controller_grad_clip=0, controller_safety_coef=0,
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -447,6 +448,12 @@ class Controller(object):
 
         self.use_safe_model = use_safe_model
         self.train_safe_model = False
+        self.manager = manager
+        self.controller_imagination_safety_loss = controller_imagination_safety_loss
+        self.controller_safety_coef = controller_safety_coef
+        self.controller_grad_clip = controller_grad_clip
+        if self.controller_imagination_safety_loss:
+            assert self.manager
         if use_safe_model:
             assert not(cost_function is None)
             self.cost_function = cost_function
@@ -520,9 +527,18 @@ class Controller(object):
         action = get_tensor(action)
         return self.critic(state, sg, action)
 
-    def actor_loss(self, state, sg):
+    def actor_loss(self, state, sg, init_state):
         if self.PPO: assert 1 == 0
-        return -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
+        actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
+        if self.controller_imagination_safety_loss:
+            safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
+                                                                controller_policy=self, 
+                                                                max_horizon=self.manager.img_horizon,
+                                                                safety_cost=self.safe_model,
+                                                                all_steps_safety=False,
+                                                                train=True)
+            actor_loss += self.controller_safety_coef * safety_loss.mean()
+        return actor_loss
 
     def subgoal_transition(self, state, subgoal, next_state):
         if self.absolute_goal:
@@ -689,11 +705,14 @@ class Controller(object):
                     debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
 
                 # Compute actor loss
-                actor_loss = self.actor_loss(state, sg)
+                actor_loss = self.actor_loss(state, sg, init_state)
 
                 # Optimize the actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
+                if self.controller_grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
+                                        max_norm=self.controller_grad_clip)
                 self.actor_optimizer.step()
 
                 avg_act_loss += actor_loss

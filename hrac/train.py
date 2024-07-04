@@ -399,26 +399,6 @@ def run_hrac(args):
 
 
     # Initialize models
-    controller_policy = hrac.Controller(
-        state_dim=state_dim,
-        goal_dim=controller_goal_dim,
-        action_dim=action_dim,
-        max_action=max_action,
-        actor_lr=args.ctrl_act_lr,
-        critic_lr=args.ctrl_crit_lr,
-        ppo_lr=args.ppo_lr,
-        no_xy=no_xy,
-        absolute_goal=args.absolute_goal,
-        policy_noise=policy_noise,
-        noise_clip=noise_clip,
-        PPO=args.PPO,
-        hidden_dim_ppo=args.ppo_hidden_dim,
-        weight_decay_ppo=args.ppo_weight_decay,
-        cost_function=env.cost_func,
-        use_safe_model=args.controller_safe_model,
-        safe_model_loss_coef=args.safe_model_loss_coef,
-    )
-
     manager_policy = hrac.Manager(
         state_dim=state_dim,
         goal_dim=goal_dim,
@@ -441,6 +421,30 @@ def run_hrac(args):
         testing_mean_wm=args.testing_mean_wm,
         subgoal_grad_clip=args.subgoal_grad_clip,
         cumul_modelbased_safety=args.cumul_modelbased_safety,
+    )
+    
+    controller_policy = hrac.Controller(
+        state_dim=state_dim,
+        goal_dim=controller_goal_dim,
+        action_dim=action_dim,
+        max_action=max_action,
+        actor_lr=args.ctrl_act_lr,
+        critic_lr=args.ctrl_crit_lr,
+        ppo_lr=args.ppo_lr,
+        no_xy=no_xy,
+        absolute_goal=args.absolute_goal,
+        policy_noise=policy_noise,
+        noise_clip=noise_clip,
+        PPO=args.PPO,
+        hidden_dim_ppo=args.ppo_hidden_dim,
+        weight_decay_ppo=args.ppo_weight_decay,
+        cost_function=env.cost_func,
+        use_safe_model=args.controller_safe_model,
+        safe_model_loss_coef=args.safe_model_loss_coef,
+        controller_imagination_safety_loss=args.controller_imagination_safety_loss,
+        controller_grad_clip=args.controller_grad_clip,
+        manager=manager_policy,
+        controller_safety_coef=args.controller_safety_coef,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -494,7 +498,7 @@ def run_hrac(args):
             controller_buffer.returns = returns
         ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(controller_buffer, 
             episode_timesteps if not PPO else args.ppo_update_epochs,
-            batch_size=args.ppo_ctrl_batch_size, discount=args.ppo_gamma if PPO else args.ctrl_discount, 
+            batch_size=args.ppo_ctrl_batch_size if PPO else args.ctrl_batch_size, discount=args.ppo_gamma if PPO else args.ctrl_discount, 
             tau=args.ctrl_soft_sync_rate, minibatch_size=args.ppo_minibatch_size, 
             clip_coef=args.ppo_clip_coef, clip_vloss=args.ppo_clip_vloss, norm_adv=args.ppo_norm_adv, 
             max_grad_norm=args.ppo_max_grad_norm, vf_coef=args.ppo_vf_coef, 
@@ -554,6 +558,7 @@ def run_hrac(args):
                                 cost_model_iterations=10):
             if train_safe_model:
                 assert controller.use_safe_model
+                print("train cost model")
                 debug_info = manager_policy.train_world_model(replay_buffer, controller=controller, 
                                                                 train_safe_model=True,
                                                                 cost_model_iterations=cost_model_iterations,
@@ -667,11 +672,6 @@ def run_hrac(args):
                     print("episode num:", episode_num)
                     if episode_num % 10 == 0:
                         print("Episode {}".format(episode_num))
-                    ## Train TD3 or PPO controller
-                    train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
-                                        ep_controller_reward, controller_episode_cost, episode_cost, 
-                                        episode_safety_subgoal_rate/episode_subgoals_count, 
-                                        ep_manager_reward, total_timesteps)
                         
                     ## Train World Model or Cost Model
                     if args.train_safe_model:
@@ -686,12 +686,19 @@ def run_hrac(args):
                                             train_safe_model=False,
                                             controller=controller_policy,
                                             cost_model_iterations=episode_timesteps)
+                    
+                    ## Train TD3 or PPO controller
+                    train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
+                                    ep_controller_reward, controller_episode_cost, episode_cost, 
+                                    episode_safety_subgoal_rate/episode_subgoals_count, 
+                                    ep_manager_reward, total_timesteps)
 
                     ## Train manager
                     if timesteps_since_manager >= args.train_manager_freq:
                         timesteps_since_manager = 0
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
+                        print("train subgoal policy")
                         man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = manager_policy.train(controller_policy,
                             manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
                             batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
