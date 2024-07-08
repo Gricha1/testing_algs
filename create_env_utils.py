@@ -56,6 +56,11 @@ class CustomVideoRendered:
         if self.plot_subgoal:
             assert "subgoal_pos" in current_step_info
 
+        if env_name == "SafeAntMaze":
+            safety_boundary, safe_dataset = self.env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            debug_info["safety_boundary"] = safety_boundary
+            debug_info["safe_dataset"] = safe_dataset
+
         shift_x, shift_y = self.shift_x, self.shift_y
         env_min_x, env_max_x = self.render_info["env_min_x"], self.render_info["env_max_x"]
         env_min_y, env_max_y = self.render_info["env_min_y"], self.render_info["env_max_y"]
