@@ -11,7 +11,7 @@ def dist_xy(pos1, pos2):
     
     return np.sqrt(np.sum(np.square(pos1 - pos2)))
 
-#-------Assuming we have reward & cost function. available with us in closed form.
+# Assuming we have reward & cost function. available with us in closed form.
 def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
     #------cost hazard-----------
     cost = 0
@@ -21,10 +21,10 @@ def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
         h_dist = dist_xy(h_pos,robot_pos)
         if h_dist <= hazards_size:
             cost += hazards_cost * (hazards_size - h_dist)
-    if cost>0:
-        cost=1
+    if cost > 0:
+        cost = 1
     else:
-        cost=0
+        cost = 0
     #----reward-----------------
 
     reward = 0
@@ -32,7 +32,7 @@ def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
     reward_goal = 1.0
     goal_size = 0.3
 
-    dist_goal = dist_xy(robot_pos,goal_pos)
+    dist_goal = dist_xy(robot_pos, goal_pos)
     reward += (last_dist_goal - dist_goal) * reward_distance
     last_dist_goal = dist_goal
     goal_flag=False
@@ -46,8 +46,8 @@ def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
         reward=10
     return reward, cost, last_dist_goal, goal_flag
 
-def get_goal_flag(robot_pos,goal_pos):
-    dist_goal = dist_xy(robot_pos,goal_pos)
+def get_goal_flag(robot_pos, goal_pos):
+    dist_goal = dist_xy(robot_pos, goal_pos)
     goal_size = 0.3
     if dist_goal < goal_size:
         return True

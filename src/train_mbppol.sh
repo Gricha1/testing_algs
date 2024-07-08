@@ -23,6 +23,6 @@ generate_next_index() {
 next_folder=$(generate_next_index)
 echo "Weights folder: $next_folder"
 
-python3 mbppo_lagrangian.py --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
-#python3 mbppo_lagrangian.py --exp_name=$weights_folder --seed=0 --env_name=Safexp-PointGoal2-v0 --beta=0.02
+#python3 mbppo_lagrangian.py --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
+python3 mbppo_lagrangian.py --exp_name=$weights_folder --seed=0 --env_name=Safexp-PointGoal2-v0 --beta=0.02
 

@@ -482,7 +482,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             o, static = env.reset()
             goal_pos = static['goal']
             hazards_pos = static['hazards']
-        #ld = dist_xy(o[40:], goal_pos)        
         screens = []
         ep_ret = 0
         pep_ret = 0
@@ -601,9 +600,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             o, static = env.reset()
             goal_pos = static['goal']
             hazards_pos = static['hazards']
-        if args.env_name == "SafeAntMaze":
-            ld = dist_xy(o[:2], goal_pos[:2])
-        else:
             ld = dist_xy(o[40:], goal_pos)
         train_episode = 0
         screens = []
@@ -641,10 +637,11 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             else:
                 c = info['cost']
 
-            if not d and not info['goal_met']:
-                if args.env_name == "SafeAntMaze":
+            if args.env_name == "SafeAntMaze":
+                if not d:
                     env_pool.push(o, a, r, info['safety_cost'], next_o, d)
-                else:
+            else:
+                if not d and not info['goal_met']:
                     env_pool.push(o, a, r, info['cost'], next_o, d)
             
             violations += c
@@ -673,26 +670,31 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             terminal_mixer = d or timeout_mixer
             epoch_ended_mixer = t == mix_real - 1
 
-            if t<=mix_real-1:
+            if t <= mix_real - 1:
                 if timeout_mixer or epoch_ended_mixer:
                     ott = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
                     _, v,vc, _ = ac.step(ott)
                     del ott
                     buf.finish_path(v,vc)
                 elif d:
-                    v=0
-                    vc=0
+                    v = 0
+                    vc = 0
                     buf.finish_path(v,vc)
 
             if terminal:
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, PEPRet=pep_ret, PEPCost=pep_cost)
             if terminal or epoch_ended:
-                o, static= env.reset()
-                goal_pos = static['goal']
-                hazards_pos = static['hazards']
-                ld = dist_xy(o[40:], goal_pos)
+                if args.env_name == "SafeAntMaze":
+                    obs = env.reset()
+                    goal_pos = obs["desired_goal"]
+                    o = obs["observation"]           
+                else:
+                    o, static = env.reset()
+                    goal_pos = static['goal']
+                    hazards_pos = static['hazards']
+                    ld = dist_xy(o[40:], goal_pos)
                 ep_ret, ep_len =  0, 0
-                pep_ret,pep_cost  = 0,0
+                pep_ret,pep_cost = 0, 0
                 ep_cost = 0
                 train_episode += 1
         if args.vizualize_validation and (epoch % validate_each_epoch) == 0:
@@ -708,7 +710,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         megaiter = 0
         perf_flag = True
         while perf_flag:
-            if megaiter==0:
+            if megaiter == 0:
                 last_dynaret = 0
                 last_valid_rets = [0]*args.num_elites
 
@@ -718,36 +720,45 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             if args.env_name == "SafeAntMaze":
                 obs = env.reset()
                 goal_pos = obs["desired_goal"]
-                o = obs["observation"]            
+                o = obs["observation"]        
             else:
                 o, static = env.reset()
                 goal_pos = static['goal']
                 hazards_pos = static['hazards']
-            ld = dist_xy(o[40:], goal_pos)
+                ld = dist_xy(o[40:], goal_pos)
             dep_ret = 0
             dep_cost = 0
             dep_len = 0
 
             print("training policy with imagination")
             ## Mixing real environment data in first outer loop
-            if megaiter==0:
+            if megaiter == 0:
                 mix_real = 1500
             else:
                 mix_real = 0
             for t in tqdm(range(local_steps_per_epoch - mix_real)):
 
                 ## generate hazard lidar
-                obs_vec = generate_lidar(o, hazards_pos)
-                robot_pos = o[40:]
-                obs_vec = np.array(obs_vec)
+                if args.env_name == "SafeAntMaze":
+                    obs_vec = o
+                    robot_pos = o[:2]
+                else:
+                    obs_vec = generate_lidar(o, hazards_pos)
+                    robot_pos = o[40:]
+                    obs_vec = np.array(obs_vec)
 
                 otensor = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
                 a, v, vc, logp = ac.step(otensor)
                 del otensor
 
                 ## USING LEARNED MODEL OF ENVIRONMENT TO GENERATE ROLLOUTS
-                next_o = predict_env2.step(o,a)
-                r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
+                next_o = predict_env2.step(o, a)
+                if args.env_name == "SafeAntMaze":
+                    r, c, goal_flag = env.get_reward_cost(robot_pos, 
+                                                          goal_pos, 
+                                                          dist_xy=dist_xy)
+                else:
+                    r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
 
                 dep_ret += r
                 dep_cost += c
@@ -761,7 +772,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 # Model horizon (H)  = max_ep_len2
                 timeout = dep_len == max_ep_len2
                 terminal = timeout
-                epoch_ended = t==local_steps_per_epoch-1
+                epoch_ended = t == local_steps_per_epoch - 1
                 if terminal or epoch_ended or goal_flag:
                     # if epoch_ended and not(terminal):
                     #     print('Warning: trajectory cut off by epoch at %d steps.'%ep_len, flush=True)
@@ -777,13 +788,18 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
                         logger.store(DynaEpRet=dep_ret, DynaEpCost=dep_cost)
-                    o, static  = env.reset()
-                    goal_pos = static['goal']
-                    hazards_pos = static['hazards']
-                    ld = dist_xy(o[40:], goal_pos)
+                    if args.env_name == "SafeAntMaze":
+                        obs = env.reset()
+                        goal_pos = obs["desired_goal"]
+                        o = obs["observation"]           
+                    else:
+                        o, static  = env.reset()
+                        goal_pos = static['goal']
+                        hazards_pos = static['hazards']
+                        ld = dist_xy(o[40:], goal_pos)
                     dep_ret, dep_len, dep_cost = 0, 0, 0
 
-            if (epoch % save_freq == 0) or (epoch == outer_loop_epochs-1):
+            if (epoch % save_freq == 0) or (epoch == outer_loop_epochs - 1):
                 logger.save_state({'env': env}, None)
             new_dynaret = logger.get_stats('DynaEpRet')[0]
 
@@ -795,37 +811,57 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 update()
                 # 6 ELITE MODELS OUT OF 8
                 valid_rets = [0]*args.num_elites
-                winner=0
+                winner = 0
                 print("validating............")
                 for va in tqdm(range(len(valid_rets))):
-                    ov,staticv = env.reset()
-                    goal_posv = staticv['goal']
-                    hazards_posv = staticv['hazards']
-                    ldv = dist_xy(o[40:], goal_posv)
+                    if args.env_name == "SafeAntMaze":
+                        obs = env.reset()
+                        goal_posv = obs["desired_goal"]
+                        ov = obs["observation"]        
+                    else:
+                        ov, staticv = env.reset()
+                        goal_posv = staticv['goal']
+                        hazards_posv = staticv['hazards']
+                        # test probably bug with o instead of ov
+                        ldv = dist_xy(o[40:], goal_posv)
                     for step_iter in range(75):
-                        obs_vecv = generate_lidar(ov, hazards_posv)
-                        robot_posv = ov[40:]
-                        obs_vecv = np.array(obs_vecv)
+                        if args.env_name == "SafeAntMaze":
+                            obs_vecv = ov
+                            robot_posv = ov[:2]
+                        else:
+                            obs_vecv = generate_lidar(ov, hazards_posv)
+                            robot_posv = ov[40:]
+                            obs_vecv = np.array(obs_vecv)
                         ovt = torch.as_tensor(obs_vecv, device=cpudevice, dtype=torch.float32)
                         av, _, _, _ = ac.step(ovt)
                         del ovt
                         next_ov = predict_env2.step_elite(ov, av, va)
-                        rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
+                        if args.env_name == "SafeAntMaze":
+                            rv, cv, goal_flagv = env.get_reward_cost(robot_posv, 
+                                                                     goal_posv, 
+                                                                     dist_xy=dist_xy)
+                        else:
+                            rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
 
                         valid_rets[va] += rv
                         ov = next_ov
                         if goal_flagv:
-                            ov, staticv  = env.reset()
-                            goal_posv = staticv['goal']
-                            hazards_posv = staticv['hazards']
-                            ldv = dist_xy(ov[40:], goal_posv)
+                            if args.env_name == "SafeAntMaze":
+                                obs = env.reset()
+                                goal_posv = obs["desired_goal"]
+                                ov = obs["observation"]       
+                            else:
+                                ov, staticv = env.reset()
+                                goal_posv = staticv['goal']
+                                hazards_posv = staticv['hazards']
+                                ldv = dist_xy(ov[40:], goal_posv)
                     if valid_rets[va] > last_valid_rets[va]:
                         winner += 1
-                print(valid_rets,last_valid_rets)
-                performance_ratio = winner/args.num_elites
+                print(valid_rets, last_valid_rets)
+                performance_ratio = winner / args.num_elites
                 print("Performance ratio=", performance_ratio)
                 thresh = 4/6  #BETTER THAN 50%
-                if performance_ratio < thresh :
+                if performance_ratio < thresh:
                     perf_flag = False
                     print("backtracking.........")
                     #------------backtrack-----------------
@@ -836,7 +872,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     megaiter += 1
                     del predict_env2
                     del env_model2
-                    #buf.ptr, buf.path_start_idx = 0, 0
                     break
                 else:
                     del predict_env2
