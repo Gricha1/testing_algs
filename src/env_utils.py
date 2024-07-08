@@ -196,12 +196,12 @@ class SafetyGymEnv():
             for obs in obstacles:
                 self.render_info["ax_states"].add_patch(obs)
             # debug info
-            if len(dubug_info) != 0:
-                #a0 = dubug_info["a0"]
-                #a1 = dubug_info["a1"]
-                acc_reward = dubug_info["acc_reward"]
-                t = dubug_info["t"]
-                acc_cost = dubug_info["acc_cost"]
+            if len(debug_info) != 0:
+                #a0 = debug_info["a0"]
+                #a1 = debug_info["a1"]
+                acc_reward = debug_info["acc_reward"]
+                t = debug_info["t"]
+                acc_cost = debug_info["acc_cost"]
                 #self.render_info["ax_states"].text(env_max_x - 4.5, env_max_y - 0.3, f"a0:{int(a0*100)/100}")
                 #self.render_info["ax_states"].text(env_max_x - 3.5, env_max_y - 0.3, f"a1:{int(a1*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 2.5, env_max_y - 0.3, f"R:{int(acc_reward*10)/10}")

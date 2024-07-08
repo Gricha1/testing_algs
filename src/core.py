@@ -132,6 +132,14 @@ class MLPActorCritic(nn.Module):
             v = self.v(obs)
             vc = self.vc(obs)
         return a.cpu().numpy(), v.cpu().numpy(), vc.cpu().numpy(),  logp_a.cpu().numpy()
-
+    
+    def save(self, exp_name):
+        torch.save(self.pi, exp_name + "/" + "pi.pkl")
+        torch.save(self.v, exp_name + "/" + "v.pkl")
+        torch.save(self.vc, exp_name + "/" + "vc.pkl")
+    def load(self, exp_name):
+        self.pi = torch.load(exp_name + "/" + "pi.pkl")
+        self.v = torch.load(exp_name + "/" + "v.pkl")
+        self.vc = torch.load(exp_name + "/" + "vc.pkl")
     def act(self, obs):
         return self.step(obs)[0]

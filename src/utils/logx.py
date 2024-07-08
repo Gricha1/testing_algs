@@ -143,14 +143,14 @@ class Logger:
             if config:
                 self.run_wandb = wandb.init(
                     project="safe_subgoal_model_based",
-                    #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                    sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
                     name=f"MBPPOL_",
                     config=config,
                 )
             else:
                 self.run_wandb = wandb.init(
                     project="safe_subgoal_model_based",
-                    #sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                    sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
                     name=f"MBPPOL_",
                 )
             self.wandb_dict = {}
@@ -209,7 +209,6 @@ class Logger:
     
     def save_video(self, screens):
         self.custom_video = screens
-        #self.custom_video = np.transpose(np.array(custom_video), axes=[0, 3, 1, 2])
 
     def save_state(self, state_dict, itr=None):
         """
@@ -363,8 +362,11 @@ class Logger:
                     epoch,
                 )
         if self.use_wandb:
+            if self.vizualize_validation:
+                video = np.transpose(np.array(self.custom_video), axes=[0, 3, 1, 2])
+                video = wandb.Video(video, fps=10, format="gif", caption=f"epoch: {epoch}")
+                self.wandb_dict["video"] = video
             self.run_wandb.log(self.wandb_dict)
-            del self.custom_video
             self.wandb_dict = {}
 
 class EpochLogger(Logger):

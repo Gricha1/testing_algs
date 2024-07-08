@@ -8,7 +8,9 @@ def dist_xy(pos1, pos2):
         pos1 = pos1[:2]
     if pos2.shape == (3,):
         pos2 = pos2[:2]
+    
     return np.sqrt(np.sum(np.square(pos1 - pos2)))
+
 #-------Assuming we have reward & cost function. available with us in closed form.
 def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
     #------cost hazard-----------
