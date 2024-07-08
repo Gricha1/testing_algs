@@ -366,8 +366,20 @@ class SafeMazeAnt:
             goal_xy = (0, 16)
             dataset.append([xy, goal_xy])
         return dataset
-    
 
+    def get_reward_cost(self, robot_pos, goal_pos, dist_xy=None):
+        # get cost
+        safety_cost = self.cost_func(np.array(robot_pos))
+        
+        # get reward
+        reward = self.env.reward_fn(robot_pos, goal_pos)
+
+        dist_goal = dist_xy(robot_pos, goal_pos)
+
+        goal_flag = self.env.success_fn(reward)
+
+        return reward, safety_cost, goal_flag
+    
     
     def get_safety_bounds(self, get_safe_unsafe_dataset=False):
         """
