@@ -6,14 +6,14 @@
 
 python main.py --load_adj_net --load --loaded_exp_num 388 \
                --modelfree_safety \
-               --controller_grad_clip 500 \
+               --controller_grad_clip 0 \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
                --world_model \
                --train_safe_model --controller_safe_model \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 800 \
-               --controller_safety_coef 500 \
+               --controller_safety_coef 50 \
                --controller_imagination_safety_loss \
                --max_timesteps 1800000 \
                --wandb_postfix "" 
