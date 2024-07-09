@@ -24,9 +24,6 @@ from predict_env import PredictEnv
 from replay_memory import ReplayMemory
 from tqdm import tqdm
 from stable_baselines3.common.logger import Video
-#import lightgbm as lgb
-#from sklearn.ensemble import GradientBoostingClassifier
-#from sklearn.metrics import mean_squared_error,roc_auc_score,precision_score
 
 class PPOBuffer:
     """
@@ -134,8 +131,8 @@ class PPOBuffer:
 def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default',beta=1,
-        args=None, state_dim=0, action_dim=0, renderer=None):
+        target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default', beta=1,
+        args=None, state_dim=0, goal_dim=0, action_dim=0, renderer=None, img_rollout_H=80):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -257,7 +254,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     #obs_dim = env.observation_space.shape
     #-----------------This dimension size is specific for our use-case in our modified Safety Gym envs-----------------------
     if args.env_name == "SafeAntMaze":
-        obs_dim = (state_dim, )
+        obs_dim = (state_dim + goal_dim, )
         act_dim = action_dim
     else:
         obs_dim = (26,)
@@ -283,15 +280,13 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     gradnorm_list = []
     cost_limit = cost_limit
     # Set up function for computing PPO policy loss
-    def compute_loss_pi(data):
-        #print(data)
+    def compute_loss_pi(data):        
         obs, act, adv, cadv,  logp_old = data['obs'], data['act'], data['adv'], data['cadv'] ,data['logp']
 
         cur_cost = data['cur_cost']
         penalty_param = data['cur_penalty']
 
         # Policy loss
-
         pi, logp = ac.pi(obs, act.to(cpudevice))
 
         ratio = torch.exp(logp - logp_old)
@@ -365,9 +360,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 current_idx += param_sizes[idx]
 
 #---------------------------------------------------------------------------------------------------------------
-
-
-    #wandb.watch(ac.pi, log='all', log_freq=10, idx=1)
     def update():
         cur_cost = logger.get_stats('DynaEpCost')[0]
         data = buf.get()
@@ -416,8 +408,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             pi_optimizer.step()
 
 
-
-
         # Value function learning
         train_v_iters=80
         for i in range(train_v_iters):
@@ -443,12 +433,13 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                      DeltaLossV=(loss_v.item() - v_l_old))
 
 #----------------------TRAIN DYNAMICS----------------------------------------------------------
-
     def train_predict_model(env_pool, predict_env):
+        print("***********")
+        print("train world model")
         # Get all samples from environment
         state, action, reward, cost, next_state, done = env_pool.sample(len(env_pool))
 
-        print("memory occupied by  sampled info = ",sys.getsizeof(state))
+        #print("memory occupied by  sampled info = ",sys.getsizeof(state))
         delta_state = next_state - state
         inputs = np.concatenate((state, action), axis=-1)
 
@@ -457,8 +448,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         epoch, loss = predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
         logger.store(LossModel=loss)
         del state, action, reward, next_state, done
+        print("model loss:", loss)
+        print("***********")
 #-----------------------------------------------------------------------------------------------
-        #return cost_clf
 
     if args.validate:
         validate_world_model = True
@@ -477,7 +469,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         if args.env_name == "SafeAntMaze":
             obs = env.reset(eval_idx=val_episode)
             goal_pos = obs["desired_goal"]
-            o = obs["observation"]            
+            o = obs["observation"]
+            o = np.concatenate((o, goal_pos))
         else:
             o, static = env.reset()
             goal_pos = static['goal']
@@ -489,7 +482,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         pep_cost = 0
         ep_len = 0
         t = 0
-        max_ep_len2 = 80
         while True:
             t += 1
             if args.env_name == "SafeAntMaze":
@@ -499,7 +491,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 obs_vec = generate_lidar(o, hazards_pos)
                 obs_vec = np.array(obs_vec)
             
-            ot = torch.as_tensor(obs_vec,device=cpudevice, dtype=torch.float32)
+            ot = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
             a, v, vc, logp = ac.step(ot)
             if validate_world_model:
                 with torch.no_grad():
@@ -509,7 +501,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             next_o, r, d, info = env.step(a)
 
             if args.env_name == "SafeAntMaze": 
-                next_o = next_o["observation"]               
+                next_o = next_o["observation"]  
+                next_o = np.concatenate((next_o, goal_pos))
                 c = info['safety_cost']
             else:
                 c = info['cost']
@@ -547,9 +540,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             timeout = ep_len == max_ep_len
             terminal = d or timeout
 
-            timeout_mixer = ep_len==max_ep_len2
-            terminal_mixer = d or timeout_mixer
-
             if terminal:
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
                              PEPRet=pep_ret, PEPCost=pep_cost)
@@ -584,8 +574,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
     # Main loop: collect experience in env to train dynamics models
     # 450k environment steps
     # Collecting data from real environment
-    max_training_steps = int(10000/num_procs())
-    outer_loop_epochs = int(num_steps/max_training_steps)
+    max_training_steps = int(10000 / num_procs())
+    outer_loop_epochs = int(num_steps / max_training_steps)
     validation_episode = 1
     validate_each_epoch = 5
     validate_world_model = True
@@ -595,7 +585,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         if args.env_name == "SafeAntMaze":
             obs = env.reset()
             goal_pos = obs["desired_goal"]
-            o = obs["observation"]            
+            o = obs["observation"]  
+            o_without_goal = o
+            o = np.concatenate((o, goal_pos))
         else:
             o, static = env.reset()
             goal_pos = static['goal']
@@ -608,10 +600,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
         ep_cost = 0
         pep_cost = 0
         ep_len = 0
-        print("interacting with real environment")
         mix_real = int(1500/num_procs())
-        max_ep_len2 = 80
-
+        max_ep_len2 = img_rollout_H
+        print("interacting with real environment")
         ## Collect Trajectories From Env
         for t in tqdm(range(max_training_steps)):
 
@@ -633,13 +624,16 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
             if args.env_name == "SafeAntMaze":
                 next_o = next_o["observation"]  
+                next_o_without_goal = next_o
+                next_o = np.concatenate((next_o, goal_pos))  
                 c = info['safety_cost']
             else:
                 c = info['cost']
 
             if args.env_name == "SafeAntMaze":
+                # test probably here is a problem with goal met
                 if not d:
-                    env_pool.push(o, a, r, info['safety_cost'], next_o, d)
+                    env_pool.push(o_without_goal, a, r, info['safety_cost'], next_o_without_goal, d)
             else:
                 if not d and not info['goal_met']:
                     env_pool.push(o, a, r, info['cost'], next_o, d)
@@ -661,6 +655,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 buf.store(obs_vec, a, r, c, v, vc, logp)
 
             o = next_o
+            o_without_goal = next_o_without_goal 
 
             timeout = ep_len == max_ep_len
             terminal = d or timeout
@@ -687,7 +682,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 if args.env_name == "SafeAntMaze":
                     obs = env.reset()
                     goal_pos = obs["desired_goal"]
-                    o = obs["observation"]           
+                    o = obs["observation"]
+                    o_without_goal = o   
+                    o = np.concatenate((o, goal_pos))        
                 else:
                     o, static = env.reset()
                     goal_pos = static['goal']
@@ -720,7 +717,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             if args.env_name == "SafeAntMaze":
                 obs = env.reset()
                 goal_pos = obs["desired_goal"]
-                o = obs["observation"]        
+                o = obs["observation"] 
+                o_without_goal = o
+                o = np.concatenate((o, goal_pos))               
             else:
                 o, static = env.reset()
                 goal_pos = static['goal']
@@ -730,14 +729,14 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             dep_cost = 0
             dep_len = 0
 
-            print("training policy with imagination")
+            print("get imagination steps:", local_steps_per_epoch - mix_real)
+            ## Get Imagination Steps
             ## Mixing real environment data in first outer loop
             if megaiter == 0:
                 mix_real = 1500
             else:
                 mix_real = 0
             for t in tqdm(range(local_steps_per_epoch - mix_real)):
-
                 ## generate hazard lidar
                 if args.env_name == "SafeAntMaze":
                     obs_vec = o
@@ -751,8 +750,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 a, v, vc, logp = ac.step(otensor)
                 del otensor
 
-                ## USING LEARNED MODEL OF ENVIRONMENT TO GENERATE ROLLOUTS
-                next_o = predict_env2.step(o, a)
+                next_o_without_goal = predict_env2.step(o_without_goal, a)
+                next_o = np.concatenate((next_o_without_goal, goal_pos))
+                
                 if args.env_name == "SafeAntMaze":
                     r, c, goal_flag = env.get_reward_cost(robot_pos, 
                                                           goal_pos, 
@@ -784,14 +784,16 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     else:
                         v = 0
                         vc = 0
-                    buf.finish_path(v,vc)
+                    buf.finish_path(v, vc)
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
                         logger.store(DynaEpRet=dep_ret, DynaEpCost=dep_cost)
                     if args.env_name == "SafeAntMaze":
                         obs = env.reset()
                         goal_pos = obs["desired_goal"]
-                        o = obs["observation"]           
+                        o = obs["observation"]
+                        o_without_goal = o
+                        o = np.concatenate((o, goal_pos))                   
                     else:
                         o, static  = env.reset()
                         goal_pos = static['goal']
@@ -817,7 +819,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     if args.env_name == "SafeAntMaze":
                         obs = env.reset()
                         goal_posv = obs["desired_goal"]
-                        ov = obs["observation"]        
+                        ov = obs["observation"]
+                        ov_without_goal = ov
+                        ov = np.concatenate((ov, goal_pos))                
                     else:
                         ov, staticv = env.reset()
                         goal_posv = staticv['goal']
@@ -835,7 +839,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                         ovt = torch.as_tensor(obs_vecv, device=cpudevice, dtype=torch.float32)
                         av, _, _, _ = ac.step(ovt)
                         del ovt
-                        next_ov = predict_env2.step_elite(ov, av, va)
+                        next_ov_without_goal = predict_env2.step_elite(ov_without_goal, av, va)
+                        next_ov = np.concatenate((next_ov_without_goal, goal_posv))
+
                         if args.env_name == "SafeAntMaze":
                             rv, cv, goal_flagv = env.get_reward_cost(robot_posv, 
                                                                      goal_posv, 
@@ -849,7 +855,9 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                             if args.env_name == "SafeAntMaze":
                                 obs = env.reset()
                                 goal_posv = obs["desired_goal"]
-                                ov = obs["observation"]       
+                                ov = obs["observation"] 
+                                ov_without_goal = ov
+                                ov = np.concatenate((ov, goal_pos))        
                             else:
                                 ov, staticv = env.reset()
                                 goal_posv = staticv['goal']
@@ -882,18 +890,6 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 # Perform PPO-agrangian update!
                 megaiter+=1
                 update()
-
-        # custom validation
-        #if (epoch % validate_each_epoch) == 0 and not args.not_use_wandb:
-        #    video = wandb.Video(logger.custom_video, fps=10, format="gif", caption=f"epoch: {epoch}")
-        #    logger.wandb_dict["video"] = video
-        # test
-        #elif (epoch % validate_each_epoch) == 0:
-        #    writer.add_video(
-        #        "eval/pos_video",
-        #        torch.ByteTensor([positions_screens]),
-        #        total_timesteps,
-        #    )
 
         ## Save Actor Critic Weights and Logging
         ac.save(exp_name)
@@ -958,11 +954,14 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
+
     # world model
     parser.add_argument("--world_model", default=True)
     parser.add_argument('--pred_hidden_size', default=200, type=int)
     parser.add_argument('--num_networks', default=8, type=int)
     parser.add_argument('--num_elites', default=6, type=int)
+    parser.add_argument('--img_rollout_H', default=80, type=int)
+    
     # actor critic
     parser.add_argument("--controller_safe_model", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
@@ -1016,6 +1015,7 @@ if __name__ == '__main__':
         renderer = None
 
     else:
+        num_steps = 1.8e6
         renderer_args = {"plot_subgoal": False, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": True}
@@ -1055,7 +1055,8 @@ if __name__ == '__main__':
 
     ppo(lambda : env, args.cost_limit, actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
-        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs,max_ep_len=750,
+        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name="data/" + args.exp_name,beta=args.beta,
-        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, action_dim=action_dim,
-        renderer=renderer)
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, goal_dim=goal_dim, 
+        action_dim=action_dim,
+        renderer=renderer, img_rollout_H=args.img_rollout_H)

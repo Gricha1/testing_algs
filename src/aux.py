@@ -69,7 +69,7 @@ def ego_xy(robot_matrix, robot_pos, pos):
 #     Calculate and return a lidar observation.  See sub methods for implementation.
 #     '''
 #     return obs_lidar_pseudo(positions)
-def obs_lidar_pseudo(robot_matrix,robot_pos,positions):
+def obs_lidar_pseudo(robot_matrix, robot_pos, positions):
     '''
     Return a robot-centric lidar observation of a list of positions.
 
@@ -127,17 +127,18 @@ def make_observation(state, lidar):
     x = state[:8]
     obs = x+lidar+state[40:]
     return obs
-def generate_lidar(o,hazards_pos):
+
+def generate_lidar(o, hazards_pos):
     robot_matrix_x_y = o[38:40]
     x = robot_matrix_x_y[0]
     y = robot_matrix_x_y[1]
 
-    first_row = [x,y,0]
-    second_row = [-y,x,0]
-    third_row = [0,0,1]
-    robot_matrix = [first_row,second_row,third_row]
+    first_row = [x, y, 0]
+    second_row = [-y, x, 0]
+    third_row = [0, 0, 1]
+    robot_matrix = [first_row, second_row, third_row]
     robot_pos = o[40:]
     #--------------------------------------------------------------------------------------
     lidar_vec = obs_lidar_pseudo(robot_matrix, robot_pos, hazards_pos)
-    obs_vec = make_observation(o,lidar_vec)
+    obs_vec = make_observation(o, lidar_vec)
     return obs_vec
