@@ -48,7 +48,7 @@ class Manager(object):
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False, modelbased_safety=False, safety_loss_coef=1, img_horizon=10, 
+                 wm_no_xy=False, modelbased_safety=False, img_horizon=10, 
                  cost_function=None, modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
                  cumul_modelbased_safety=False,
@@ -89,8 +89,7 @@ class Manager(object):
 
         # Safety
         self.modelbased_safety = modelbased_safety
-        self.cumul_modelbased_safety = cumul_modelbased_safety
-        self.safety_loss_coef = safety_loss_coef
+        self.cumul_modelbased_safety = cumul_modelbased_safety        
         self.img_horizon = img_horizon
         self.cost_function = cost_function
         self.modelfree_safety = modelfree_safety
@@ -225,7 +224,7 @@ class Manager(object):
                                                         all_steps_safety=self.cumul_modelbased_safety,
                                                         train=True)
             safety_model_based_loss = safety_model_based_loss.mean()
-        elif self.modelfree_safety:
+        if self.modelfree_safety:
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
             manager_absolute_goal += copy_state[:, :actions.shape[1]]
@@ -235,13 +234,13 @@ class Manager(object):
             safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
-        safety_norm_factor = 0
-        if self.modelbased_safety:
-            safety_norm_factor += self.coef_safety_modelbased
-        if self.modelfree_safety:
-            safety_norm_factor += self.coef_safety_modelfree
-        if self.modelbased_safety or self.modelfree_safety:
-            safety_loss /= safety_norm_factor
+        #safety_norm_factor = 0
+        #if self.modelbased_safety:
+        #    safety_norm_factor += self.coef_safety_modelbased
+        #if self.modelfree_safety:
+        #    safety_norm_factor += self.coef_safety_modelfree
+        #if self.modelbased_safety or self.modelfree_safety:
+        #    safety_loss /= safety_norm_factor
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
@@ -350,7 +349,7 @@ class Manager(object):
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
             if self.modelbased_safety or self.modelfree_safety:
-                actor_loss = actor_loss + self.safety_loss_coef * safety_subgoals_loss
+                actor_loss = actor_loss + safety_subgoals_loss
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()

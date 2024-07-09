@@ -41,6 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--r_embedding_dim", default=32, type=int)
 
     # Manager Parameters
+    parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
     parser.add_argument("--manager_propose_freq", default=20, type=int) # 10
@@ -99,11 +100,9 @@ if __name__ == "__main__":
     parser.add_argument("--modelbased_safety", action='store_true', default=False)
     parser.add_argument("--modelfree_safety", action='store_true', default=False)
     parser.add_argument("--cumul_modelbased_safety", action='store_true', default=False)
-    parser.add_argument("--subgoal_grad_clip", default=0, type=float)
-    parser.add_argument("--img_horizon", default=20, type=int)
-    parser.add_argument("--safety_loss_coef", default=200., type=float)
-    parser.add_argument("--coef_safety_modelbased", default=1.0, type=float)    
-    parser.add_argument("--coef_safety_modelfree", default=1.0, type=float)
+    parser.add_argument("--img_horizon", default=20, type=int)    
+    parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
+    parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
 
     # Safety model Parameters
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
@@ -131,12 +130,6 @@ if __name__ == "__main__":
             " to train safety you need world model"
     assert not args.cumul_modelbased_safety or (args.modelbased_safety and args.cumul_modelbased_safety)
     assert args.img_horizon <= args.manager_propose_freq
-
-    if args.modelbased_safety == args.modelfree_safety == True:
-        assert (args.coef_safety_modelbased + args.coef_safety_modelfree) == 1.0
-    if args.modelbased_safety != args.modelfree_safety:
-        assert args.coef_safety_modelbased == 1.0
-        assert args.coef_safety_modelfree == 1.0
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)

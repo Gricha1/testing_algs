@@ -412,7 +412,6 @@ def run_hrac(args):
         absolute_goal=args.absolute_goal,
         wm_no_xy=no_xy,
         modelbased_safety=args.modelbased_safety,
-        safety_loss_coef=args.safety_loss_coef,
         img_horizon=args.img_horizon,
         cost_function=env.cost_func,
         modelfree_safety=args.modelfree_safety,
