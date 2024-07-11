@@ -2,7 +2,7 @@
 
 
 #weights_folder="final_base"
-weights_folder=test_point_12
+weights_folder=test_point_36
 echo "Weights folder: $weights_folder"
 
 

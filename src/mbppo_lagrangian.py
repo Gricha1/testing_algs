@@ -128,7 +128,7 @@ class PPOBuffer:
 
 
 
-def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
+def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
         target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default', beta=1,
@@ -623,9 +623,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             next_o, r, d, info = env.step(a)
 
             if args.env_name == "SafeAntMaze":
-                next_o = next_o["observation"]  
-                next_o_without_goal = next_o
-                next_o = np.concatenate((next_o, goal_pos))  
+                next_o_without_goal = next_o["observation"]                  
+                next_o = np.concatenate((next_o_without_goal, goal_pos))  
                 c = info['safety_cost']
             else:
                 c = info['cost']
@@ -717,9 +716,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
             if args.env_name == "SafeAntMaze":
                 obs = env.reset()
                 goal_pos = obs["desired_goal"]
-                o = obs["observation"] 
-                o_without_goal = o
-                o = np.concatenate((o, goal_pos))               
+                o_without_goal = obs["observation"] 
+                o = np.concatenate((o_without_goal, goal_pos))               
             else:
                 o, static = env.reset()
                 goal_pos = static['goal']
@@ -755,8 +753,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                 
                 if args.env_name == "SafeAntMaze":
                     r, c, goal_flag = env.get_reward_cost(robot_pos, 
-                                                          goal_pos, 
-                                                          dist_xy=dist_xy)
+                                                          goal_pos)
                 else:
                     r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
 
@@ -791,9 +788,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     if args.env_name == "SafeAntMaze":
                         obs = env.reset()
                         goal_pos = obs["desired_goal"]
-                        o = obs["observation"]
-                        o_without_goal = o
-                        o = np.concatenate((o, goal_pos))                   
+                        o_without_goal = obs["observation"]
+                        o = np.concatenate((o_without_goal, goal_pos))                   
                     else:
                         o, static  = env.reset()
                         goal_pos = static['goal']
@@ -819,9 +815,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                     if args.env_name == "SafeAntMaze":
                         obs = env.reset()
                         goal_posv = obs["desired_goal"]
-                        ov = obs["observation"]
-                        ov_without_goal = ov
-                        ov = np.concatenate((ov, goal_pos))                
+                        ov_without_goal = obs["observation"]
+                        ov = np.concatenate((ov_without_goal, goal_pos))                
                     else:
                         ov, staticv = env.reset()
                         goal_posv = staticv['goal']
@@ -844,8 +839,7 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
 
                         if args.env_name == "SafeAntMaze":
                             rv, cv, goal_flagv = env.get_reward_cost(robot_posv, 
-                                                                     goal_posv, 
-                                                                     dist_xy=dist_xy)
+                                                                     goal_posv)
                         else:
                             rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
 
@@ -855,9 +849,8 @@ def ppo(env_fn,cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), s
                             if args.env_name == "SafeAntMaze":
                                 obs = env.reset()
                                 goal_posv = obs["desired_goal"]
-                                ov = obs["observation"] 
-                                ov_without_goal = ov
-                                ov = np.concatenate((ov, goal_pos))        
+                                ov_without_goal = obs["observation"] 
+                                ov = np.concatenate((ov_without_goal, goal_pos))        
                             else:
                                 ov, staticv = env.reset()
                                 goal_posv = staticv['goal']
@@ -963,7 +956,6 @@ if __name__ == '__main__':
     parser.add_argument('--img_rollout_H', default=80, type=int)
     
     # actor critic
-    parser.add_argument("--controller_safe_model", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
     parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
 
@@ -1053,7 +1045,7 @@ if __name__ == '__main__':
 
     #-----------------------------------------------------------------------------
 
-    ppo(lambda : env, args.cost_limit, actor_critic=core.MLPActorCritic,
+    ppo(lambda : env, num_steps, args.cost_limit, actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name="data/" + args.exp_name,beta=args.beta,
