@@ -4,3 +4,6 @@
 [submodule "src/envs"]
 	path = src/envs
 	url = https://github.com/Gricha1/testing_algs
+[submodule "src/safety_gym_envs"]
+	path = src/safety_gym_envs
+	url = https://github.com/Gricha1/testing_algs

@@ -16,7 +16,7 @@ from mpi4py import MPI
 from utils.logx import EpochLogger
 from utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
-from env_utils import SafetyGymEnv
+from safety_gym_envs.env_utils import SafetyGymEnv
 from envs.create_env_utils import create_env
 from aux import dist_xy, get_reward_cost, get_goal_flag, ego_xy, obs_lidar_pseudo, make_observation, generate_lidar
 from model import EnsembleDynamicsModel

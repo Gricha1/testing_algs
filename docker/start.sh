@@ -17,7 +17,7 @@ else
 fi
 
 echo "start dockergpu device: $device"
-echo "start docker name: hrac_$docker_container_idx"
+echo "start docker name: mbppol_$docker_container_idx"
 echo "start docker image: $image_name"
 
 cd ..
