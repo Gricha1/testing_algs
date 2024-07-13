@@ -263,8 +263,13 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
     # Create actor-critic module
     ac = actor_critic(obs_dim, env.action_space, **ac_kwargs)
     cpudevice = torch.device('cpu')
+    predict_env2 = None
     if args.load:
+        env_name = "safepg2"
+        model_type = 'pytorch'
         ac.load(exp_name)
+        env_model2 = torch.load(exp_name + "/" + "env_model.pkl")
+        predict_env2 = PredictEnv(env_model2, env_name, model_type)
         print("load from:", exp_name)
     ac.to(cpudevice)
     # Sync params across processes
@@ -387,29 +392,23 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         # Train policy with multiple steps of gradient descent
         train_epoch_eigvals=[]
 
-        train_pi_iters=80
         this_epoch_gradnorms = []
         for i in range(train_pi_iters):
 
             loss_pi, _,pi_info = compute_loss_pi(data)
 
-
             kl = mpi_avg(pi_info['kl'])
 
-
-            if kl > 1.2 * target_kl:
+            if target_kl > 0 and kl > 1.2 * target_kl:
                 logger.log('Early stopping at step %d due to reaching max kl.'%i)
                 break
-
 
             pi_optimizer.zero_grad()
             loss_pi.backward()
             mpi_avg_grads(ac.pi)
             pi_optimizer.step()
 
-
         # Value function learning
-        train_v_iters=80
         for i in range(train_v_iters):
             loss_v, loss_vc = compute_loss_v(data)
             vf_optimizer.zero_grad()
@@ -466,11 +465,15 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         megaiter = 0
         max_training_steps = 0
 
+        debug = False
+
         if args.env_name == "SafeAntMaze":
             obs = env.reset(eval_idx=val_episode)
             goal_pos = obs["desired_goal"]
-            o = obs["observation"]
-            o = np.concatenate((o, goal_pos))
+            if debug:
+                goal_pos = [0, 5]
+            o_without_goal = obs["observation"]
+            o = np.concatenate((o_without_goal, goal_pos))
         else:
             o, static = env.reset()
             goal_pos = static['goal']
@@ -482,6 +485,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         pep_cost = 0
         ep_len = 0
         t = 0
+        prev_imagined_state = None
         while True:
             t += 1
             if args.env_name == "SafeAntMaze":
@@ -501,6 +505,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             next_o, r, d, info = env.step(a)
 
             if args.env_name == "SafeAntMaze": 
+                if debug:
+                    goal_pos = [3, 0]
                 next_o = next_o["observation"]  
                 next_o = np.concatenate((next_o, goal_pos))
                 c = info['safety_cost']
@@ -521,6 +527,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             else:
                 current_step_info["goal_pos"] = None
             current_step_info["robot_radius"] = 1.5
+            if prev_imagined_state is None:
+                prev_imagined_state = o_without_goal
+            imagined_state = predict_env2.step(o_without_goal, a)
+            current_step_info["imagined_robot_pos"] = prev_imagined_state[:2]
+            prev_imagined_state = imagined_state
             if args.vizualize_validation:
                 if args.env_name == "SafeAntMaze":
                     if t == 1:
@@ -585,9 +596,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         if args.env_name == "SafeAntMaze":
             obs = env.reset()
             goal_pos = obs["desired_goal"]
-            o = obs["observation"]  
-            o_without_goal = o
-            o = np.concatenate((o, goal_pos))
+            o_without_goal = obs["observation"]  
+            o = np.concatenate((o_without_goal, goal_pos))
         else:
             o, static = env.reset()
             goal_pos = static['goal']
@@ -654,7 +664,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 buf.store(obs_vec, a, r, c, v, vc, logp)
 
             o = next_o
-            o_without_goal = next_o_without_goal 
+            if args.env_name == "SafeAntMaze":
+                o_without_goal = next_o_without_goal 
 
             timeout = ep_len == max_ep_len
             terminal = d or timeout
@@ -681,9 +692,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 if args.env_name == "SafeAntMaze":
                     obs = env.reset()
                     goal_pos = obs["desired_goal"]
-                    o = obs["observation"]
-                    o_without_goal = o   
-                    o = np.concatenate((o, goal_pos))        
+                    o_without_goal = obs["observation"]
+                    o = np.concatenate((o_without_goal, goal_pos))        
                 else:
                     o, static = env.reset()
                     goal_pos = static['goal']
@@ -748,8 +758,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 a, v, vc, logp = ac.step(otensor)
                 del otensor
 
-                next_o_without_goal = predict_env2.step(o_without_goal, a)
-                next_o = np.concatenate((next_o_without_goal, goal_pos))
+                if args.env_name == "SafeAntMaze":
+                    next_o_without_goal = predict_env2.step(o_without_goal, a)
+                    next_o = np.concatenate((next_o_without_goal, goal_pos))
+                else:
+                    next_o = predict_env2.step(o, a)
                 
                 if args.env_name == "SafeAntMaze":
                     r, c, goal_flag = env.get_reward_cost(robot_pos, 
@@ -765,6 +778,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 buf.store(obs_vec, a, r, c , v, vc, logp)
 
                 o = next_o
+                if args.env_name == "SafeAntMaze":
+                    o_without_goal = next_o_without_goal
 
                 # Model horizon (H)  = max_ep_len2
                 timeout = dep_len == max_ep_len2
@@ -947,6 +962,10 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
+    
+    # PPO
+    parser.add_argument('--target_kl', type=float, default=0.01)
+
 
     # world model
     parser.add_argument("--world_model", default=True)
@@ -1004,15 +1023,27 @@ if __name__ == '__main__':
         env_config=DEFAULT_ENV_CONFIG_POINT
         env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
         state_dim, action_dim = env.observation_size, env.action_size
+        goal_dim = None
         renderer = None
 
-    else:
+    elif args.env_name == "SafeAntMaze":
         num_steps = 1.8e6
+        if args.validate and args.vizualize_validation:
+            plot_world_model_state = True
+        else:
+            plot_world_model_state = False
         renderer_args = {"plot_subgoal": False, 
                          "world_model_comparsion": False,
-                         "plot_safety_boundary": True}
-        env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
-
+                         "plot_safety_boundary": True,
+                         "plot_world_model_state": plot_world_model_state}
+        env, state_dim, goal_dim, action_dim, renderer = create_env(
+                                                            args, 
+                                                            renderer_args=renderer_args)
+        if renderer_args["plot_world_model_state"]:
+            assert args.load
+    else:
+        assert 1 == 0
+        
     if proc_id()==0:
         num_networks = args.num_networks
         num_elites = args.num_elites
@@ -1049,6 +1080,9 @@ if __name__ == '__main__':
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=750,
         logger_kwargs=logger_kwargs,exp_name="data/" + args.exp_name,beta=args.beta,
-        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, state_dim=state_dim, goal_dim=goal_dim, 
+        pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, 
+        state_dim=state_dim, 
+        goal_dim=goal_dim, 
         action_dim=action_dim,
+        target_kl=args.target_kl,
         renderer=renderer, img_rollout_H=args.img_rollout_H)
