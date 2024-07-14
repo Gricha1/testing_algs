@@ -30,6 +30,10 @@ class StandardScaler(object):
     def __init__(self):
         pass
 
+    def set_mu_std(self, mu, std):
+        self.mu = mu
+        self.std = std
+
     def fit(self, data):
         """Runs two ops, one for assigning the mean of the data to the internal mean, and
         another for assigning the standard deviation of the data to the internal standard deviation.
@@ -198,7 +202,7 @@ class EnsembleModel(nn.Module):
 
 class EnsembleDynamicsModel():
     #@profile
-    def __init__(self, network_size, elite_size, state_size, action_size, reward_size=0, cost_size=0, hidden_size=200, use_decay=False):
+    def __init__(self, network_size, elite_size, state_size, action_size, reward_size=0, cost_size=0, hidden_size=200, learning_rate=1e-3, use_decay=False):
         self.network_size = network_size
         self.elite_size = elite_size
         self.model_list = []
@@ -208,8 +212,12 @@ class EnsembleDynamicsModel():
         self.cost_size = cost_size
         self.network_size = network_size
         self.elite_model_idxes = []
-        self.ensemble_model = EnsembleModel(state_size, action_size, reward_size, cost_size, network_size, hidden_size, use_decay=use_decay)
+        self.ensemble_model = EnsembleModel(state_size, action_size, reward_size, cost_size, network_size, hidden_size, learning_rate=learning_rate, use_decay=use_decay)
         self.scaler = StandardScaler()
+
+    def set_elite_model_idxes(self, elite_model_idxes):
+        self.elite_model_idxes = elite_model_idxes
+
     #@profile
     def train(self, inputs, labels, batch_size=256, holdout_ratio=0., max_epochs_since_update=5):
         self._max_epochs_since_update = max_epochs_since_update
@@ -279,10 +287,10 @@ class EnsembleDynamicsModel():
             for i in losses:
                 train_mse_losses.append(i.detach().cpu().numpy())
 
-            print('epoch: {}, train mse losses: {}'.format(epoch, np.mean(train_mse_losses,axis=0)))
+            print('epoch: {}, train mse losses: {}'.format(epoch, np.mean(train_mse_losses, axis=0)))
             print('epoch: {}, holdout mse losses: {}'.format(epoch, holdout_mse_losses))
 
-            return epoch, np.mean(np.mean(train_mse_losses,axis=0))
+            return epoch, np.mean(np.mean(train_mse_losses, axis=0))
 
     def _save_best(self, epoch, holdout_losses):
         updated = False

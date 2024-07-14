@@ -1,6 +1,8 @@
 #This code is modified for research purpose from Open AI Spinning Up implementation of PPO https://github.com/openai/spinningup (MIT LICENSE which allows for private use, attached  in ./src folder)
 import sys
 import collections
+from copy import deepcopy
+import pickle
 
 import numpy as np
 import torch
@@ -132,7 +134,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
         target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default', beta=1,
-        args=None, state_dim=0, goal_dim=0, action_dim=0, renderer=None, img_rollout_H=80):
+        args=None, state_dim=0, goal_dim=0, action_dim=0, renderer=None, img_rollout_H=80,
+        loaded_exp_num=None, predict_env=None, env_model=None):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -263,14 +266,22 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
     # Create actor-critic module
     ac = actor_critic(obs_dim, env.action_space, **ac_kwargs)
     cpudevice = torch.device('cpu')
-    predict_env2 = None
     if args.load:
         env_name = "safepg2"
         model_type = 'pytorch'
-        ac.load(exp_name)
-        env_model2 = torch.load(exp_name + "/" + "env_model.pkl")
-        predict_env2 = PredictEnv(env_model2, env_name, model_type)
-        print("load from:", exp_name)
+        if not args.not_load_ac:
+            ac.load(loaded_exp_num)
+        if args.load_wm_from_pth:
+            predict_env.model.ensemble_model.load_state_dict(torch.load(loaded_exp_num + "/" + "SafeAntMaze_hrac_env_model.pth"))
+            mu = np.load(loaded_exp_num + "/" + "SafeAntMaze_hrac_wm_scaler_mu.npy")
+            std = np.load(loaded_exp_num + "/" + "SafeAntMaze_hrac_wm_scaler_std.npy")
+            predict_env.model.scaler.set_mu_std(mu, std)
+            elite_model_idxes = np.load(loaded_exp_num + "/" + "SafeAntMaze_hrac_wm_elite_model_idxes.npy")
+            predict_env.model.set_elite_model_idxes(elite_model_idxes)
+        else:
+            env_model = torch.load(loaded_exp_num + "/" + "env_model.pkl")
+            predict_env = PredictEnv(env_model, env_name, model_type)
+        print("load from:", loaded_exp_num)
     ac.to(cpudevice)
     # Sync params across processes
     sync_params(ac)
@@ -308,17 +319,17 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
 
         pi_objective = loss_rpi - penalty_item*loss_cpi
         ent_coef = 0.0 #1*pi.entropy().mean()
-        pi_objective = (pi_objective + ent_coef) /(1+penalty_item)
+        pi_objective = (pi_objective + ent_coef) / (1 + penalty_item)
         loss_pi = -pi_objective
         #to tackle underestimation of cost due to truncated horizon we use 'beta_safety' hyperparameter
         beta_safety = beta
-        cost_deviation = (cur_cost - cost_limit*beta_safety)
+        cost_deviation = (cur_cost - cost_limit * beta_safety)
 
 
         # Useful extra info
         approx_kl = (logp_old - logp).mean().item()
         ent = pi.entropy().mean().item()
-        clipped = ratio.gt(1+clip_ratio) | ratio.lt(1-clip_ratio)
+        clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)
         clipfrac = torch.as_tensor(clipped, device=cpudevice, dtype=torch.float32).mean().item()
         pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
 
@@ -444,6 +455,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
 
         labels = delta_state
 
+        if args.add_state_normalization:
+            inputs[:, :2] = env.scale_poses(inputs[:, :2])
+            labels[:, :2] = env.scale_poses(labels[:, :2])
+
         epoch, loss = predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
         logger.store(LossModel=loss)
         del state, action, reward, next_state, done
@@ -529,7 +544,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             current_step_info["robot_radius"] = 1.5
             if prev_imagined_state is None:
                 prev_imagined_state = o_without_goal
-            imagined_state = predict_env2.step(o_without_goal, a)
+            if args.add_state_normalization:
+                o_without_goal[:2] = env.scale_poses(o_without_goal[:2])
+            imagined_state = predict_env.step(o_without_goal, a)
+            if args.add_state_normalization:
+                imagined_state[:2] = env.rescale_poses(imagined_state[:2])
             current_step_info["imagined_robot_pos"] = prev_imagined_state[:2]
             prev_imagined_state = imagined_state
             if args.vizualize_validation:
@@ -573,7 +592,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             del screens
         logging(logger, epoch, megaiter, 
                 start_time, violations, 
-                max_training_steps, validate=True)
+                max_training_steps, validate=True, args=args)
         print("end validation")
         return
 
@@ -642,10 +661,12 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             if args.env_name == "SafeAntMaze":
                 # test probably here is a problem with goal met
                 if not d:
-                    env_pool.push(o_without_goal, a, r, info['safety_cost'], next_o_without_goal, d)
+                    env_pool.push(o_without_goal, a, r, info['safety_cost'], 
+                                  next_o_without_goal, d)
             else:
                 if not d and not info['goal_met']:
-                    env_pool.push(o, a, r, info['cost'], next_o, d)
+                    env_pool.push(o, a, r, info['cost'], 
+                                  next_o, d)
             
             violations += c
             ep_ret += r
@@ -663,9 +684,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             if t <= mix_real - 1:
                 buf.store(obs_vec, a, r, c, v, vc, logp)
 
-            o = next_o
             if args.env_name == "SafeAntMaze":
-                o_without_goal = next_o_without_goal 
+                o_without_goal = next_o_without_goal
+            o = next_o 
 
             timeout = ep_len == max_ep_len
             terminal = d or timeout
@@ -680,11 +701,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     ott = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
                     _, v,vc, _ = ac.step(ott)
                     del ott
-                    buf.finish_path(v,vc)
+                    buf.finish_path(v, vc)
                 elif d:
                     v = 0
                     vc = 0
-                    buf.finish_path(v,vc)
+                    buf.finish_path(v, vc)
 
             if terminal:
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, PEPRet=pep_ret, PEPCost=pep_cost)
@@ -707,8 +728,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             logger.save_video(screens)
 
         ## Train Dynamic Model
-        train_predict_model(env_pool, predict_env)
-        torch.save(env_model,exp_name + "/" + "env_model.pkl")
+        if not args.wm_learning_rate == 0:
+            train_predict_model(env_pool, predict_env)
+            torch.save(env_model, exp_name + "/" + "env_model.pkl")
 
         ## Train Actor Critic
         env_name = "safepg2"
@@ -720,8 +742,12 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 last_dynaret = 0
                 last_valid_rets = [0]*args.num_elites
 
-            env_model2 = torch.load(exp_name + "/" + "env_model.pkl")
-            predict_env2 = PredictEnv(env_model2, env_name, model_type)
+            if args.load and args.wm_learning_rate == 0:
+                env_model2 = deepcopy(env_model)
+                predict_env2 = deepcopy(predict_env)
+            if not(args.load and args.wm_learning_rate == 0):
+                env_model2 = torch.load(exp_name + "/" + "env_model.pkl")
+                predict_env2 = PredictEnv(env_model2, env_name, model_type)
 
             if args.env_name == "SafeAntMaze":
                 obs = env.reset()
@@ -759,7 +785,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 del otensor
 
                 if args.env_name == "SafeAntMaze":
+                    if args.add_state_normalization:
+                        o_without_goal[:2] = env.scale_poses(o_without_goal[:2])
                     next_o_without_goal = predict_env2.step(o_without_goal, a)
+                    if args.add_state_normalization:
+                        next_o_without_goal[:2] = env.rescale_poses(next_o_without_goal[:2])
                     next_o = np.concatenate((next_o_without_goal, goal_pos))
                 else:
                     next_o = predict_env2.step(o, a)
@@ -777,9 +807,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 # save and log
                 buf.store(obs_vec, a, r, c , v, vc, logp)
 
-                o = next_o
                 if args.env_name == "SafeAntMaze":
                     o_without_goal = next_o_without_goal
+                o = next_o
 
                 # Model horizon (H)  = max_ep_len2
                 timeout = dep_len == max_ep_len2
@@ -849,8 +879,15 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                         ovt = torch.as_tensor(obs_vecv, device=cpudevice, dtype=torch.float32)
                         av, _, _, _ = ac.step(ovt)
                         del ovt
-                        next_ov_without_goal = predict_env2.step_elite(ov_without_goal, av, va)
-                        next_ov = np.concatenate((next_ov_without_goal, goal_posv))
+                        if args.env_name == "SafeAntMaze":
+                            if args.add_state_normalization:
+                                ov_without_goal[:2] = env.scale_poses(ov_without_goal[:2])
+                            next_ov_without_goal = predict_env2.step_elite(ov_without_goal, av, va)
+                            if args.add_state_normalization:
+                                next_ov_without_goal[:2] = env.rescale_poses(next_ov_without_goal[:2])
+                            next_ov = np.concatenate((next_ov_without_goal, goal_posv))
+                        else:
+                            next_ov = predict_env2.step_elite(ov, av, va)
 
                         if args.env_name == "SafeAntMaze":
                             rv, cv, goal_flagv = env.get_reward_cost(robot_posv, 
@@ -859,7 +896,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                             rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
 
                         valid_rets[va] += rv
+                        if args.env_name == "SafeAntMaze":
+                            ov_without_goal = next_ov_without_goal
                         ov = next_ov
+
                         if goal_flagv:
                             if args.env_name == "SafeAntMaze":
                                 obs = env.reset()
@@ -903,11 +943,12 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         ac.save(exp_name)
         logging(logger, epoch, megaiter, 
                 start_time, violations, 
-                max_training_steps)
+                max_training_steps, args=args)
 
 def logging(logger, epoch, megaiter, 
             start_time, violations, 
-            max_training_steps, validate=False):
+            max_training_steps, validate=False, 
+            args=None):
     logger.store(Megaiter=megaiter)
     # Log info about epoch
     logger.log_tabular('Epoch', epoch)
@@ -925,7 +966,8 @@ def logging(logger, epoch, megaiter,
         logger.log_tabular('Megaiter', with_min_and_max=True)
         logger.log_tabular('LossPi', average_only=True)
         logger.log_tabular('LossV', average_only=True)
-        logger.log_tabular('LossModel', average_only=True)
+        if not args.wm_learning_rate == 0.0:
+            logger.log_tabular('LossModel', average_only=True)
         logger.log_tabular('LossCV', average_only=True)
         logger.log_tabular('DeltaLossPi', average_only=True)
         logger.log_tabular('DeltaLossV', average_only=True)
@@ -966,15 +1008,19 @@ if __name__ == '__main__':
     # PPO
     parser.add_argument('--target_kl', type=float, default=0.01)
 
-
     # world model
+    parser.add_argument("--load_wm_from_pth", action="store_true", default=False)
+    parser.add_argument("--add_state_normalization", action="store_true", default=False)
     parser.add_argument("--world_model", default=True)
+    parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument('--pred_hidden_size', default=200, type=int)
     parser.add_argument('--num_networks', default=8, type=int)
     parser.add_argument('--num_elites', default=6, type=int)
     parser.add_argument('--img_rollout_H', default=80, type=int)
+    parser.add_argument("--use_decay", default=True, type=bool)
     
     # actor critic
+    parser.add_argument("--not_load_ac", action="store_true", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
     parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
 
@@ -1048,14 +1094,19 @@ if __name__ == '__main__':
         num_networks = args.num_networks
         num_elites = args.num_elites
         pred_hidden_size = args.pred_hidden_size
-        use_decay = True
+        learning_rate = args.wm_learning_rate
+        use_decay = args.use_decay
         replay_size = 1000000
         env_name = 'safepg2'
         model_type='pytorch'
         reward_size = 0
         cost_size = 0
         #state_dim = 8
-        env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, reward_size, cost_size, pred_hidden_size,
+        env_model = EnsembleDynamicsModel(num_networks, num_elites, 
+                                          state_dim, action_dim, 
+                                          reward_size, cost_size, 
+                                          pred_hidden_size,
+                                          learning_rate=learning_rate,
                                           use_decay=use_decay)
         env_pool = ReplayMemory(replay_size)
         predict_env = PredictEnv(env_model, env_name, model_type)
@@ -1079,10 +1130,13 @@ if __name__ == '__main__':
     ppo(lambda : env, num_steps, args.cost_limit, actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=750,
-        logger_kwargs=logger_kwargs,exp_name="data/" + args.exp_name,beta=args.beta,
+        logger_kwargs=logger_kwargs, exp_name="data/" + args.exp_name, beta=args.beta,
         pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, 
         state_dim=state_dim, 
         goal_dim=goal_dim, 
         action_dim=action_dim,
         target_kl=args.target_kl,
-        renderer=renderer, img_rollout_H=args.img_rollout_H)
+        renderer=renderer, img_rollout_H=args.img_rollout_H,
+        loaded_exp_num="data/" + args.loaded_exp_num,
+        predict_env=predict_env,
+        env_model=env_model)
