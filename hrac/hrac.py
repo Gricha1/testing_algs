@@ -406,11 +406,21 @@ class Manager(object):
         torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo))
         if not(self.predict_env is None):
+            # save as pkl
             torch.save(self.predict_env.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
+            # save as state dict + scaler
+            torch.save(self.predict_env.model.ensemble_model.state_dict(), "{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo))
+            # save: scalar mu, scalar std, model elite idxs 
+            mu = self.predict_env.model.scaler.mu
+            std = self.predict_env.model.scaler.std
+            elite_model_idxes = np.array(self.predict_env.model.elite_model_idxes)
+            np.save("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo), mu)
+            np.save("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo), std)
+            np.save("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo), elite_model_idxes)
         # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ManagerActorOptim.pth".format(dir, env_name, algo))
         # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ManagerCriticOptim.pth".format(dir, env_name, algo))
 
-    def load(self, dir, env_name, algo, exp_num):
+    def load(self, dir, env_name, algo, exp_num, load_wm_as_pkl=True):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo)))
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
         self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo)))
@@ -418,9 +428,17 @@ class Manager(object):
         if not(self.predict_env is None):
             temp_env_name = 'safepg2'
             temp_model_type='pytorch'
-            env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-            predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
-            self.set_predict_env(predict_env)
+            if load_wm_as_pkl:
+                env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
+                predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
+                self.set_predict_env(predict_env)
+            else:
+                self.predict_env.model.ensemble_model.load_state_dict(torch.load("{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo)))
+                mu = np.load("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo))
+                std = np.load("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo))
+                self.predict_env.model.scaler.set_mu_std(mu, std)
+                elite_model_idxes = np.load("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo))
+                self.predict_env.model.set_elite_model_idxes(elite_model_idxes)
         # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ManagerActorOptim.pth".format(dir, env_name, algo)))
         # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ManagerCriticOptim.pth".format(dir, env_name, algo)))
 
