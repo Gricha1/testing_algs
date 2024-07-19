@@ -343,14 +343,14 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
 
     # Set up optimizers for policy and value function
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
-    penalty_param = torch.tensor(0.5, device=cpudevice,requires_grad=True).float()
+    penalty_param = torch.tensor(0.5, device=cpudevice, requires_grad=True).float()
     penalty = softplus(penalty_param)
 
 
     penalty_lr = 5e-2
     penalty_optimizer = Adam([penalty_param], lr=penalty_lr)
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
-    cvf_optimizer = Adam(ac.vc.parameters(),lr=vf_lr)
+    cvf_optimizer = Adam(ac.vc.parameters(), lr=vf_lr)
     # Set up model saving
     logger.setup_pytorch_saver(ac)
 
@@ -392,7 +392,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         penalty_optimizer.step()
 
         data['cur_penalty'] = penalty_param
-        print("penal=",softplus(penalty_param))
+        print("penal=", softplus(penalty_param))
 
 
         pi_l_old = pi_l_old.item()
@@ -417,6 +417,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             pi_optimizer.zero_grad()
             loss_pi.backward()
             mpi_avg_grads(ac.pi)
+            if args.ppo_grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(ac.pi.parameters(), 
+                                      max_norm=args.ppo_grad_clip)
             pi_optimizer.step()
 
         # Value function learning
@@ -425,11 +428,18 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             vf_optimizer.zero_grad()
             loss_v.backward()
             mpi_avg_grads(ac.v)   # average grads across MPI processes
+            if args.ppo_grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(ac.v.parameters(), 
+                                      max_norm=args.ppo_grad_clip)
             vf_optimizer.step()
 
             cvf_optimizer.zero_grad()
             loss_vc.backward()
             mpi_avg_grads(ac.vc)
+            if args.ppo_grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(ac.vc.parameters(), 
+                                      max_norm=args.ppo_grad_clip)
+
             cvf_optimizer.step()
 
         # Log changes from update
@@ -480,7 +490,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         megaiter = 0
         max_training_steps = 0
 
-        debug = False
+        debug = True
 
         if args.env_name == "SafeAntMaze":
             obs = env.reset(eval_idx=val_episode)
@@ -579,7 +589,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 hazards_pos = static['hazards']
                 #ld = dist_xy(o[40:], goal_pos)
                 ep_ret, ep_len =  0, 0
-                pep_ret,pep_cost  = 0,0
+                pep_ret, pep_cost  = 0,0
                 ep_cost = 0
                 val_episode += 1
 
@@ -961,6 +971,7 @@ def logging(logger, epoch, megaiter,
     #-------------no. of environment interaction per epoch = max_training_steps = 1e4 --------------------
     if not validate:
         logger.log_tabular('TotalEnvInteracts', (epoch+1)*max_training_steps)
+        logger.log_tabular('global_step', (epoch+1)*max_training_steps)
         logger.log_tabular('DynaEpRet', with_min_and_max=True)
         logger.log_tabular('DynaEpCost',with_min_and_max=True)
         logger.log_tabular('Megaiter', with_min_and_max=True)
@@ -1005,9 +1016,6 @@ if __name__ == '__main__':
     parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
     
-    # PPO
-    parser.add_argument('--target_kl', type=float, default=0.01)
-
     # world model
     parser.add_argument("--load_wm_from_pth", action="store_true", default=False)
     parser.add_argument("--add_state_normalization", action="store_true", default=False)
@@ -1020,9 +1028,12 @@ if __name__ == '__main__':
     parser.add_argument("--use_decay", default=True, type=bool)
     
     # actor critic
+    parser.add_argument('--target_kl', type=float, default=0.01)
     parser.add_argument("--not_load_ac", action="store_true", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
     parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
+    parser.add_argument("--ppo_grad_clip", default=0, type=float)
+
 
     # logger
     parser.add_argument("--log_dir", default="./data", type=str)

@@ -2,10 +2,10 @@
 
 
 #weights_folder="final_base"
-weights_folder=test_point_37
+weights_folder=validate_1
 echo "Weights folder: $weights_folder"
 
 
 #python3 mbppo_lagrangian.py --vizualize_validation --validate --load --exp_name=$weights_folder --seed=0 --env=Safexp-PointGoal2-v0 --beta=0.02
 #python3 mbppo_lagrangian.py --vizualize_validation --validate --load --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
-python3 mbppo_lagrangian.py --vizualize_validation --validate --load --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
+python3 mbppo_lagrangian.py --load --load_wm_from_pth --loaded_exp_num test_point_103 --exp_name=$weights_folder --hid 300 --vizualize_validation --validate --load --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
