@@ -338,7 +338,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
     # Set up function for computing value loss
     def compute_loss_v(data):
         obs, ret, cret = data['obs'], data['ret'], data['cret']
-        return ((ac.v(obs) - ret)**2).mean(),((ac.vc(obs) - cret)**2).mean()
+        return ((ac.v(obs) - ret)**2).mean(), ((ac.vc(obs) - cret)**2).mean()
 
 
     # Set up optimizers for policy and value function
@@ -401,9 +401,6 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
 
 
         # Train policy with multiple steps of gradient descent
-        train_epoch_eigvals=[]
-
-        this_epoch_gradnorms = []
         for i in range(train_pi_iters):
 
             loss_pi, _,pi_info = compute_loss_pi(data)
