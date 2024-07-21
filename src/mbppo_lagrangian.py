@@ -317,7 +317,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)
             clipfrac = torch.as_tensor(clipped, device=cpudevice, dtype=torch.float32).mean().item()
             pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
-            return -loss_rpi, _, _
+            return -loss_rpi, _, pi_info
 
 
         clip_cadv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * cadv
@@ -1157,6 +1157,6 @@ if __name__ == '__main__':
         action_dim=action_dim,
         target_kl=args.target_kl,
         renderer=renderer, img_rollout_H=args.img_rollout_H,
-        loaded_exp_num="data/" + args.loaded_exp_num,
+        loaded_exp_num="data/" + str(args.loaded_exp_num),
         predict_env=predict_env,
         env_model=env_model)
