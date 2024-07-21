@@ -101,7 +101,6 @@ class PPOBuffer:
         self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)
         self.cadv_buf[path_slice] = core.discount_cumsum(cdeltas, self.gamma * self.lam)
 
-
         # the next line computes rewards-to-go, to be targets for the value function
         self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)[:-1]
         self.cret_buf[path_slice] = core.discount_cumsum(crews, self.gamma)[:-1]
@@ -317,8 +316,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)
             clipfrac = torch.as_tensor(clipped, device=cpudevice, dtype=torch.float32).mean().item()
             pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
-            return -loss_rpi, _, pi_info
 
+            return -loss_rpi, _, pi_info
 
         clip_cadv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * cadv
         loss_cpi = (torch.max(ratio * cadv, clip_cadv)).mean()
@@ -547,6 +546,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     pass
             del ot
 
+            if debug:
+                a = env.action_space.sample()
+                print("random action")
             next_o, r, d, info = env.step(a)
 
             if args.env_name == "SafeAntMaze": 
@@ -601,8 +603,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             terminal = d or timeout
 
             if terminal:
+                _, _, goal_flag = env.get_reward_cost(next_o[:2], 
+                                                      goal_pos)
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
-                             PEPRet=pep_ret, PEPCost=pep_cost)
+                             PEPRet=pep_ret, PEPCost=pep_cost, TrainSucRate=float(goal_flag))
                 break
                 o,static= env.reset()
                 goal_pos = static['goal']
@@ -753,7 +757,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     hazards_pos = static['hazards']
                     ld = dist_xy(o[40:], goal_pos)
                 ep_ret, ep_len =  0, 0
-                pep_ret,pep_cost = 0, 0
+                pep_ret, pep_cost = 0, 0
                 ep_cost = 0
                 train_episode += 1
         if args.vizualize_validation and (epoch % validate_each_epoch) == 0:
@@ -1034,10 +1038,6 @@ if __name__ == '__main__':
     # environment
     parser.add_argument('--env_name', type=str, default='Safexp-PointGoal2-v0')
     parser.add_argument("--random_start_pose", action="store_true", default=False)
-
-    parser.add_argument('--hid', type=int, default=64)
-    parser.add_argument('--l', type=int, default=2)
-    parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
      #---------Don't use multiprocessing as data collection and environment model training is not modified for that-----------#
     parser.add_argument('--cpu', type=int, default=1)
@@ -1059,7 +1059,11 @@ if __name__ == '__main__':
     parser.add_argument('--img_rollout_H', default=80, type=int)
     parser.add_argument("--use_decay", default=True, type=bool)
     
-    # actor critic
+    # PPO
+    parser.add_argument('--lam', type=float, default=0.97) # GAE
+    parser.add_argument('--gamma', type=float, default=0.99)
+    parser.add_argument('--hid', type=int, default=64)
+    parser.add_argument('--l', type=int, default=2)
     parser.add_argument("--rew_scale", default=1.0, type=float)
     parser.add_argument("--ppo_without_safe", action="store_true", default=False)
     parser.add_argument('--target_kl', type=float, default=0.01)
@@ -1174,7 +1178,7 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------
 
     ppo(lambda : env, num_steps, args.cost_limit, actor_critic=core.MLPActorCritic,
-        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
+        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma, lam=args.lam,
         seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=max_ep_len,
         logger_kwargs=logger_kwargs, exp_name="data/" + args.exp_name, beta=args.beta,
         pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, 
