@@ -133,7 +133,7 @@ class PPOBuffer:
 def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=None, save_freq=1,exp_name='default', beta=1,
+        target_kl=0.01, logger_kwargs=None, save_freq=1, exp_name='default', beta=1,
         args=None, state_dim=0, goal_dim=0, action_dim=0, renderer=None, img_rollout_H=80,
         loaded_exp_num=None, predict_env=None, env_model=None):
     """
@@ -404,11 +404,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         data['cur_penalty'] = penalty_param
         print("penal=", softplus(penalty_param))
 
-
         pi_l_old = pi_l_old.item()
         v_l_old, cv_l_old = compute_loss_v(data)
         v_l_old, cv_l_old = v_l_old.item(), cv_l_old.item()
-
 
         # Train policy with multiple steps of gradient descent
         for i in range(train_pi_iters):
@@ -427,6 +425,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             if args.ppo_grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(ac.pi.parameters(), 
                                       max_norm=args.ppo_grad_clip)
+            with torch.no_grad():
+                pi_grad = (
+                    sum(p.grad.data.norm(2).item() ** 2 for p in ac.pi.parameters() if p.grad is not None) ** 0.5
+                )
             pi_optimizer.step()
 
         # Value function learning
@@ -439,6 +441,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             if args.ppo_grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(ac.v.parameters(), 
                                       max_norm=args.ppo_grad_clip)
+            with torch.no_grad():
+                v_grad = (
+                    sum(p.grad.data.norm(2).item() ** 2 for p in ac.v.parameters() if p.grad is not None) ** 0.5
+                )
             vf_optimizer.step()
             
             # optimize CV function
@@ -448,18 +454,23 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             if args.ppo_grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(ac.vc.parameters(), 
                                       max_norm=args.ppo_grad_clip)
-
+            with torch.no_grad():
+                cv_grad = (
+                    sum(p.grad.data.norm(2).item() ** 2 for p in ac.vc.parameters() if p.grad is not None) ** 0.5
+                )
             cvf_optimizer.step()
 
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
-        #wandb.log({'losspi':pi_l_old,'kl':kl})
         logger.store(LossPi=pi_l_old, LossV=v_l_old,
                      LossCV=cv_l_old,
-                     Lambda=penalty_param,
+                     Lambda=penalty_param.item(),
                      KL=kl, Entropy=ent, ClipFrac=cf,
                      DeltaLossPi=(loss_pi.item() - pi_l_old),
-                     DeltaLossV=(loss_v.item() - v_l_old))
+                     DeltaLossV=(loss_v.item() - v_l_old),
+                     PiGrad=pi_grad,
+                     VGrad=v_grad,
+                     CVGrad=cv_grad)
 
 #----------------------TRAIN DYNAMICS----------------------------------------------------------
     def train_predict_model(env_pool, predict_env):
@@ -669,6 +680,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
             del ot
 
             next_o, r, d, info = env.step(a)
+            if args.env_name == "SafeAntMaze":
+                r = r * args.rew_scale
 
             if args.env_name == "SafeAntMaze":
                 next_o_without_goal = next_o["observation"]                  
@@ -759,7 +772,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         while perf_flag:
             if megaiter == 0:
                 last_dynaret = 0
-                last_valid_rets = [0]*args.num_elites
+                last_valid_rets = [0] * args.num_elites
 
             if args.load and args.wm_learning_rate == 0:
                 env_model2 = deepcopy(env_model)
@@ -801,6 +814,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
 
                 otensor = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
                 a, v, vc, logp = ac.step(otensor)
+                # test
+                if t < 3:
+                    print("a:", a)
                 del otensor
 
                 if args.env_name == "SafeAntMaze":
@@ -816,6 +832,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 if args.env_name == "SafeAntMaze":
                     r, c, goal_flag = env.get_reward_cost(robot_pos, 
                                                           goal_pos)
+                    r = r * args.rew_scale
                 else:
                     r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
 
@@ -824,7 +841,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 dep_len += 1
 
                 # save and log
-                buf.store(obs_vec, a, r, c , v, vc, logp)
+                buf.store(obs_vec, a, r, c, v, vc, logp)
 
                 if args.env_name == "SafeAntMaze":
                     o_without_goal = next_o_without_goal
@@ -855,7 +872,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                         o_without_goal = obs["observation"]
                         o = np.concatenate((o_without_goal, goal_pos))                   
                     else:
-                        o, static  = env.reset()
+                        o, static = env.reset()
                         goal_pos = static['goal']
                         hazards_pos = static['hazards']
                         ld = dist_xy(o[40:], goal_pos)
@@ -865,14 +882,14 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 logger.save_state({'env': env}, None)
             new_dynaret = logger.get_stats('DynaEpRet')[0]
 
-            ## Validation
+            ## Validation world model and Train actor critic
             if megaiter > 0:
                 old_params_pi = get_param_values(ac.pi)
                 old_params_v = get_param_values(ac.v)
                 old_params_vc = get_param_values(ac.vc)
                 update()
                 # 6 ELITE MODELS OUT OF 8
-                valid_rets = [0]*args.num_elites
+                valid_rets = [0] * args.num_elites
                 winner = 0
                 print("validating............")
                 for va in tqdm(range(len(valid_rets))):
@@ -887,7 +904,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                         hazards_posv = staticv['hazards']
                         # test probably bug with o instead of ov
                         ldv = dist_xy(o[40:], goal_posv)
-                    for step_iter in range(75):
+                    # test 75 probably isnt correct
+                    for step_iter in range(max_ep_len2 - 5):
                         if args.env_name == "SafeAntMaze":
                             obs_vecv = ov
                             robot_posv = ov[:2]
@@ -911,6 +929,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                         if args.env_name == "SafeAntMaze":
                             rv, cv, goal_flagv = env.get_reward_cost(robot_posv, 
                                                                      goal_posv)
+                            rv = rv * args.rew_scale
                         else:
                             rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
 
@@ -935,7 +954,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 print(valid_rets, last_valid_rets)
                 performance_ratio = winner / args.num_elites
                 print("Performance ratio=", performance_ratio)
-                thresh = 4/6  #BETTER THAN 50%
+                thresh = ((args.num_elites // 2) + 1) / args.num_elites  #BETTER THAN 50%
                 if performance_ratio < thresh:
                     perf_flag = False
                     print("backtracking.........")
@@ -955,7 +974,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     last_valid_rets = valid_rets
             else:
                 # Perform PPO-agrangian update!
-                megaiter+=1
+                megaiter += 1
                 update()
 
         ## Save Actor Critic Weights and Logging
@@ -986,6 +1005,10 @@ def logging(logger, epoch, megaiter,
         logger.log_tabular('Megaiter', with_min_and_max=True)
         logger.log_tabular('LossPi', average_only=True)
         logger.log_tabular('LossV', average_only=True)
+        logger.log_tabular('Lambda', average_only=True)
+        logger.log_tabular('PiGrad', average_only=True)
+        logger.log_tabular('VGrad', average_only=True)
+        logger.log_tabular('CVGrad', average_only=True)
         if not args.wm_learning_rate == 0.0:
             logger.log_tabular('LossModel', average_only=True)
         logger.log_tabular('LossCV', average_only=True)
@@ -1037,6 +1060,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_decay", default=True, type=bool)
     
     # actor critic
+    parser.add_argument("--rew_scale", default=1.0, type=float)
     parser.add_argument("--ppo_without_safe", action="store_true", default=False)
     parser.add_argument('--target_kl', type=float, default=0.01)
     parser.add_argument("--not_load_ac", action="store_true", default=False)
@@ -1091,6 +1115,7 @@ if __name__ == '__main__':
         state_dim, action_dim = env.observation_size, env.action_size
         goal_dim = None
         renderer = None
+        max_ep_len = eplen
 
     elif args.env_name == "SafeAntMaze":
         num_steps = 1.8e6
@@ -1107,6 +1132,7 @@ if __name__ == '__main__':
                                                             renderer_args=renderer_args)
         if renderer_args["plot_world_model_state"]:
             assert args.load
+        max_ep_len = 500
     else:
         assert 1 == 0
         
@@ -1149,7 +1175,7 @@ if __name__ == '__main__':
 
     ppo(lambda : env, num_steps, args.cost_limit, actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma,
-        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=750,
+        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=max_ep_len,
         logger_kwargs=logger_kwargs, exp_name="data/" + args.exp_name, beta=args.beta,
         pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, 
         state_dim=state_dim, 
