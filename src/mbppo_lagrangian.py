@@ -295,9 +295,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
     buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
     gradnorm_list = []
     cost_limit = cost_limit
+
     # Set up function for computing PPO policy loss
-    def compute_loss_pi(data):        
-        obs, act, adv, cadv,  logp_old = data['obs'], data['act'], data['adv'], data['cadv'] ,data['logp']
+    def compute_loss_pi(data, ppo_without_safe=False):        
+        obs, act, adv, cadv, logp_old = data['obs'], data['act'], data['adv'], data['cadv'], data['logp']
 
         cur_cost = data['cur_cost']
         penalty_param = data['cur_penalty']
@@ -310,6 +311,15 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         clip_adv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * adv
         loss_rpi = (torch.min(ratio * adv, clip_adv)).mean()
 
+        if ppo_without_safe:
+            approx_kl = (logp_old - logp).mean().item()
+            ent = pi.entropy().mean().item()
+            clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)
+            clipfrac = torch.as_tensor(clipped, device=cpudevice, dtype=torch.float32).mean().item()
+            pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
+            return -loss_rpi, _, _
+
+
         clip_cadv = torch.clamp(ratio, 1-clip_ratio, 1+clip_ratio) * cadv
         loss_cpi = (torch.max(ratio * cadv, clip_cadv)).mean()
         loss_cpi = loss_cpi.mean()
@@ -317,7 +327,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         p = softplus(penalty_param)
         penalty_item = p.item()
 
-        pi_objective = loss_rpi - penalty_item*loss_cpi
+        pi_objective = loss_rpi - penalty_item * loss_cpi
         ent_coef = 0.0 #1*pi.entropy().mean()
         pi_objective = (pi_objective + ent_coef) / (1 + penalty_item)
         loss_pi = -pi_objective
@@ -381,15 +391,15 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         data = buf.get()
         data['cur_cost'] = cur_cost
         data['cur_penalty'] = penalty_param
-        pi_l_old, cost_dev, pi_info_old = compute_loss_pi(data)
+        pi_l_old, cost_dev, pi_info_old = compute_loss_pi(data, 
+                                            ppo_without_safe=args.ppo_without_safe)
+        if not args.ppo_without_safe:
+            loss_penalty = -penalty_param * cost_dev
 
-        loss_penalty = -penalty_param*cost_dev
-
-
-        penalty_optimizer.zero_grad()
-        loss_penalty.backward()
-        mpi_avg_grads(penalty_param)
-        penalty_optimizer.step()
+            penalty_optimizer.zero_grad()
+            loss_penalty.backward()
+            mpi_avg_grads(penalty_param)
+            penalty_optimizer.step()
 
         data['cur_penalty'] = penalty_param
         print("penal=", softplus(penalty_param))
@@ -403,7 +413,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         # Train policy with multiple steps of gradient descent
         for i in range(train_pi_iters):
 
-            loss_pi, _,pi_info = compute_loss_pi(data)
+            loss_pi, _, pi_info = compute_loss_pi(data, ppo_without_safe=args.ppo_without_safe)
 
             kl = mpi_avg(pi_info['kl'])
 
@@ -422,6 +432,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
         # Value function learning
         for i in range(train_v_iters):
             loss_v, loss_vc = compute_loss_v(data)
+            # optimize V function
             vf_optimizer.zero_grad()
             loss_v.backward()
             mpi_avg_grads(ac.v)   # average grads across MPI processes
@@ -429,7 +440,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 torch.nn.utils.clip_grad_norm_(ac.v.parameters(), 
                                       max_norm=args.ppo_grad_clip)
             vf_optimizer.step()
-
+            
+            # optimize CV function
             cvf_optimizer.zero_grad()
             loss_vc.backward()
             mpi_avg_grads(ac.vc)
@@ -1025,12 +1037,12 @@ if __name__ == '__main__':
     parser.add_argument("--use_decay", default=True, type=bool)
     
     # actor critic
+    parser.add_argument("--ppo_without_safe", action="store_true", default=False)
     parser.add_argument('--target_kl', type=float, default=0.01)
     parser.add_argument("--not_load_ac", action="store_true", default=False)
     parser.add_argument('--pi_lr', default=3e-4, type=float) # 3e-4
     parser.add_argument('--vf_lr', default=1e-3, type=float) # 1e-3
     parser.add_argument("--ppo_grad_clip", default=0, type=float)
-
 
     # logger
     parser.add_argument("--log_dir", default="./data", type=str)
