@@ -129,8 +129,9 @@ class PPOBuffer:
 
 
 
-def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
-        steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
+def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, 
+        ac_kwargs=dict(), seed=0,
+        steps_per_epoch=4000, gamma=0.99, clip_ratio=0.1, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
         target_kl=0.01, logger_kwargs=None, save_freq=1, exp_name='default', beta=1,
         args=None, state_dim=0, goal_dim=0, action_dim=0, renderer=None, img_rollout_H=80,
@@ -370,7 +371,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                                  for p in trainable_params])
         return params.copy()
 
-    def set_param_values(new_params,model,set_new=True):
+    def set_param_values(new_params, model, set_new=True):
         trainable_params = list(model.parameters())
 
         param_shapes = [p.data.numpy().shape for p in trainable_params]
@@ -606,7 +607,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                 _, _, goal_flag = env.get_reward_cost(next_o[:2], 
                                                       goal_pos)
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
-                             PEPRet=pep_ret, PEPCost=pep_cost, TrainSucRate=float(goal_flag))
+                             PEPRet=pep_ret, PEPCost=pep_cost, 
+                             TrainSucRate=float(goal_flag))
                 break
                 o,static= env.reset()
                 goal_pos = static['goal']
@@ -744,7 +746,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     buf.finish_path(v, vc)
 
             if terminal:
-                logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, PEPRet=pep_ret, PEPCost=pep_cost)
+                _, _, goal_flag = env.get_reward_cost(next_o[:2], 
+                                                      goal_pos)
+                logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
+                             PEPRet=pep_ret, PEPCost=pep_cost,
+                             TrainSucRate=float(goal_flag))
             if terminal or epoch_ended:
                 if args.env_name == "SafeAntMaze":
                     obs = env.reset()
@@ -817,6 +823,12 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     obs_vec = np.array(obs_vec)
 
                 otensor = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
+
+                # test
+                if t < 3:
+                    print(f"t: {t}, obs:", otensor)
+                #if t == max_ep_len2:
+                #    print(f"t: {t}, obs:", otensor)
                 a, v, vc, logp = ac.step(otensor)
                 # test
                 if t < 3:
@@ -963,6 +975,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic, ac_kwar
                     perf_flag = False
                     print("backtracking.........")
                     #------------backtrack-----------------
+                    # test probably doesnt let update weights
                     set_param_values(old_params_pi, ac.pi)
                     set_param_values(old_params_v, ac.v)
                     set_param_values(old_params_vc, ac.vc)
@@ -995,6 +1008,7 @@ def logging(logger, epoch, megaiter,
     # Log info about epoch
     logger.log_tabular('Epoch', epoch)
     logger.log_tabular('EpRet', with_min_and_max=True)
+    logger.log_tabular('TrainSucRate', average_only=True)
     logger.log_tabular('EpCost', with_min_and_max=True)
     logger.log_tabular('EpLen', average_only=True)
     logger.log_tabular('PEPRet', with_min_and_max=True)
@@ -1049,6 +1063,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=1)
     
     # world model
+    parser.add_argument('--ppo_batch_size', default=30_000, type=int)
     parser.add_argument("--load_wm_from_pth", action="store_true", default=False)
     parser.add_argument("--add_state_normalization", action="store_true", default=False)
     parser.add_argument("--world_model", default=True)
@@ -1060,6 +1075,9 @@ if __name__ == '__main__':
     parser.add_argument("--use_decay", default=True, type=bool)
     
     # PPO
+    parser.add_argument('--train_pi_iters', type=int, default=80)
+    parser.add_argument('--train_v_iters', type=int, default=80)
+    parser.add_argument('--clip_ratio', type=float, default=0.1)
     parser.add_argument('--lam', type=float, default=0.97) # GAE
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--hid', type=int, default=64)
@@ -1089,8 +1107,6 @@ if __name__ == '__main__':
     #if rank>0:
     #=================safety gym benchmarks defaults==============================
     num_steps = 4.5e5
-    steps_per_epoch = 30000
-    epochs = int(num_steps / steps_per_epoch)
     #=============================================================================
     #---modified safety_gym-------------------------------------------------------
     DEFAULT_ENV_CONFIG_POINT = dict(
@@ -1104,16 +1120,12 @@ if __name__ == '__main__':
             robot = 'Point'
             eplen = 750
             num_steps = 4.5e5
-            steps_per_epoch = 30000
-            epochs = 60
             DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
         elif "Car" in args.env_name:
             robot = 'Car'
             eplen = 750
             DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
             num_steps = 4.5e5
-            steps_per_epoch = 30000
-            epochs = 60
         env_config=DEFAULT_ENV_CONFIG_POINT
         env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
         state_dim, action_dim = env.observation_size, env.action_size
@@ -1178,14 +1190,17 @@ if __name__ == '__main__':
     #-----------------------------------------------------------------------------
 
     ppo(lambda : env, num_steps, args.cost_limit, actor_critic=core.MLPActorCritic,
-        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma, lam=args.lam,
-        seed=args.seed, steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=max_ep_len,
+        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma, 
+        clip_ratio=args.clip_ratio , lam=args.lam,
+        seed=args.seed, steps_per_epoch=args.ppo_batch_size, max_ep_len=max_ep_len,
         logger_kwargs=logger_kwargs, exp_name="data/" + args.exp_name, beta=args.beta,
         pi_lr=args.pi_lr, vf_lr=args.vf_lr, args=args, 
         state_dim=state_dim, 
         goal_dim=goal_dim, 
         action_dim=action_dim,
         target_kl=args.target_kl,
+        train_pi_iters=args.train_pi_iters,
+        train_v_iters=args.train_v_iters,
         renderer=renderer, img_rollout_H=args.img_rollout_H,
         loaded_exp_num="data/" + str(args.loaded_exp_num),
         predict_env=predict_env,
