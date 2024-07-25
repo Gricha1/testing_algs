@@ -1,1 +1,1 @@
-python train_safe.py --domain_name Safexp --task_name PointGoal1 --seed 0 --cuda
+python train_safe.py --use_wandb --domain_name Safexp --task_name PointGoal1 --seed 0 --cuda

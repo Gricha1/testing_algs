@@ -73,7 +73,9 @@ def main(args):
         num_eval_episodes=config["num_eval_episodes"],
         action_repeat=config["action_repeat"],
         train_steps_per_iter=config["train_steps_per_iter"],
-        env_steps_per_train_step=config["env_steps_per_train_step"]
+        env_steps_per_train_step=config["env_steps_per_train_step"],
+        use_wandb=args.use_wandb,
+        config=config
     )
     trainer.writer.add_text("config", json.dumps(config), 0)
     trainer.train()
@@ -86,6 +88,7 @@ if __name__ == "__main__":
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--seed", type=int, default=314, help="Random seed")
     parser.add_argument("--cuda", action="store_true", help="Train using GPU with CUDA")
+    parser.add_argument("--use_wandb", action="store_true", default=False)
     args = parser.parse_args()
     main(args)
 

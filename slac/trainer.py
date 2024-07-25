@@ -11,6 +11,7 @@ from tqdm import tqdm
 from slac.utils import sample_reproduction
 from PIL import Image
 from copy import deepcopy
+import wandb
 
 class SlacObservation:
     """
@@ -72,7 +73,9 @@ class Trainer:
         num_eval_episodes=3,
         env_steps_per_train_step=1,
         action_repeat=1,
-        train_steps_per_iter=1
+        train_steps_per_iter=1,
+        use_wandb=False,
+        config=None
     ):
         # Env to collect samples.
         self.env = env
@@ -94,6 +97,13 @@ class Trainer:
         self.log_dir = log_dir
         self.summary_dir = os.path.join(log_dir, "summary")
         self.writer = SummaryWriter(log_dir=self.summary_dir, flush_secs=10)
+        if use_wandb:
+            self.wandb_run = wandb.init(
+                project="safe_slac",
+                sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
+                name=config["task_name"],
+                config=config
+            )
         self.model_dir = os.path.join(log_dir, "model")
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
