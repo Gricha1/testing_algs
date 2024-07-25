@@ -12,7 +12,7 @@ python main.py --modelfree_safety \
                --train_safe_model --controller_safe_model \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 800 \
-               --controller_safety_coef 10 \
+               --controller_safety_coef 5 \
                --controller_imagination_safety_loss \
                --max_timesteps 1800000 \
                --wandb_postfix "" 
