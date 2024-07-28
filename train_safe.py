@@ -26,15 +26,23 @@ def main(args):
     config["seed"] = args.seed
     config["num_steps"] = args.num_steps
 
-    env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', image_size=config["image_size"], use_pixels=True, action_repeat=config["action_repeat"])
-    env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', image_size=config["image_size"], use_pixels=True, action_repeat=config["action_repeat"])
+    env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                        image_size=config["image_size"], 
+                        use_pixels=not args.vector_env, 
+                        action_repeat=config["action_repeat"])
+    env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                           image_size=config["image_size"], 
+                           use_pixels=not args.vector_env, 
+                           action_repeat=config["action_repeat"])
     short_hash = get_git_short_hash()
     log_dir = os.path.join(
         "logs",
         f"{short_hash}",
         f"{config['domain_name']}-{config['task_name']}",
         f'slac-seed{config["seed"]}-{datetime.now().strftime("%Y%m%d-%H%M")}',
+        args.exp_num,
     )
+    config["log_dir"] = log_dir
 
     algo = LatentPolicySafetyCriticSlac(
         num_sequences=config["num_sequences"],
@@ -57,6 +65,7 @@ def main(args):
         grad_clip_norm=config["grad_clip_norm"],
         tau=config["tau"],
         image_noise=config["image_noise"],
+        pixel_input=not args.vector_env,
     )
     trainer = Trainer(
         num_sequences=config["num_sequences"],
@@ -75,7 +84,8 @@ def main(args):
         train_steps_per_iter=config["train_steps_per_iter"],
         env_steps_per_train_step=config["env_steps_per_train_step"],
         use_wandb=args.use_wandb,
-        config=config
+        config=config,
+        pixel_input=not args.vector_env,
     )
     trainer.writer.add_text("config", json.dumps(config), 0)
     trainer.train()
@@ -83,7 +93,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--exp_num", type=str, default="0")
     parser.add_argument("--num_steps", type=int, default=2 * 10 ** 6, help="Number of training steps")
+    parser.add_argument("--vector_env", default=False, action="store_true")
     parser.add_argument("--domain_name", type=str, default="Safexp", help="Name of the domain")
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--seed", type=int, default=314, help="Random seed")

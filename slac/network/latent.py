@@ -81,26 +81,34 @@ class Decoder(torch.jit.ScriptModule):
     Decoder.
     """
 
-    def __init__(self, input_dim=288, output_dim=3, std=1.0):
+    def __init__(self, input_dim=288, output_dim=3, std=1.0, pixel_input=True, hidden_units=(256, 256)):
         super(Decoder, self).__init__()
 
-        self.net = nn.Sequential(
-            # (32+256, 1, 1) -> (256, 4, 4)
-            nn.ConvTranspose2d(input_dim, 256, 4),
-            nn.LeakyReLU(inplace=True, negative_slope=0.2),
-            # (256, 4, 4) -> (128, 8, 8)
-            nn.ConvTranspose2d(256, 128, 3, 2, 1, 1),
-            nn.LeakyReLU(inplace=True, negative_slope=0.2),
-            # (128, 8, 8) -> (64, 16, 16)
-            nn.ConvTranspose2d(128, 64, 3, 2, 1, 1),
-            nn.LeakyReLU(inplace=True, negative_slope=0.2),
-            # (64, 16, 16) -> (32, 32, 32)
-            nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
-            nn.LeakyReLU(inplace=True, negative_slope=0.2),
-            # (32, 32, 32) -> (3, 64, 64)
-            nn.ConvTranspose2d(32, output_dim, 5, 2, 2, 1),
-            nn.LeakyReLU(inplace=True, negative_slope=0.2),
-        ).apply(initialize_weight)
+        if pixel_input:
+            self.net = nn.Sequential(
+                # (32+256, 1, 1) -> (256, 4, 4)
+                nn.ConvTranspose2d(input_dim, 256, 4),
+                nn.LeakyReLU(inplace=True, negative_slope=0.2),
+                # (256, 4, 4) -> (128, 8, 8)
+                nn.ConvTranspose2d(256, 128, 3, 2, 1, 1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.2),
+                # (128, 8, 8) -> (64, 16, 16)
+                nn.ConvTranspose2d(128, 64, 3, 2, 1, 1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.2),
+                # (64, 16, 16) -> (32, 32, 32)
+                nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.2),
+                # (32, 32, 32) -> (3, 64, 64)
+                nn.ConvTranspose2d(32, output_dim, 5, 2, 2, 1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.2),
+            ).apply(initialize_weight)
+        else:
+            self.net = build_mlp(
+                input_dim=input_dim,
+                output_dim=int(output_dim),
+                hidden_units=hidden_units,
+                hidden_activation=nn.ELU(),
+            ).apply(initialize_weight)
         self.std = std
 
     @torch.jit.script_method
@@ -117,26 +125,34 @@ class Encoder(torch.jit.ScriptModule):
     Encoder.
     """
 
-    def __init__(self, input_dim=3, output_dim=256):
+    def __init__(self, input_dim=3, output_dim=256, pixel_input=True, hidden_units=(256, 256)):
         super(Encoder, self).__init__()
 
-        self.net = nn.Sequential(
-            # (3, 64, 64) -> (32, 32, 32)
-            nn.Conv2d(input_dim, 32, 5, 2, 2),
-            nn.ELU(inplace=True),
-            # (32, 32, 32) -> (64, 16, 16)
-            nn.Conv2d(32, 64, 3, 2, 1),
-            nn.ELU(inplace=True),
-            # (64, 16, 16) -> (128, 8, 8)
-            nn.Conv2d(64, 128, 3, 2, 1),
-            nn.ELU(inplace=True),
-            # (128, 8, 8) -> (256, 4, 4)
-            nn.Conv2d(128, 256, 3, 2, 1),
-            nn.ELU(inplace=True),
-            # (256, 4, 4) -> (256, 1, 1)
-            nn.Conv2d(256, output_dim, 4),
-            nn.ELU(inplace=True),
-        ).apply(initialize_weight)
+        if pixel_input:
+            self.net = nn.Sequential(
+                # (3, 64, 64) -> (32, 32, 32)
+                nn.Conv2d(input_dim, 32, 5, 2, 2),
+                nn.ELU(inplace=True),
+                # (32, 32, 32) -> (64, 16, 16)
+                nn.Conv2d(32, 64, 3, 2, 1),
+                nn.ELU(inplace=True),
+                # (64, 16, 16) -> (128, 8, 8)
+                nn.Conv2d(64, 128, 3, 2, 1),
+                nn.ELU(inplace=True),
+                # (128, 8, 8) -> (256, 4, 4)
+                nn.Conv2d(128, 256, 3, 2, 1),
+                nn.ELU(inplace=True),
+                # (256, 4, 4) -> (256, 1, 1)
+                nn.Conv2d(256, output_dim, 4),
+                nn.ELU(inplace=True),
+            ).apply(initialize_weight)
+        else:
+            self.net = build_mlp(
+                input_dim=int(input_dim),
+                output_dim=output_dim,
+                hidden_units=hidden_units,
+                hidden_activation=nn.ELU(),
+            ).apply(initialize_weight)
 
     @torch.jit.script_method
     def forward(self, x):
@@ -297,7 +313,8 @@ class CostLatentModel(torch.jit.ScriptModule):
         z1_dim=32,
         z2_dim=256,
         hidden_units=(256, 256),
-        image_noise=0.1
+        image_noise=0.1,
+        pixel_input=False,
     ):
         super(CostLatentModel, self).__init__()
         self.bceloss = torch.nn.BCELoss(reduction="none")
@@ -346,12 +363,14 @@ class CostLatentModel(torch.jit.ScriptModule):
         
 
         # feat(t) = Encoder(x(t))
-        self.encoder = Encoder(state_shape[0], feature_dim)
+        self.encoder = Encoder(state_shape[0], feature_dim, pixel_input=pixel_input, hidden_units=hidden_units)
         # p(x(t) | z1(t), z2(t))
         self.decoder = Decoder(
             z1_dim + z2_dim,
             state_shape[0],
             std=np.sqrt(image_noise),
+            pixel_input=pixel_input,
+            hidden_units=hidden_units
         )
         self.apply(initialize_weight)
 

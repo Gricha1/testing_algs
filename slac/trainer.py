@@ -75,7 +75,8 @@ class Trainer:
         action_repeat=1,
         train_steps_per_iter=1,
         use_wandb=False,
-        config=None
+        config=None,
+        pixel_input=True,
     ):
         # Env to collect samples.
         self.env = env
@@ -86,6 +87,7 @@ class Trainer:
         self.env_test.seed(2 ** 31 - seed)
 
         # Observations for training and evaluation.
+        self.pixel_input = pixel_input
         self.ob = SlacObservation(env.observation_space.shape, env.action_space.shape, num_sequences)
         self.ob_test = SlacObservation(env.observation_space.shape, env.action_space.shape, num_sequences)
 
@@ -127,9 +129,11 @@ class Trainer:
         # Episode's timestep.
         t = 0
         # Initialize the environment.
-        self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
+        if self.pixel_input:
+            self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         state = self.env.reset()
-        self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
+        if self.pixel_input:
+            self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         self.ob.reset_episode(state)
         self.algo.buffer.reset_episode(state)
 

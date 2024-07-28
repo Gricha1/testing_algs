@@ -532,7 +532,8 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         start_alpha=3.3e-4,
         start_lagrange=2.5e-2,
         grad_clip_norm=10.0,
-        image_noise=0.1
+        image_noise=0.1,
+        pixel_input=False,
     ):
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -542,6 +543,7 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         self.budget_undiscounted = budget
         self.steps = 1000/action_repeat
         self.budget = budget*(1 - gamma_c ** (1000/action_repeat)) / (1 - gamma_c)/(1000/action_repeat)
+        self.pixel_input = pixel_input
 
         # Replay buffer.
         self.buffer = CostReplayBuffer(buffer_size, num_sequences, state_shape, action_shape, device)
@@ -553,7 +555,7 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         self.critic_target = TwinnedQNetwork(action_shape, z1_dim, z2_dim, hidden_units)
         self.safety_critic = SingleQNetwork(action_shape, z1_dim, z2_dim, hidden_units, init_output=self.budget)
         self.safety_critic_target = SingleQNetwork(action_shape, z1_dim, z2_dim, hidden_units, init_output=self.budget)
-        self.latent = CostLatentModel(state_shape, action_shape, feature_dim, z1_dim, z2_dim, hidden_units, image_noise=image_noise)
+        self.latent = CostLatentModel(state_shape, action_shape, feature_dim, z1_dim, z2_dim, hidden_units, image_noise=image_noise, pixel_input=pixel_input)
         soft_update(self.critic_target, self.critic, 1.0)
         soft_update(self.safety_critic_target, self.safety_critic, 1.0)
         
@@ -633,7 +635,8 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
             action = np.tanh(np.random.normal(loc=0,scale=2, size=env.action_space.shape))*env.action_space.high
         else:
             action = self.explore(ob)
-        env.env.env.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
+        if self.pixel_input:
+            env.env.env.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         state, reward, done, info = env.step(action)
         cost = info["cost"]
         self.lastcost = cost
