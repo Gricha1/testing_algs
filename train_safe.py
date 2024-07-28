@@ -8,7 +8,7 @@ from matplotlib.pyplot import get
 import torch
 
 from slac.algo import LatentPolicySafetyCriticSlac, SafetyCriticSlacAlgorithm
-from slac.env import make_safety
+from slac.safety_gym_wrapper.env import make_safety
 from slac.trainer import Trainer
 import json
 from configuration import get_default_config

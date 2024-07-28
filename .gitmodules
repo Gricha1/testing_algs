@@ -1,3 +1,6 @@
 [submodule "safety-gym"]
 	path = safety-gym
 	url = https://github.com/Gricha1/testing_algs
+[submodule "slac/safety_gym_wrapper"]
+	path = slac/safety_gym_wrapper
+	url = https://github.com/Gricha1/testing_algs
