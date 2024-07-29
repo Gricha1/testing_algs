@@ -40,6 +40,8 @@ class ActionRepeatWrapper(Wrapper):
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
         return observation1, track_reward, done1, track_info
+    
+
 
 class PixelObservationWrapper(ObservationWrapper):
     """Augment observations by pixel values."""
@@ -178,10 +180,107 @@ class PixelObservationWrapper(ObservationWrapper):
         observation.update(pixel_observations)
 
         return observation
+    
+class GoalConditionedWrapper(ObservationWrapper):
+    """Augment observations by pixel values."""
+
+# Pixel observation wrapper based on OpenAI Gym implementation.
+# The MIT License
+
+# Copyright (c) 2016 OpenAI (https://openai.com)
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+
+    def __init__(self,
+                 env):
+        """Initializes a new goal conditioned Wrapper.
+
+        Args:
+            env: The environment to wrap.
+        """
+
+        super(GoalConditionedWrapper, self).__init__(env)
+
+        wrapped_observation_space = env.observation_space
+
+        self.observation_space = spaces.Dict()
+        gc_spaces = {"observation": wrapped_observation_space,
+                     "desired_goal": spaces.Box(
+                                    shape=(2,), 
+                                    low=-1, high=1, 
+                                    dtype=wrapped_observation_space.dtype),
+                     "achieved_goal": spaces.Box(
+                                    shape=(2,), 
+                                    low=-1, high=1, 
+                                    dtype=wrapped_observation_space.dtype)}
+        
+        self.observation_space.spaces.update(gc_spaces)
+        self._env = env
+
+    def observation(self, observation):
+        # observation_keys = {('accelerometer', Box(3,)), 
+        #                     ('velocimeter', Box(3,)), 
+        #                     ('gyro', Box(3,)), 
+        #                     ('magnetometer', Box(3,)), 
+        #                     ('goal_lidar', Box(16,)), 
+        #                     ('hazards_lidar', Box(16,))}   
+        agent_xy = np.array(self._env.env.robot_pos)[:2]
+        accelerometer = observation[:3]
+        velocimeter = observation[3:6]
+        gyro = observation[6:9]
+        magnetometer = observation[9:12]
+        # goal_lidar = observation[12:28]
+        hazards_lidar = observation[28:44]
+        new_vec_observation = np.concatenate([agent_xy,
+                                              accelerometer,
+                                              velocimeter,
+                                              gyro,
+                                              magnetometer,
+                                              hazards_lidar]) # (30,)
+        
+        agent_goal_xy = np.array(self._env.env.goal_pos)[:2]
+        # test boundary
+        assert -1 <= agent_xy[0] <= 1
+        assert -1 <= agent_xy[1] <= 1
+        assert -1 <= agent_goal_xy[0] <= 1
+        assert -1 <= agent_goal_xy[1] <= 1
+        gc_observation = {"observation": new_vec_observation, 
+                          "desired_goal": agent_goal_xy,
+                          "achieved_goal": agent_xy}
+
+        return gc_observation
+
+    def _add_pixel_observation(self, observation):
+        if self._pixels_only:
+            observation = collections.OrderedDict()
+        elif self._observation_is_dict:
+            observation = type(observation)(observation)
+        else:
+            observation = collections.OrderedDict()
+            observation[STATE_KEY] = observation
+        if self.task == "button":
+            if self.buttons is None:
+                self.buttons = [i for i, name in enumerate(self.env.unwrapped.sim.model.geom_names) if name.startswith("button")]
+            for j, button in enumerate(self.buttons):
+                if j == self.env.unwrapped.goal_button:
+                    self.env.unwrapped.sim.model.geom_rgba[button] = self.COLOR_GOAL
+                else:   
+                    self.env.unwrapped.sim.model.geom_rgba[button] = self.COLOR_BUTTON
+        pixel_observations = {
+            pixel_key: self.env.sim.render(**self._render_kwargs[pixel_key])[::-1, :, :]
+            for pixel_key in self._pixel_keys
+        }
+
+        observation.update(pixel_observations)
+
+        return observation
 
 gym.logger.set_level(40)
 
-def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1):
+def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False):
     env = gym.make(
         domain_name, 
     )
@@ -190,6 +289,9 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1):
     env._max_episode_steps = env.config["num_steps"]
     ar_env = ActionRepeatWrapper(env, repeat=action_repeat)
     if not use_pixels:
+        if goal_conditioned:
+            gc_env = GoalConditionedWrapper(ar_env)
+            return gc_env 
         return ar_env
 
 
