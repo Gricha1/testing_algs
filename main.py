@@ -93,6 +93,7 @@ if __name__ == "__main__":
     parser.add_argument("--ppo_weight_decay", default=None, type=float)
 
     # WorldModel Parameters
+    parser.add_argument("--cost_memmory", action='store_true', default=False)
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)

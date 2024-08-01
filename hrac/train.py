@@ -459,7 +459,7 @@ def run_hrac(args):
         cumul_modelbased_safety=args.cumul_modelbased_safety,
     )
     
-    cost_memmory = True
+    cost_memmory = args.cost_memmory
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,

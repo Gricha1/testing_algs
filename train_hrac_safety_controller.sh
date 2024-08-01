@@ -1,6 +1,10 @@
-# HRAC + MB
+if [ -z "$1" ]; then
+    seed=2
+else
+    seed=$1
+fi
 
-python main.py --seed 2 \
+python main.py --seed $seed \
                --controller_imagination_safety_loss \
                --controller_grad_clip 0 \
                --validation_without_image --eval_freq 30000 \

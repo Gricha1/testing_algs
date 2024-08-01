@@ -1,5 +1,10 @@
+if [ -z "$1" ]; then
+    seed=2
+else
+    seed=$1
+fi
 
-python main.py --seed 2 \
+python main.py --seed $seed \
                --modelfree_safety \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \

@@ -1,5 +1,10 @@
+if [ -z "$1" ]; then
+    seed=2
+else
+    seed=$1
+fi
 
-python main.py --seed 2 \
+python main.py --seed $seed \
                --modelfree_safety \
                --controller_imagination_safety_loss \
                --controller_grad_clip 0 \
