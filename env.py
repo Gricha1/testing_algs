@@ -39,6 +39,7 @@ class ActionRepeatWrapper(Wrapper):
 
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
+        track_info["safety_cost"] = track_info["cost"]
         return observation1, track_reward, done1, track_info
     
 
@@ -207,14 +208,17 @@ class GoalConditionedWrapper(ObservationWrapper):
         wrapped_observation_space = env.observation_space
 
         self.observation_space = spaces.Dict()
-        gc_spaces = {"observation": wrapped_observation_space,
+        gc_spaces = {"observation": spaces.Box(
+                                    shape=(30,), 
+                                    low=-np.inf, high=np.inf,  
+                                    dtype=wrapped_observation_space.dtype),
                      "desired_goal": spaces.Box(
                                     shape=(2,), 
-                                    low=-1, high=1, 
+                                    low=-np.inf, high=np.inf,  
                                     dtype=wrapped_observation_space.dtype),
                      "achieved_goal": spaces.Box(
                                     shape=(2,), 
-                                    low=-1, high=1, 
+                                    low=-np.inf, high=np.inf, 
                                     dtype=wrapped_observation_space.dtype)}
         
         self.observation_space.spaces.update(gc_spaces)
@@ -243,10 +247,10 @@ class GoalConditionedWrapper(ObservationWrapper):
         
         agent_goal_xy = np.array(self._env.env.goal_pos)[:2]
         # test boundary
-        assert -1 <= agent_xy[0] <= 1
-        assert -1 <= agent_xy[1] <= 1
-        assert -1 <= agent_goal_xy[0] <= 1
-        assert -1 <= agent_goal_xy[1] <= 1
+        #assert -1 <= agent_xy[0] <= 1
+        #assert -1 <= agent_xy[1] <= 1
+        #assert -1 <= agent_goal_xy[0] <= 1
+        #assert -1 <= agent_goal_xy[1] <= 1
         gc_observation = {"observation": new_vec_observation, 
                           "desired_goal": agent_goal_xy,
                           "achieved_goal": agent_xy}

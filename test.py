@@ -19,7 +19,7 @@ def main(args):
         # obs.shape = (3, 2, 2) if not args.vector_env
         # obs.shape = (44,) if args.vector_env
         # obs["observation"], obs["desired_goal"], obs["achieved_goal"] if args.goal_conditioned
-        # info = {"cost_hazards": ... , "cost": ...}
+        # info = {"cost_hazards": ... , "cost": ..., 'safety_cost' ... }
         print("action shape:", action.shape)
         print("reward:", reward)
         if args.goal_conditioned:
