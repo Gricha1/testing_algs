@@ -1,3 +1,6 @@
 [submodule "envs"]
 	path = envs
 	url = https://github.com/Gricha1/testing_algs
+[submodule "safety_gym_wrapper"]
+	path = safety_gym_wrapper
+	url = https://github.com/Gricha1/testing_algs.git
