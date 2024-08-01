@@ -83,7 +83,7 @@ class Decoder(torch.jit.ScriptModule):
 
     def __init__(self, input_dim=288, output_dim=3, std=1.0, pixel_input=True, hidden_units=(256, 256)):
         super(Decoder, self).__init__()
-
+        self.pixel_input = pixel_input
         if pixel_input:
             self.net = nn.Sequential(
                 # (32+256, 1, 1) -> (256, 4, 4)
@@ -113,11 +113,14 @@ class Decoder(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        B, S, latent_dim = x.size()
-        x = x.view(B * S, latent_dim, 1, 1)
-        x = self.net(x)
-        _, C, W, H = x.size()
-        x = x.view(B, S, C, W, H)
+        if self.pixel_input:
+            B, S, latent_dim = x.size()
+            x = x.view(B * S, latent_dim, 1, 1)
+            x = self.net(x)
+            _, C, W, H = x.size()
+            x = x.view(B, S, C, W, H)
+        else:
+            x = self.net(x)
         return x, torch.ones_like(x).mul_(self.std)
 
 class Encoder(torch.jit.ScriptModule):
@@ -127,7 +130,7 @@ class Encoder(torch.jit.ScriptModule):
 
     def __init__(self, input_dim=3, output_dim=256, pixel_input=True, hidden_units=(256, 256)):
         super(Encoder, self).__init__()
-
+        self.pixel_input = pixel_input
         if pixel_input:
             self.net = nn.Sequential(
                 # (3, 64, 64) -> (32, 32, 32)
@@ -156,10 +159,13 @@ class Encoder(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        B, S, C, H, W = x.size()
-        x = x.view(B * S, C, H, W)
-        x = self.net(x)
-        x = x.view(B, S, -1)
+        if self.pixel_input:
+            B, S, C, H, W = x.size()
+            x = x.view(B * S, C, H, W)
+            x = self.net(x)
+            x = x.view(B, S, -1)
+        else:
+            x = self.net(x)
         return x
 
 
