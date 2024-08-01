@@ -11,14 +11,18 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Simple replay buffer
 class ReplayBuffer(object):
-    def __init__(self, maxsize=1e6, ppo_memory=False):
+    def __init__(self, maxsize=1e6, ppo_memory=False, cost_memmory=False):
         self.ppo_memory = ppo_memory
+        self.cost_memmory = cost_memmory
         if ppo_memory:
             self.storage = [[] for _ in range(10)]
             self.advantages = None
             self.returns = None
         else:    
-            self.storage = [[] for _ in range(8)]
+            if cost_memmory:
+                self.storage = [[] for _ in range(9)]
+            else:
+                self.storage = [[] for _ in range(8)]
         self.maxsize = maxsize
         self.next_idx = 0
 
@@ -26,7 +30,10 @@ class ReplayBuffer(object):
         if self.ppo_memory:
             self.storage = [[] for _ in range(10)]
         else:
-            self.storage = [[] for _ in range(8)]
+            if self.cost_memmory:
+                self.storage = [[] for _ in range(9)]    
+            else:
+                self.storage = [[] for _ in range(8)]
         self.next_idx = 0
 
     # Expects tuples of (x, x', g, u, r, d, x_seq, a_seq)
@@ -54,18 +61,26 @@ class ReplayBuffer(object):
         if self.ppo_memory:
             x, y, g, u, r, d, l, v, x_seq, a_seq = [], [], [], [], [], [], [], [], [], []
         else:
-            x, y, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], []          
+            if self.cost_memmory:
+                x, y, g, u, r, c, d, x_seq, a_seq = [], [], [], [], [], [], [], [], []          
+            else:
+                x, y, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], []          
 
         for i in ind: 
             if self.ppo_memory:
                 X, Y, G, U, R, D, L, V, obs_seq, acts = (array[i] for array in self.storage)
             else:
-                X, Y, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
+                if self.cost_memmory:
+                    X, Y, G, U, R, C, D, obs_seq, acts = (array[i] for array in self.storage)
+                else:
+                    X, Y, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
             x.append(np.array(X, copy=False))
             y.append(np.array(Y, copy=False))
             g.append(np.array(G, copy=False))
             u.append(np.array(U, copy=False))
             r.append(np.array(R, copy=False))
+            if self.cost_memmory:
+                c.append(np.array(C, copy=False))    
             d.append(np.array(D, copy=False))
             if self.ppo_memory:
                 l.append(np.array(L, copy=False))
@@ -80,9 +95,15 @@ class ReplayBuffer(object):
                 np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
                 np.array(l).reshape(-1, 1), np.array(v).reshape(-1, 1), x_seq, a_seq
         else:
-            return np.array(x), np.array(y), np.array(g), \
-                np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
-                x_seq, a_seq
+            if self.cost_memmory:
+                return np.array(x), np.array(y), np.array(g), \
+                    np.array(u), np.array(r).reshape(-1, 1), np.array(c).reshape(-1, 1), \
+                    np.array(d).reshape(-1, 1), \
+                    x_seq, a_seq
+            else:
+                return np.array(x), np.array(y), np.array(g), \
+                    np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
+                    x_seq, a_seq
 
     def save(self, file):
         if self.ppo_memory:

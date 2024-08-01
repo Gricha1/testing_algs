@@ -49,7 +49,7 @@ class Manager(object):
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
                  wm_no_xy=False, modelbased_safety=False, img_horizon=10, 
-                 cost_function=None, modelfree_safety=False, testing_mean_wm=False,
+                 modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
                  cumul_modelbased_safety=False,
                  coef_safety_modelbased=1.0,
@@ -91,7 +91,6 @@ class Manager(object):
         self.modelbased_safety = modelbased_safety
         self.cumul_modelbased_safety = cumul_modelbased_safety        
         self.img_horizon = img_horizon
-        self.cost_function = cost_function
         self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
         self.coef_safety_modelbased = coef_safety_modelbased
@@ -121,17 +120,30 @@ class Manager(object):
             debug_info["safe_model_mean_true"] = []
             debug_info["safe_model_mean_pred"] = []
             for i in range(cost_model_iterations):
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False)
+                if replay_buffer.cost_memmory:
+                    x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                    state = get_tensor(y, to_device=False) # cost for the next_state
+                else:
+                    x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                    c = None
+                    state = get_tensor(x, to_device=False)
                 state_device = state.to(device)
-                safe_model_loss, true, pred = controller.train_cost_model(state_device)
+                if not(c is None):
+                    cost = get_tensor(c, to_device=False)
+                    cost_device = cost.to(device)
+                else:
+                    cost_device = None
+                safe_model_loss, true, pred = controller.train_cost_model(state_device, cost=cost_device)
                 debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
                 debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
                 debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
             return debug_info
         
         else:
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
+            if replay_buffer.cost_memmory:
+                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
+            else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
             state = get_tensor(x, to_device=False)
             state_device = state.to(device)
             action = get_tensor(u, to_device=False)
@@ -234,13 +246,6 @@ class Manager(object):
             safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
-        #safety_norm_factor = 0
-        #if self.modelbased_safety:
-        #    safety_norm_factor += self.coef_safety_modelbased
-        #if self.modelfree_safety:
-        #    safety_norm_factor += self.coef_safety_modelfree
-        #if self.modelbased_safety or self.modelfree_safety:
-        #    safety_loss /= safety_norm_factor
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
@@ -472,7 +477,6 @@ class Controller(object):
         if self.controller_imagination_safety_loss:
             assert self.manager
         if use_safe_model:
-            assert not(cost_function is None)
             self.cost_function = cost_function
             self.safe_model_loss_coef = safe_model_loss_coef
             self.safe_model = ControllerSafeModel(state_dim).to(device)
@@ -572,10 +576,13 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
     
-    def train_cost_model(self, init_state):
+    def train_cost_model(self, init_state, cost=None):
         pred = self.safe_model(init_state)
         numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
-        true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
+        if not(cost is None):
+            true = cost
+        else:
+            true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
 
         # Compute safet_model loss
         safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)

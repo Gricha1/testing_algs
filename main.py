@@ -28,6 +28,14 @@ if __name__ == "__main__":
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
 
+    parser.add_argument("--image_size", type=int, default=2)
+    parser.add_argument("--vector_env", default=False, action="store_true")
+    parser.add_argument("--action_repeat", type=int, default=2)
+    parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
+    parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
+    parser.add_argument("--goal_conditioned", action="store_true", default=False)
+
+
     # Adjacency Network Parameters
     parser.add_argument("--adj_loss_coef", default=1., type=float)
     parser.add_argument("--gid", default=0, type=int)

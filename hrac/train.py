@@ -10,9 +10,8 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from stable_baselines3.common.logger import Video
 
+from safety_gym_wrapper.env import make_safety
 from envs.create_env_utils import create_env
-# test
-#from env_utils import SafetyGymEnv
 
 import hrac.utils as utils
 import hrac.hrac as hrac
@@ -45,12 +44,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         global_steps = 0
         goals_achieved = 0
         eval_image_ep = args.visulazied_episode
-        if env_name == "SafeAntMaze":
+        if "Safe" in env_name:
             avg_cost = 0.
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
             avg_episode_real_subgoal_safety = 0
-            safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            if env_name == "SafeAntMaze":
+                safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             if controller_policy.use_safe_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
@@ -70,8 +70,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
-            else:
+            elif env_name == "SafeAntMaze":
                 obs = env.reset(eval_idx=eval_ep)
+            elif env_name == "SafeGym":
+                # test
+                # todo: make eval hard tasks
+                obs = env.reset()
 
             goal = obs["desired_goal"]
             state = obs["observation"]
@@ -86,7 +90,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             prev_action = None
             done = False
             step_count = 0
-            env_goals_achieved = 0
             episode_reward = 0
             episode_cost = 0
             episode_controller_rew = 0
@@ -98,9 +101,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     subgoal = manager_policy.sample_goal(state, goal)
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
-                        episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                        if env_name == "SafeAntMaze":
+                            episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                        if env_name == "SafeAntMaze":
+                            episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                         if args.world_model:
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
@@ -123,10 +128,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
                 new_obs, reward, done, info = env.step(action)
-                if env_name == "SafeAntMaze":
+                if "Safe" in env_name:
                     cost = info["safety_cost"]
-                if env_name != "AntGather" and env.success_fn(reward):
-                    env_goals_achieved += 1
+                if env_name == "SafeGym":
+                    if "goal_met" in info:
+                        goals_achieved += 1
+                        done = True
+                elif env_name != "AntGather" and env.success_fn(reward):
                     goals_achieved += 1
                     done = True
 
@@ -187,7 +195,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
 
                 avg_reward += reward
-                if env_name == "SafeAntMaze":
+                if "Safe" in env_name:
                     avg_cost += cost
                     episode_cost += cost
                 avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
@@ -197,7 +205,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 state = new_state
                 prev_action = action
 
-            if env_name == "SafeAntMaze":
+            if "Safe" in env_name:
                 avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
                 avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
                 avg_episode_real_subgoal_safety += episode_cost / episode_subgoals_count
@@ -212,7 +220,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             renderer.delete_data()
             
         avg_reward /= eval_episodes
-        if env_name == "SafeAntMaze":
+        if "Safe" in env_name:
             avg_episode_safety_subgoal_rate /= eval_episodes
             validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
             if args.world_model:
@@ -235,7 +243,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
         print("---------------------------------------")
 
         env.evaluate = False
-        if env_name == "SafeAntMaze":
+        if "Safe" in env_name:
             return avg_reward, avg_cost, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
         else:
             return avg_reward, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
@@ -314,10 +322,40 @@ def run_hrac(args):
     print("args:", args)
 
     # Environment initialization
-    env, state_dim, goal_dim, action_dim, renderer = create_env(args)
-    
-    low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
+    # goal conditioned env: obs["observation"], obs["desired_goal"], obs["achieved_goal"]
+    # env.action_space
+    # env.cost_func: state -> float()
+    # env.evaluate = bool
+    # env.success_fn: reward -> bool
+    # state_dim
+    # goal_dim
+    # action_dim
+    # renderer
+    # low
+    if args.domain_name == "SafetyMaze":
+        env, state_dim, goal_dim, action_dim, renderer = create_env(args)
+        low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+    elif args.domain_name == "Safexp":
+        assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
+        env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                            image_size=args.image_size, 
+                            use_pixels=not args.vector_env, 
+                            action_repeat=args.action_repeat,
+                            goal_conditioned=args.goal_conditioned)
+        renderer = None
+                
+        state_dim = env.observation_space["observation"].shape[0]
+        goal_dim = env.observation_space["desired_goal"].shape[0]
+        action_dim = env.action_space.shape[0]
+        env.seed(args.seed)
+        # test
+        # subgoal scale, only low[:2] is matter
+        low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
+                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+    else:
+        assert 1 == 0, "there is no {args.domain_name} domain of envs"
+
     max_action = float(env.action_space.high[0])
     policy_noise = 0.2
     noise_clip = 0.5
@@ -412,8 +450,7 @@ def run_hrac(args):
         absolute_goal=args.absolute_goal,
         wm_no_xy=no_xy,
         modelbased_safety=args.modelbased_safety,
-        img_horizon=args.img_horizon,
-        cost_function=env.cost_func,
+        img_horizon=args.img_horizon,        
         modelfree_safety=args.modelfree_safety,
         coef_safety_modelbased=args.coef_safety_modelbased,
         coef_safety_modelfree=args.coef_safety_modelfree,
@@ -422,6 +459,7 @@ def run_hrac(args):
         cumul_modelbased_safety=args.cumul_modelbased_safety,
     )
     
+    cost_memmory = True
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -437,7 +475,7 @@ def run_hrac(args):
         PPO=args.PPO,
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
-        cost_function=env.cost_func,
+        cost_function=env.cost_func if not cost_memmory else None,
         use_safe_model=args.controller_safe_model,
         safe_model_loss_coef=args.safe_model_loss_coef,
         controller_imagination_safety_loss=args.controller_imagination_safety_loss,
@@ -550,7 +588,7 @@ def run_hrac(args):
                                                 learning_rate=learning_rate, use_decay=use_decay)
                 predict_env = PredictEnv(env_model, env_name, model_type)
             manager_policy.set_predict_env(predict_env)
-        world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)
+        world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=cost_memmory)
         def train_world_cost_model(replay_buffer, acc_wm_imagination_episode_metric, 
                                 train_world_model=False, train_safe_model=False, 
                                 controller=None,
@@ -648,8 +686,12 @@ def run_hrac(args):
                     action = env.action_space.sample()
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
-                    world_model_buffer.add(
-                        (state, next_state, None, action, None, None, [], [])) 
+                    if world_model_buffer.cost_memmory:
+                        world_model_buffer.add(
+                        (state, next_state, None, action, None, info["safety_cost"], None, [], [])) 
+                    else:
+                        world_model_buffer.add(
+                            (state, next_state, None, action, None, None, [], [])) 
                     state = next_state
                     exploration_total_timesteps += 1
 
@@ -687,7 +729,8 @@ def run_hrac(args):
                                             cost_model_iterations=episode_timesteps)
                     
                     ## Train TD3 or PPO controller
-                    train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, episode_timesteps, 
+                    train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, 
+                                    episode_timesteps, 
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
                                     episode_safety_subgoal_rate/episode_subgoals_count, 
                                     ep_manager_reward, total_timesteps)
@@ -778,7 +821,7 @@ def run_hrac(args):
                 episode_timesteps = 0
                 just_loaded = False
                 episode_num += 1
-                if args.env_name == "SafeAntMaze":
+                if "Safe" in args.env_name:
                     episode_cost = 0
                     controller_episode_cost = 0
                     episode_safety_subgoal_rate = 0
@@ -831,11 +874,9 @@ def run_hrac(args):
 
             controller_goal = subgoal
             ep_controller_reward += controller_reward
-            controller_episode_cost += 0
-            if args.env_name == "SafeAntMaze":
+            if "Safe" in args.env_name:
                 episode_cost += cost
-            else:
-                episode_cost += 0
+                controller_episode_cost += 0
 
             if args.inner_dones:
                 ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
@@ -845,8 +886,12 @@ def run_hrac(args):
 
             if args.world_model or args.controller_safe_model:
                 assert not controller_policy.PPO, "didnt implement wm + ppo controller"
-                world_model_buffer.add(
-                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+                if world_model_buffer.cost_memmory:
+                        world_model_buffer.add(
+                        (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
+                else:
+                    world_model_buffer.add(
+                        (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
             if controller_policy.PPO:
                 controller_buffer.add(
                     (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), logprob, value, [], []))
@@ -882,11 +927,13 @@ def run_hrac(args):
                 manager_buffer.add(manager_transition)
                 subgoal = manager_policy.sample_goal(state, goal)
 
-                if args.env_name == "SafeAntMaze":
+                if "Safe" in args.env_name:
                     if manager_policy.absolute_goal:
+                        if env_name == "SafeAntMaze":
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                        if env_name == "SafeAntMaze":
+                            episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                     episode_subgoals_count += 1
 
                 if not args.absolute_goal:
