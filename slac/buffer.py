@@ -259,7 +259,10 @@ class CostReplayBuffer:
         state_ = np.empty((batch_size, self.num_sequences + 1, *self.state_shape), dtype=np.uint8)
         for i, idx in enumerate(idxes):
             state_[i, ...] = self.state_[idx]
-        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        if len(self.state_shape) == 3:
+            state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        else:
+            state_ = torch.tensor(state_, dtype=torch.float32, device=self.device)
         return state_, self.action_[idxes], self.reward_[idxes], self.done_[idxes], self.cost_[idxes]
 
     def sample_sac(self, batch_size):
@@ -270,7 +273,10 @@ class CostReplayBuffer:
         state_ = np.empty((batch_size, self.num_sequences + 1, *self.state_shape), dtype=np.uint8)
         for i, idx in enumerate(idxes):
             state_[i, ...] = self.state_[idx]
-        state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        if len(self.state_shape) == 3:
+            state_ = torch.tensor(state_, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        else:
+            state_ = torch.tensor(state_, dtype=torch.float32, device=self.device)
         return state_, self.action_[idxes], self.reward_[idxes, -1], self.done_[idxes, -1], self.cost_[idxes, -1]
 
     def __len__(self):

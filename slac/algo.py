@@ -664,7 +664,11 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         return t
 
     def preprocess(self, ob):
-        state = torch.tensor(ob.last_state, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        if len(self.state_shape) == 3:
+            state = torch.tensor(ob.last_state, dtype=torch.uint8, device=self.device).float().div_(255.0)
+        else:
+            state = torch.tensor(ob.last_state, dtype=torch.float32, device=self.device)
+        
         with torch.no_grad():
             feature = self.latent.encoder(state.unsqueeze(0))
         action = torch.tensor(ob.last_action, dtype=torch.float, device=self.device).unsqueeze(0).unsqueeze(0)
