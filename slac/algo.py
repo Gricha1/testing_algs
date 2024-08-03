@@ -514,6 +514,7 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         state_shape,
         action_shape,                         
         action_repeat,
+        max_episode_steps,
         device,
         seed,
         gamma=0.99,
@@ -541,8 +542,8 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
 
         budget = 25
         self.budget_undiscounted = budget
-        self.steps = 1000/action_repeat
-        self.budget = budget*(1 - gamma_c ** (1000/action_repeat)) / (1 - gamma_c)/(1000/action_repeat)
+        self.steps = max_episode_steps
+        self.budget = budget*(1 - gamma_c ** self.steps) / (1 - gamma_c)/self.steps
         self.pixel_input = pixel_input
 
         # Replay buffer.

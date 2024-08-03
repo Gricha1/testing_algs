@@ -53,6 +53,7 @@ def main(args):
         state_shape=env.observation_space.shape,
         action_shape=env.action_space.shape,
         action_repeat=config["action_repeat"],
+        max_episode_steps=env._max_episode_steps,
         device=torch.device("cuda" if args.cuda else "cpu"),
         seed=config["seed"],
         buffer_size=config["buffer_size"],
