@@ -8,7 +8,7 @@ from matplotlib.pyplot import get
 import torch
 
 from slac.algo import LatentPolicySafetyCriticSlac, SafetyCriticSlacAlgorithm
-from slac.safety_gym_wrapper.env import make_safety
+from envs.safegym import make_safety
 from slac.trainer import Trainer
 import json
 from configuration import get_default_config
@@ -25,15 +25,18 @@ def main(args):
     config["task_name"] = args.task_name
     config["seed"] = args.seed
     config["num_steps"] = args.num_steps
+    config["use_goalobs"] = args.use_goalobs
 
     env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
                         image_size=config["image_size"], 
                         use_pixels=not args.vector_env, 
-                        action_repeat=config["action_repeat"])
+                        action_repeat=config["action_repeat"],
+                        goal_conditioned=config["use_goalobs"])
     env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
                            image_size=config["image_size"], 
                            use_pixels=not args.vector_env, 
-                           action_repeat=config["action_repeat"])
+                           action_repeat=config["action_repeat"],
+                           goal_conditioned=config["use_goalobs"])
     short_hash = get_git_short_hash()
     log_dir = os.path.join(
         "logs",
@@ -101,6 +104,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=314, help="Random seed")
     parser.add_argument("--cuda", action="store_true", help="Train using GPU with CUDA")
     parser.add_argument("--use_wandb", action="store_true", default=False)
+    parser.add_argument("--use_goalobs", action="store_true", default=False)
     args = parser.parse_args()
     main(args)
 

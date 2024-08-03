@@ -185,6 +185,7 @@ class Trainer:
     def evaluate(self, step_env):
         reward_returns = []
         cost_returns = []
+        lengths = []
         steps_until_dump_obs = 20
         def coord_to_im_(coord):
             coord = (coord+1.5)*100
@@ -245,6 +246,7 @@ class Trainer:
                 self.writer.add_video(f"vid/eval", [np.array(track_list)], global_step=step_env, fps=video_fps)
             reward_returns.append(episode_return)
             cost_returns.append(cost_return)
+            lengths.append(eval_step)
         self.algo.z1 = None
         self.algo.z2 = None
 
@@ -263,10 +265,11 @@ class Trainer:
         self.writer.add_scalar("return/test_median", median_reward_return, step_env)
         self.writer.add_scalar("cost/test", mean_cost_return, step_env)
         self.writer.add_scalar("cost/test_median", median_cost_return, step_env)
+        self.writer.add_scalar("length/test", np.mean(lengths), step_env)
         self.writer.add_histogram("return/test_hist", np.array(reward_returns), step_env)
         self.writer.add_histogram("cost/test_hist", np.array(cost_returns), step_env)
         
-        print(f"Steps: {step_env:<6}   " f"Return: {mean_reward_return:<5.1f} " f"CostRet: {mean_cost_return:<5.1f}   " f"Time: {self.time}")
+        print(f"Length: {np.mean(lengths):.1f} Steps: {step_env:<6} Return: {mean_reward_return:<5.1f} CostRet: {mean_cost_return:<5.1f} Time: {self.time}")
 
     @property
     def time(self):
