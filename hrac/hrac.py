@@ -240,9 +240,12 @@ class Manager(object):
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
             manager_absolute_goal += copy_state[:, :actions.shape[1]]
-            zeros_to_add = torch.zeros(actions.shape[0], 
-                                        state.shape[1] - actions.shape[1]).to(device)
-            manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
+            # test
+            #zeros_to_add = torch.zeros(actions.shape[0], 
+            #                            state.shape[1] - actions.shape[1]).to(device)
+            #manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
+            part_of_state = copy_state[:, actions.shape[1]:]
+            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
@@ -465,8 +468,7 @@ class Controller(object):
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
         self.absolute_goal = absolute_goal
-        self.criterion = nn.SmoothL1Loss()    
-        # self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss()            
 
         self.use_safe_model = use_safe_model
         self.train_safe_model = False

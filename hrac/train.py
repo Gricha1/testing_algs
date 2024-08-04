@@ -1,4 +1,6 @@
 import os
+import time
+import copy
 from math import ceil
 
 import torch
@@ -11,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from stable_baselines3.common.logger import Video
 
 from safety_gym_wrapper.env import make_safety
+from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
 from safety_gym_wrapper.render_utils.utils import get_renderer
 from envs.create_env_utils import create_env
 
@@ -52,13 +55,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             avg_episode_real_subgoal_safety = 0
             if env_name == "SafeAntMaze":
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
-            if env_name == "SafeAntMaze" and controller_policy.use_safe_model:
+            elif env_name == "SafeGym":
+                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1])
+            if controller_policy.use_safe_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
-                x_with_zeros = np.concatenate((x_np, 
-                                               np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
-                                               axis=1)
+                if env_name == "SafeAntMaze":
+                    x_with_zeros = np.concatenate((x_np, 
+                                                np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
+                                                axis=1)
+                else:
+                    x_with_zeros = x_np
                 x_tensor = torch.tensor(x_with_zeros)
                 x_tensor = x_tensor.to(device)
                 pred = controller_policy.safe_model(x_tensor)
@@ -354,6 +362,12 @@ def run_hrac(args):
         goal_dim = env.observation_space["desired_goal"].shape[0]
         action_dim = env.action_space.shape[0]
         env.state_dim = state_dim
+        # test, cost unique = [0, 1, 2]
+        print("get safedataset safetygym!!!")
+        start_time = time.time()
+        env.safe_dataset = get_safetydataset_as_random_experience(env)
+        end_time = time.time()
+        print("time for safe dataset:", end_time-start_time)
         renderer_args = {"plot_subgoal": True, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": False,
