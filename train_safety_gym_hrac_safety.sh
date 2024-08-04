@@ -1,9 +1,16 @@
+if [ -z "$1" ]; then
+    seed=344
+else
+    seed=$1
+fi
+
 
 python main.py --domain_name Safexp \
                --task_name PointGoal1 \
+               --env_name SafeGym \
                --goal_conditioned \
                --vector_env \
-               --seed 344 \
+               --seed $seed \
                --modelfree_safety \
                --controller_imagination_safety_loss \
                --controller_grad_clip 0 \

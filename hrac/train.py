@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from stable_baselines3.common.logger import Video
 
 from safety_gym_wrapper.env import make_safety
+from safety_gym_wrapper.render_utils.utils import get_renderer
 from envs.create_env_utils import create_env
 
 import hrac.utils as utils
@@ -51,7 +52,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             avg_episode_real_subgoal_safety = 0
             if env_name == "SafeAntMaze":
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
-            if controller_policy.use_safe_model:
+            if env_name == "SafeAntMaze" and controller_policy.use_safe_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
@@ -171,7 +172,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     else:
                         current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                            current_step_info["robot_pos"]
-                    current_step_info["robot_radius"] = 1.5
+                    if env_name == "SafeGym":
+                        current_step_info["robot_radius"] = env.goal_size
+                    else:
+                        current_step_info["robot_radius"] = 1.5
                     # get imagination of current state
                     if not(manager_policy.predict_env is None):
                         imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
@@ -181,12 +185,15 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     if env_name =="AntGather":
                         current_step_info["apples_and_bombs"] = env.get_apples_and_bombs()
                         current_step_info["apple_bomb_radius"] = 1.0
+                    if env_name == "SafeGym":
+                        current_step_info["hazards"] = [hazard[:2] for hazard in env.hazards_pos]
+                        current_step_info["hazards_radius"] = env.hazards_size
                     if not args.validation_without_image:
                         screen = renderer.custom_render(current_step_info, 
                                                         debug_info=debug_info, 
                                                         plot_goal=True,
                                                         env_name=env_name,
-                                                        safe_model=controller_policy.safe_model)
+                                                        safe_model=controller_policy.safe_model if controller_policy.use_safe_model else None)
                         positions_screens.append(screen.transpose(2, 0, 1))
 
                 goal = new_obs["desired_goal"]
@@ -343,16 +350,28 @@ def run_hrac(args):
                             use_pixels=not args.vector_env, 
                             action_repeat=args.action_repeat,
                             goal_conditioned=args.goal_conditioned)
-        renderer = None
-                
         state_dim = env.observation_space["observation"].shape[0]
         goal_dim = env.observation_space["desired_goal"].shape[0]
         action_dim = env.action_space.shape[0]
+        env.state_dim = state_dim
+        renderer_args = {"plot_subgoal": True, 
+                         "world_model_comparsion": False,
+                         "plot_safety_boundary": False,
+                         "plot_world_model_state": False,
+                         "plot_cost_model_heatmap": True,
+                         }
+        renderer = get_renderer(env, args, renderer_args)
         env.seed(args.seed)
         # test
         # subgoal scale, only low[:2] is matter
-        low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
-                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        if "1" in args.task_name:
+            low = np.array((-5, -5, -0.5, -1, -1, -1, -1,
+                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        elif "2" in args.task_name:
+            low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
+                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        else:
+            assert 1 == 0, "not recognized task lvl"
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
 
