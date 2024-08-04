@@ -9,6 +9,7 @@ import torch
 
 from slac.algo import LatentPolicySafetyCriticSlac, SafetyCriticSlacAlgorithm
 from envs.safegym import make_safety
+from envs.slac_wrapper import make_safe_ant_maze
 from slac.trainer import Trainer
 import json
 from configuration import get_default_config
@@ -27,16 +28,20 @@ def main(args):
     config["num_steps"] = args.num_steps
     config["use_goalobs"] = args.use_goalobs
 
-    env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
-                        image_size=config["image_size"], 
-                        use_pixels=not args.vector_env, 
-                        action_repeat=config["action_repeat"],
-                        goal_conditioned=config["use_goalobs"])
-    env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
-                        image_size=config["image_size"], 
-                        use_pixels=not args.vector_env, 
-                        action_repeat=config["action_repeat"],
-                        goal_conditioned=config["use_goalobs"],
+    if args.domain_name == "SafeAntMaze":
+        env = make_safe_ant_maze(config["action_repeat"], config["seed"], False)
+        env_test = make_safe_ant_maze(config["action_repeat"], config["seed"], True)
+    else:
+        env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                            image_size=config["image_size"], 
+                            use_pixels=not args.vector_env, 
+                            action_repeat=config["action_repeat"],
+                            goal_conditioned=config["use_goalobs"])
+        env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                            image_size=config["image_size"], 
+                            use_pixels=not args.vector_env, 
+                            action_repeat=config["action_repeat"],
+                            goal_conditioned=config["use_goalobs"],
                         eval=True)
     
     short_hash = get_git_short_hash()

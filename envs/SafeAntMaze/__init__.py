@@ -236,36 +236,6 @@ class SafeMazeAnt:
         self.render_info["shift_y"] = SHIFT_Y
         self.train_random_start_pose = False
         self.set_start_pose(random_start_pose=False)
-        self.boundaries = {
-                           "x_min": -25, 
-                           "x_max": 40, 
-                           "y_min": -25,
-                           "y_max": 40,
-                           }
-
-    def scale_poses(self, poses):
-        diff_x = self.boundaries["x_max"] - self.boundaries["x_min"]
-        diff_y = self.boundaries["y_max"] - self.boundaries["y_min"]
-        if len(poses.shape) == 2:
-            poses[:, 0] = (poses[:, 0] - self.boundaries["x_min"]) / diff_x
-            poses[:, 1] = (poses[:, 1] - self.boundaries["y_min"]) / diff_y
-        else:
-            assert len(poses.shape) == 1
-            poses[0] = (poses[0] - self.boundaries["x_min"]) / diff_x
-            poses[1] = (poses[1] - self.boundaries["y_min"]) / diff_y
-        return poses
-    
-    def rescale_poses(self, poses):
-        diff_x = self.boundaries["x_max"] - self.boundaries["x_min"]
-        diff_y = self.boundaries["y_max"] - self.boundaries["y_min"]
-        if len(poses.shape) == 2:
-            poses[:, 0] = self.boundaries["x_min"] + diff_x * poses[:, 0]
-            poses[:, 1] = self.boundaries["y_min"] + diff_y * poses[:, 1]
-        else:
-            assert len(poses.shape) == 1
-            poses[0] = self.boundaries["x_min"] + diff_x * poses[0]
-            poses[1] = self.boundaries["y_min"] + diff_y * poses[1]
-        return poses
 
     def set_train_start_pose_to_random(self):
         self.train_random_start_pose = True
@@ -338,9 +308,7 @@ class SafeMazeAnt:
                     xy, goal_xy = eval_dataset[eval_idx%len(eval_dataset)]
             return self.env.reset(start_point=xy, goal_xy=goal_xy)
 
-    def step(self, action: np.ndarray):
-        assert action.shape == (8,)
-        action = np.clip(action, -1, 1)
+    def step(self, action):
         next_tup, rew, done, info = self.env.step(action)
         safety_bounds = self.get_safety_bounds()
         info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
@@ -399,12 +367,14 @@ class SafeMazeAnt:
             dataset.append([xy, goal_xy])
         return dataset
 
-    def get_reward_cost(self, robot_pos, goal_pos):
+    def get_reward_cost(self, robot_pos, goal_pos, dist_xy=None):
         # get cost
         safety_cost = self.cost_func(np.array(robot_pos))
         
         # get reward
         reward = self.env.reward_fn(robot_pos, goal_pos)
+
+        dist_goal = dist_xy(robot_pos, goal_pos)
 
         goal_flag = self.env.success_fn(reward)
 

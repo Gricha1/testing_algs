@@ -9,16 +9,17 @@ from .plots import plot_values
 
 class CustomVideoRendered:
     def __init__(self, env, controller_safe_model, 
-                 world_model_comparsion=True, 
-                 plot_subgoal=True, 
-                 plot_safety_boundary=True,
-                 plot_world_model_state=True):
+                 world_model_comparsion=True, plot_subgoal=True, 
+                 plot_safety_boundary=True):
         # config
         self.add_subgoal_values = False
         self.add_mesurements = True
         self.plot_safe_dataset = False    
         self.plot_subgoal = plot_subgoal  
         self.plot_safety_boundary = plot_safety_boundary 
+        self.plot_safety_boundary = plot_safety_boundary 
+        self.plot_world_model_state = plot_world_model_state 
+        self.plot_safety_boundary = plot_safety_boundary  
         self.plot_world_model_state = plot_world_model_state 
 
         self.render_info = {}
@@ -34,23 +35,19 @@ class CustomVideoRendered:
         self.render_info["grid_resolution_x"] = 20
         self.render_info["grid_resolution_y"] = 20
         self.render_info["state_dim"] = env.state_dim
-        if self.plot_world_model_state or self.world_model_comparsion:
+        if self.world_model_comparsion:
             self.robot_poses = None
             self.world_model_poses = None
         if self.add_subgoal_values:
             assert 1 == 0, "didnt implement"
     
     def setup_renderer(self):
-        if self.plot_world_model_state or \
-                self.world_model_comparsion or \
-                    self.controller_safe_model:
+        if self.world_model_comparsion or self.controller_safe_model:
             self.robot_poses = []
             self.world_model_poses = []
     
     def delete_data(self):
-        if self.plot_world_model_state or \
-                self.world_model_comparsion or \
-                    self.controller_safe_model:
+        if self.world_model_comparsion or self.controller_safe_model:
             del self.robot_poses
             del self.world_model_poses
 
@@ -62,8 +59,6 @@ class CustomVideoRendered:
                "robot_radius" in current_step_info
         if self.plot_subgoal:
             assert "subgoal_pos" in current_step_info
-        if self.plot_world_model_state:
-            assert "imagined_robot_pos" in current_step_info
 
         if env_name == "SafeAntMaze":
             safety_boundary, safe_dataset = self.env.get_safety_bounds(get_safe_unsafe_dataset=True)
@@ -102,7 +97,7 @@ class CustomVideoRendered:
             self.robot_poses.append((x - shift_x, y - shift_y))   
 
         # robot imagined pose
-        if self.plot_world_model_state:
+        if self.world_model_comparsion:
             x = current_step_info["imagined_robot_pos"][0] + shift_x
             y = current_step_info["imagined_robot_pos"][1] + shift_y
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
@@ -310,12 +305,6 @@ def create_env(args, renderer_args={}):
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
 
-    if "controller_safe_model" in args:
-        controller_safe_model = args.controller_safe_model
-    else:
-        controller_safe_model = False
-    renderer = CustomVideoRendered(env,  
-                                   controller_safe_model=controller_safe_model,
-                                   **renderer_args)
+    renderer = None
 
     return env, state_dim, goal_dim, action_dim, renderer
