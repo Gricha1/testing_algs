@@ -88,8 +88,6 @@ class Trainer:
         # Env for evaluation.
         self.env_test = env_test
         self.env_test.seed(2 ** 31 - seed)
-        self.render_kwargs = {'camera_name': "track", 'mode': 'offscreen', 'width':64,'height':64}
-        self.env_test.env.sim.render(**self.render_kwargs)[::-1, :, :]
 
         # Observations for training and evaluation.
         self.pixel_input = pixel_input
@@ -134,11 +132,7 @@ class Trainer:
         # Episode's timestep.
         t = 0
         # Initialize the environment.
-        if self.pixel_input:
-            self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         state = self.env.reset()
-        if self.pixel_input:
-            self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         self.ob.reset_episode(state)
         self.algo.buffer.reset_episode(state)
 
@@ -199,12 +193,8 @@ class Trainer:
         for i in range(self.num_eval_episodes):
             self.algo.z1 = None
             self.algo.z2 = None
-            self.env_test.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
             state = self.env_test.reset()
-            self.env_test.unwrapped.sim.render(**self.render_kwargs)[::-1, :, :]
-            self.env_test.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
             self.ob_test.reset_episode(state)
-            self.env_test.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
             episode_return = 0.0
             cost_return = 0.0
             done = False
@@ -220,21 +210,17 @@ class Trainer:
                         reconstruction = reconstruction.astype("uint8")
                         recons_list.append(reconstruction)
                    
-                    track = self.env_test.unwrapped.sim.render(**self.render_kwargs)[::-1, :, :]
+                    track = self.env_test.render_track()
                     track = np.moveaxis(track,-1,0)
                     track_list.append(track)
                 if steps_until_dump_obs == 0 and self.pixel_input:
                     self.debug_save_obs(self.ob_test.state[0][-1], "eval", step_env)
-                    
                     reconstruction = sample_reproduction(self.algo.latent, self.algo.device, self.ob_test.state, np.array([self.ob_test._action]))[0][-1]*255
                     self.debug_save_obs(reconstruction, "eval_reconstruction", step_env)
                 steps_until_dump_obs -= 1
                 
-                self.env_test.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
                 state, reward, done, info = self.env_test.step(action)
-                self.env_test.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
                 cost = info["cost"]
-                
                 self.ob_test.append(state, action)
                 episode_return += reward
                 cost_return += cost

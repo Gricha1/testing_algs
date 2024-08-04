@@ -33,10 +33,12 @@ def main(args):
                         action_repeat=config["action_repeat"],
                         goal_conditioned=config["use_goalobs"])
     env_test = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
-                           image_size=config["image_size"], 
-                           use_pixels=not args.vector_env, 
-                           action_repeat=config["action_repeat"],
-                           goal_conditioned=config["use_goalobs"])
+                        image_size=config["image_size"], 
+                        use_pixels=not args.vector_env, 
+                        action_repeat=config["action_repeat"],
+                        goal_conditioned=config["use_goalobs"],
+                        eval=True)
+    
     short_hash = get_git_short_hash()
     log_dir = os.path.join(
         "logs",
@@ -108,4 +110,3 @@ if __name__ == "__main__":
     parser.add_argument("--use_goalobs", action="store_true", default=False)
     args = parser.parse_args()
     main(args)
-

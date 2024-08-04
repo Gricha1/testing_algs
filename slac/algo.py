@@ -636,8 +636,6 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
             action = np.tanh(np.random.normal(loc=0,scale=2, size=env.action_space.shape))*env.action_space.high
         else:
             action = self.explore(ob)
-        if self.pixel_input:
-            env.env.env.sim.render_contexts[0].vopt.geomgroup[:] = 1 # render all objects, including hazards
         state, reward, done, info = env.step(action)
         cost = info["cost"]
         self.lastcost = cost

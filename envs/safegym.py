@@ -176,7 +176,29 @@ class PixelObservationWrapper(ObservationWrapper):
 
         return observation
 
-  
+
+class RenderWrapper(Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self._max_episode_steps = env._max_episode_steps
+        self._render_kwargs = {'camera_name': "track", 'mode': 'offscreen', 'width': 64,'height': 64}
+        self.env.unwrapped.sim.render(**self._render_kwargs)[::-1, :, :]
+    
+    def step(self, action):
+        self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1
+        return self.env.step(action)
+    
+    def reset(self):
+        self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1
+        obs = self.env.reset()
+        self.env.unwrapped.sim.render(**self._render_kwargs)[::-1, :, :]
+        self.env.unwrapped.sim.render_contexts[0].vopt.geomgroup[:] = 1
+        return obs
+    
+    def render_track(self):
+        return self.env.unwrapped.sim.render(**self._render_kwargs)[::-1, :, :]
+
+ 
 class GoalConditionedWrapper(ObservationWrapper):
 
     def __init__(self, env):
@@ -213,7 +235,7 @@ class GoalConditionedWrapper(ObservationWrapper):
 
 gym.logger.set_level(40)
 
-def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False):
+def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False, eval=False):
     env = gym.make(
         domain_name, 
     )
@@ -224,7 +246,11 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
     if not use_pixels:
         if goal_conditioned:
             gc_env = GoalConditionedWrapper(ar_env)
-            return gc_env 
+            if eval:
+                gc_env = RenderWrapper(gc_env)
+            return gc_env
+        if eval:
+            ar_env = RenderWrapper(ar_env) 
         return ar_env
 
 
@@ -240,4 +266,4 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
                                     (w_o.shape[2],w_o.shape[0],w_o.shape[1]))
     filtered._max_episode_steps = ar_env._max_episode_steps
     
-    return filtered
+    return RenderWrapper(filtered)
