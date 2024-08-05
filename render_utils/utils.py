@@ -139,9 +139,12 @@ class CustomVideoRendered:
                 self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
 
         if self.plot_cost_model_heatmap and self.controller_safe_model:
+            assert "agent_full_obs" in current_step_info
             cb = plot_values(self.render_info["fig"], 
                         self.render_info["ax_world_model_robot_trajectories"], 
-                        safe_model, render_info=self.render_info, return_cb=True)
+                        safe_model, render_info=self.render_info, 
+                        current_step_info=current_step_info,
+                        return_cb=True)
 
         # safety boundary
         if self.plot_safety_boundary:
