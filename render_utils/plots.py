@@ -21,7 +21,7 @@ def plot_values(fig, ax_values, safe_model, render_info={}, current_step_info={}
             grid_state = [grid_state_x, grid_state_y]
             #for _ in range(render_info["state_dim"] - 2):
             #    grid_state.append(0)
-            grid_state = np.concatenate([grid_state, agent_full_obs[2:]])
+            grid_state = np.concatenate([grid_state, agent_full_obs[:2], agent_full_obs[-16:]])
             grid_states.append(grid_state.tolist())
     grid_states = torch.FloatTensor(np.array(grid_states)).to(device)
     grid_vs = safe_model.predict(grid_states)
