@@ -58,9 +58,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             elif env_name == "SafeGym":
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1])
             if controller_policy.use_safe_model:
+                lidar_observation= True if args.domain_name == "Safexp" else False
                 x = safe_dataset[0]
                 true = safe_dataset[1]
-                x_np = np.array(x, dtype=np.float32)
+                if lidar_observation:
+                    x_np = np.array(x, dtype=np.float32)
+                    manager_absolute_goal = x_np[:, :2]
+                    agent_pose = x_np[:, :2]
+                    obstacle_data = x_np[:, -16:]
+                    part_of_state = np.concatenate((agent_pose, obstacle_data), axis=1)
+                    x_np = np.concatenate((manager_absolute_goal, part_of_state), axis=1)
+                else:
+                    x_np = np.array(x, dtype=np.float32)
                 if env_name == "SafeAntMaze":
                     x_with_zeros = np.concatenate((x_np, 
                                                 np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
@@ -196,6 +205,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     if env_name == "SafeGym":
                         current_step_info["hazards"] = [hazard[:2] for hazard in env.hazards_pos]
                         current_step_info["hazards_radius"] = env.hazards_size
+                        current_step_info["agent_full_obs"] = np.array(state)
+                        # test
+                        print("*******")
+                        print("agent pose:", state[:2])
+                        print("agent lidar:", state[-16:])
+                        print("*******")
                     if not args.validation_without_image:
                         screen = renderer.custom_render(current_step_info, 
                                                         debug_info=debug_info, 
@@ -490,6 +505,7 @@ def run_hrac(args):
         testing_mean_wm=args.testing_mean_wm,
         subgoal_grad_clip=args.subgoal_grad_clip,
         cumul_modelbased_safety=args.cumul_modelbased_safety,
+        lidar_observation=True if args.domain_name == "Safexp" else False
     )
     
     cost_memmory = args.cost_memmory
@@ -515,6 +531,7 @@ def run_hrac(args):
         controller_grad_clip=args.controller_grad_clip,
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
+        lidar_observation=True if args.domain_name == "Safexp" else False
     )
 
     calculate_controller_reward = get_reward_function(

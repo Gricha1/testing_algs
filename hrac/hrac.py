@@ -53,7 +53,8 @@ class Manager(object):
                  subgoal_grad_clip=0,
                  cumul_modelbased_safety=False,
                  coef_safety_modelbased=1.0,
-                 coef_safety_modelfree=1.0):
+                 coef_safety_modelfree=1.0,
+                 lidar_observation=False):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -88,6 +89,7 @@ class Manager(object):
         self.testing_mean_wm = testing_mean_wm
 
         # Safety
+        self.lidar_observation = lidar_observation
         self.modelbased_safety = modelbased_safety
         self.cumul_modelbased_safety = cumul_modelbased_safety        
         self.img_horizon = img_horizon
@@ -240,12 +242,16 @@ class Manager(object):
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
             manager_absolute_goal += copy_state[:, :actions.shape[1]]
-            # test
-            #zeros_to_add = torch.zeros(actions.shape[0], 
-            #                            state.shape[1] - actions.shape[1]).to(device)
-            #manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
-            part_of_state = copy_state[:, actions.shape[1]:]
-            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            if self.lidar_observation:
+                assert len(copy_state[0, :]) == 30
+                agent_pose = copy_state[:, :2]
+                obstacle_data = copy_state[:, -16:]
+                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            else:
+                zeros_to_add = torch.zeros(actions.shape[0], 
+                                            state.shape[1] - actions.shape[1]).to(device)
+                manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
             safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
@@ -458,6 +464,7 @@ class Controller(object):
                  weight_decay_ppo=None, use_safe_model=False, cost_function=None,
                  safe_model_loss_coef=1.0, controller_imagination_safety_loss=False,
                  manager=None, controller_grad_clip=0, controller_safety_coef=0,
+                 lidar_observation=False
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -479,9 +486,13 @@ class Controller(object):
         if self.controller_imagination_safety_loss:
             assert self.manager
         if use_safe_model:
+            self.lidar_observation = lidar_observation
             self.cost_function = cost_function
             self.safe_model_loss_coef = safe_model_loss_coef
-            self.safe_model = ControllerSafeModel(state_dim).to(device)
+            if self.lidar_observation:
+                self.safe_model = ControllerSafeModel(goal_dim + 2 + 16).to(device)
+            else:
+                self.safe_model = ControllerSafeModel(state_dim).to(device)
             self.safe_model_criterion = nn.BCELoss()
             self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
                                                  lr=critic_lr, weight_decay=0.0001)
@@ -579,7 +590,16 @@ class Controller(object):
         return subgoals
     
     def train_cost_model(self, init_state, cost=None):
-        pred = self.safe_model(init_state)
+        if self.lidar_observation:
+            # get manager goal and concatenate with current (agent_xy, lidar_data)
+            manager_absolute_goal = init_state[:, :2]
+            agent_pose = init_state[:, :2]
+            obstacle_data = init_state[:, -16:]
+            part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+            state = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            pred = self.safe_model(state)
+        else:
+            pred = self.safe_model(init_state)
         numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
         if not(cost is None):
             true = cost
