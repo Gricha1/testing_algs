@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +14,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Simple replay buffer
 class ReplayBuffer(object):
     def __init__(self, maxsize=1e6, ppo_memory=False, cost_memmory=False):
+        self.name = "simple_buffer"
         self.ppo_memory = ppo_memory
         self.cost_memmory = cost_memmory
         if ppo_memory:
@@ -130,7 +133,96 @@ class ReplayBuffer(object):
 
     def __len__(self):
         return len(self.storage[0])
+    
 
+class CostModelTrajectoryBuffer(object):
+
+    def __init__(self, maxsize):
+        self.maxsize = maxsize
+        self.next_idx = 0
+        self.trajectory = []
+        self.storage = [[] for _ in range(2)]
+        self.name = "cost_trajectory_buffer"
+
+    def __len__(self):
+        return len(self.storage[0])
+    
+    def clear(self):
+        self.storage = [[] for _ in range(2)]    
+        self.next_idx = 0
+
+    def create_new_trajectory(self):
+        self.trajectory = []
+
+    def append(self, s, cost):
+        self.trajectory.append((s, cost))
+
+    def add_trajectory_to_buffer(self):
+        states = []
+        costs = []
+
+        current_trajectory = self.trajectory
+        # get equal count of safe & unsafe states
+        unsafe_state = []
+        safe_state = []
+        for i in range(len(current_trajectory)):
+            for j in range(len(current_trajectory)):
+                state_i = current_trajectory[i][0]
+                _ = current_trajectory[i][1]
+                state_j = current_trajectory[j][0]
+                cost_j = current_trajectory[j][1]
+
+                manager_absolute_goal = state_j[:2]
+                agent_pose = state_i[:2]
+                obstacle_data = state_i[-16:]
+                part_of_state = []
+                part_of_state.extend(agent_pose)
+                part_of_state.extend(obstacle_data)
+                state = []
+                state.extend(manager_absolute_goal)
+                state.extend(part_of_state)
+                if cost_j >= 1: # test could be [0, 1, 2]                    
+                    unsafe_state.append(state)
+                else:
+                    safe_state.append(state)
+
+        min_len = min(len(unsafe_state), len(safe_state))
+        unsafe_state = random.sample(unsafe_state, min_len)
+        safe_state = random.sample(safe_state, min_len)
+
+        states.extend(unsafe_state)
+        states.extend(safe_state)
+        costs.extend([1 for i in range(len(unsafe_state))])
+        costs.extend([0 for i in range(len(safe_state))])
+
+        for state, cost in zip(states, costs):
+            self.add((state, cost))
+        
+
+    def add(self, data):
+        self.next_idx = int(self.next_idx)
+        if self.next_idx >= len(self.storage[0]):
+            [array.append(datapoint) for array, datapoint in zip(self.storage, data)]
+        else:
+            [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
+
+        self.next_idx = (self.next_idx + 1) % self.maxsize
+
+
+    def sample(self, batch_size):
+        if len(self.storage[0]) <= batch_size:
+            ind = np.arange(len(self.storage[0]))
+        else:
+            ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
+
+        x, c  = [], []
+
+        for i in ind: 
+            X, C  = (array[i] for array in self.storage)
+            x.append(np.array(X, copy=False))
+            c.append(np.array(C, copy=False))    
+        
+            return np.array(x), np.array(c).reshape(-1, 1)
 
 class TrajectoryBuffer(object):
 

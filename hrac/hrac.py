@@ -112,53 +112,55 @@ class Manager(object):
                                                        testing_mean_pred=self.testing_mean_wm)
         return imagined_state
 
-    def train_world_model(self, replay_buffer, controller=None, 
-                          train_safe_model=False, cost_model_iterations=10, 
+    def train_cost_model(self, replay_buffer, controller=None, 
+                          cost_model_iterations=10, 
                           cost_model_batch_size=128):
-        if train_safe_model:
-            debug_info = {}
-            assert not(controller is None)
-            debug_info["safe_model_loss"] = []
-            debug_info["safe_model_mean_true"] = []
-            debug_info["safe_model_mean_pred"] = []
-            for i in range(cost_model_iterations):
-                if replay_buffer.cost_memmory:
-                    x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                    state = get_tensor(y, to_device=False) # cost for the next_state
-                else:
-                    x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                    c = None
-                    state = get_tensor(x, to_device=False)
-                state_device = state.to(device)
-                if not(c is None):
-                    cost = get_tensor(c, to_device=False)
-                    cost_device = cost.to(device)
-                else:
-                    cost_device = None
-                safe_model_loss, true, pred = controller.train_cost_model(state_device, cost=cost_device)
-                debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
-                debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
-                debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
-            return debug_info
-        
-        else:
-            if replay_buffer.cost_memmory:
-                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
+        debug_info = {}
+        assert not(controller is None)
+        debug_info["safe_model_loss"] = []
+        debug_info["safe_model_mean_true"] = []
+        debug_info["safe_model_mean_pred"] = []
+        for i in range(cost_model_iterations):
+            if replay_buffer.name == "cost_trajectory_buffer":
+                x, c = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(x, to_device=False) # cost for the next_state
+            elif replay_buffer.cost_memmory:
+                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(y, to_device=False) # cost for the next_state
             else:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
-            state = get_tensor(x, to_device=False)
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                c = None
+                state = get_tensor(x, to_device=False)
             state_device = state.to(device)
-            action = get_tensor(u, to_device=False)
-            next_state = get_tensor(y, to_device=False)
+            if not(c is None):
+                cost = get_tensor(c, to_device=False)
+                cost_device = cost.to(device)
+            else:
+                cost_device = None
+            safe_model_loss, true, pred = controller.train_cost_model(state_device, cost=cost_device)
+            debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
+            debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
+            debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
+        return debug_info
 
-            delta_state = next_state - state
-            inputs = np.concatenate((state, action), axis=-1)
+    def train_world_model(self, replay_buffer):
+        if replay_buffer.cost_memmory:
+            x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
+        else:
+            x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
+        state = get_tensor(x, to_device=False)
+        state_device = state.to(device)
+        action = get_tensor(u, to_device=False)
+        next_state = get_tensor(y, to_device=False)
 
-            labels = delta_state.numpy()
-            epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
-            del state, action, next_state
-            
-            return loss
+        delta_state = next_state - state
+        inputs = np.concatenate((state, action), axis=-1)
+
+        labels = delta_state.numpy()
+        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+        del state, action, next_state
+        
+        return loss
 
     def set_eval(self):
         self.actor.set_eval()
@@ -590,16 +592,7 @@ class Controller(object):
         return subgoals
     
     def train_cost_model(self, init_state, cost=None):
-        if self.lidar_observation:
-            # get manager goal and concatenate with current (agent_xy, lidar_data)
-            manager_absolute_goal = init_state[:, :2]
-            agent_pose = init_state[:, :2]
-            obstacle_data = init_state[:, -16:]
-            part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
-            state = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-            pred = self.safe_model(state)
-        else:
-            pred = self.safe_model(init_state)
+        pred = self.safe_model(init_state)
         numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
         if not(cost is None):
             true = cost

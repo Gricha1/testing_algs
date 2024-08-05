@@ -58,7 +58,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
             elif env_name == "SafeGym":
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1])
             if controller_policy.use_safe_model:
-                lidar_observation= True if args.domain_name == "Safexp" else False
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 #if lidar_observation:
@@ -635,33 +634,34 @@ def run_hrac(args):
                 predict_env = PredictEnv(env_model, env_name, model_type)
             manager_policy.set_predict_env(predict_env)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=cost_memmory)
-        def train_world_cost_model(replay_buffer, acc_wm_imagination_episode_metric, 
-                                train_world_model=False, train_safe_model=False, 
-                                controller=None,
-                                cost_model_iterations=10):
-            if train_safe_model:
-                assert controller.use_safe_model
-                print("train cost model")
-                debug_info = manager_policy.train_world_model(replay_buffer, controller=controller, 
-                                                                train_safe_model=True,
-                                                                cost_model_iterations=cost_model_iterations,
-                                                                cost_model_batch_size=args.cost_model_batch_size)
-                for key_ in debug_info:
-                    if type(debug_info[key_]) == list:
-                        debug_info[key_] = np.mean(debug_info[key_])
-                    writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
+        if args.domain_name == "Safexp":
+            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.wm_buffer_size)
 
-            if train_world_model:
-                with TensorWrapper():
-                    print("train world model")
-                    world_model_loss = manager_policy.train_world_model(replay_buffer)
-                    
-                    writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
-                    if episode_num > 1:
-                        writer.add_scalar("data/world_model_euclid_dist", acc_wm_imagination_episode_metric, total_timesteps)
+        def train_cost_model(replay_buffer,
+                             controller=None,
+                             cost_model_iterations=10):
+            assert controller.use_safe_model
+            print("train cost model")
+            debug_info = manager_policy.train_cost_model(replay_buffer, controller=controller, 
+                                                            cost_model_iterations=cost_model_iterations,
+                                                            cost_model_batch_size=args.cost_model_batch_size)
+            for key_ in debug_info:
+                if type(debug_info[key_]) == list:
+                    debug_info[key_] = np.mean(debug_info[key_])
+                writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
 
-                    if episode_num % 10 == 0:
-                        print("world model loss: {:.3f}".format(world_model_loss))
+            
+        def train_world_model(replay_buffer, acc_wm_imagination_episode_metric):
+            with TensorWrapper():
+                print("train world model")
+                world_model_loss = manager_policy.train_world_model(replay_buffer)
+                
+                writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
+                if episode_num > 1:
+                    writer.add_scalar("data/world_model_euclid_dist", acc_wm_imagination_episode_metric, total_timesteps)
+
+                if episode_num % 10 == 0:
+                    print("world model loss: {:.3f}".format(world_model_loss))
             
 
     if args.load:
@@ -729,6 +729,10 @@ def run_hrac(args):
                         obs = env.reset()
                         state = obs["observation"]
                         done = False
+                        if args.domain_name == "Safexp":
+                            if len(cost_model_buffer.trajectory) != 0:
+                                cost_model_buffer.add_trajectory_to_buffer()
+                            cost_model_buffer.create_new_trajectory()
                     action = env.action_space.sample()
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
@@ -738,6 +742,8 @@ def run_hrac(args):
                     else:
                         world_model_buffer.add(
                             (state, next_state, None, action, None, None, [], [])) 
+                    if args.domain_name == "Safexp":
+                        cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
                     exploration_total_timesteps += 1
 
@@ -762,17 +768,15 @@ def run_hrac(args):
                         
                     ## Train World Model or Cost Model
                     if args.train_safe_model:
-                        train_world_cost_model(world_model_buffer, acc_wm_imagination_episode_metric,
-                                            train_world_model=False, 
-                                            train_safe_model=True,
-                                            controller=controller_policy,
-                                            cost_model_iterations=episode_timesteps)
+                        if args.domain_name == "Safexp":
+                            buffer = cost_model_buffer
+                        else:
+                            buffer = world_model_buffer
+                        train_cost_model(buffer,
+                                         controller=controller_policy,
+                                         cost_model_iterations=episode_timesteps)
                     if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
-                        train_world_cost_model(world_model_buffer, acc_wm_imagination_episode_metric,
-                                            train_world_model=True, 
-                                            train_safe_model=False,
-                                            controller=controller_policy,
-                                            cost_model_iterations=episode_timesteps)
+                        train_world_model(world_model_buffer, acc_wm_imagination_episode_metric)
                     
                     ## Train TD3 or PPO controller
                     train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, 
@@ -861,6 +865,10 @@ def run_hrac(args):
                 state = obs["observation"]
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
+                if args.domain_name == "Safexp":
+                    if len(cost_model_buffer.trajectory) != 0:
+                        cost_model_buffer.add_trajectory_to_buffer()
+                    cost_model_buffer.create_new_trajectory()
                 done = False
                 ep_controller_reward = 0
                 ep_manager_reward = 0
@@ -932,8 +940,10 @@ def run_hrac(args):
 
             if args.world_model or args.controller_safe_model:
                 assert not controller_policy.PPO, "didnt implement wm + ppo controller"
+                if args.domain_name == "Safexp":
+                    cost_model_buffer.append(next_state, info["safety_cost"])
                 if world_model_buffer.cost_memmory:
-                        world_model_buffer.add(
+                    world_model_buffer.add(
                         (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
                 else:
                     world_model_buffer.add(
