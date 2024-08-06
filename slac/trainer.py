@@ -1,5 +1,5 @@
 import os
-from collections import deque
+from collections import deque, defaultdict
 from datetime import timedelta
 from time import sleep, time
 from tkinter import N
@@ -151,14 +151,20 @@ class Trainer:
             t = self.algo.step(self.env, self.ob, t, False, self.writer)
             self.algo.update_lag(t, self.writer)
             # Update the algorithm.
+            step_env = step * self.action_repeat
             if t%self.env_steps_per_train_step==0:
+                metrics = defaultdict(list)
                 for _ in range(self.train_steps_per_iter):
-                    
-                    self.algo.update_latent(self.writer)
-                    self.algo.update_sac(self.writer)
+                    lat_met = self.algo.update_latent(self.writer)
+                    for k, v in lat_met.items():
+                        metrics['latent/' + k].append(v.cpu().numpy())
+                    sac_met = self.algo.update_sac(self.writer)
+                    for k, v in sac_met.items():
+                        metrics['sac/' + k].append(v.cpu().numpy())
+                for k, v in metrics.items():
+                    self.writer.add_scalar(k, np.mean(v), global_step=step_env)
 
             # Evaluate regularly.
-            step_env = step * self.action_repeat
             if step_env % self.eval_interval == 0:
                 self.evaluate(step_env)
             
@@ -167,10 +173,12 @@ class Trainer:
                     sched.step()
             
             if step_env%self.algo.epoch_len == 0:
-                self.writer.add_scalar("cost/train", np.mean(self.algo.epoch_costreturns), global_step=step_env)
-                self.writer.add_scalar("return/train", np.mean(self.algo.epoch_rewardreturns), global_step=step_env)
+                self.writer.add_scalar("train/cost", np.mean(self.algo.epoch_costreturns), global_step=step_env)
+                self.writer.add_scalar("train/return", np.mean(self.algo.epoch_rewardreturns), global_step=step_env)
+                self.writer.add_scalar("train/success", np.mean(self.algo.epoch_successes), global_step=step_env)
                 self.algo.epoch_costreturns = []
                 self.algo.epoch_rewardreturns = []
+                self.algo.epoch_successes = []
             
 
         # Wait for logging to be finished.

@@ -389,9 +389,18 @@ class SafetyCriticSlacAlgorithm:
         loss_kld, loss_image, loss_reward, loss_cost = self.latent.calculate_loss(state_, action_, reward_, done_, cost_)
 
         self.optim_latent.zero_grad()
-        (loss_kld + loss_image + loss_reward + loss_cost).backward()
+        loss = loss_kld + loss_image + loss_reward + loss_cost
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(self.latent.parameters(), self.grad_clip_norm)
         self.optim_latent.step()
+        metrics = {
+            'kld': loss_kld.detach(),
+            'image': loss_image.detach(),
+            'reward': loss_reward.detach(),
+            'cost': loss_cost.detach(),
+            'loss': loss.detach()
+            }
+        return metrics
 
             
 
@@ -616,8 +625,10 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         self.epoch_len = 30_000//self.action_repeat
         self.epoch_costreturns = []
         self.epoch_rewardreturns = []
+        self.epoch_successes = []
         self.episode_costreturn = 0
         self.episode_rewardreturn = 0
+        self.episode_success = False
         
         self.loss_averages = defaultdict(lambda : 0)
 
@@ -633,7 +644,8 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         t += 1
 
         if is_random:
-            action = np.tanh(np.random.normal(loc=0,scale=2, size=env.action_space.shape))*env.action_space.high
+            # TODO: check!!
+            action = np.random.uniform(-1, 1, size=env.action_space.shape)
         else:
             action = self.explore(ob)
         state, reward, done, info = env.step(action)
@@ -641,6 +653,7 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         self.lastcost = cost
         self.episode_costreturn += cost
         self.episode_rewardreturn += reward
+        self.episode_success |= info['success']
         mask = False if t >= env._max_episode_steps else done
         ob.append(state, action)
 
@@ -652,8 +665,10 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
                 
                 self.epoch_costreturns.append(self.episode_costreturn)
                 self.epoch_rewardreturns.append(self.episode_rewardreturn)
+                self.epoch_successes.append(self.episode_success)
             self.episode_costreturn = 0
             self.episode_rewardreturn = 0
+            self.episode_success = False
             t = 0
             state = env.reset()
             ob.reset_episode(state)
@@ -726,6 +741,13 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         with torch.no_grad():
             self.alpha = self.log_alpha.exp()
 
+        return {
+            'actor': loss_actor.detach(),
+            'mult_alpha': self.alpha.detach(),
+            'alpha': loss_alpha.detach(),
+            'mult_lagrange': self.lagrange.detach()
+            }
+
 
     def update_lag(self, t, writer):
         try:
@@ -749,12 +771,13 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         state_, action_, reward, done, cost = self.buffer.sample_sac(self.batch_size_sac)
         z, next_z, action, feature_action, next_feature_action = self.prepare_batch(state_, action_)
 
-
-        self.update_critic(z, next_z, action, next_feature_action, reward, done, writer)
-        self.update_safety_critic(z, next_z, action, next_feature_action, cost, done, writer)
-        self.update_actor(z, feature_action, writer)
+        metrics = {}
+        metrics['critic'] = self.update_critic(z, next_z, action, next_feature_action, reward, done, writer)
+        metrics['safe_critic'] = self.update_safety_critic(z, next_z, action, next_feature_action, cost, done, writer)
+        metrics.update(self.update_actor(z, feature_action, writer))
         soft_update(self.critic_target, self.critic, self.tau)
         soft_update(self.safety_critic_target, self.safety_critic, self.tau)
+        return metrics
 
     def update_critic(self, z, next_z, action, next_feature_action, reward, done, writer):
         curr_q1, curr_q2 = self.critic(z, action)
@@ -770,6 +793,8 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip_norm)
         self.optim_critic.step()
 
+        return loss_critic.detach()
+
     def update_safety_critic(self, z, next_z, action, next_feature_action, cost, done, writer):
         curr_c1 = self.safety_critic(z, action)
         with torch.no_grad():
@@ -782,3 +807,5 @@ class LatentPolicySafetyCriticSlac(SafetyCriticSlacAlgorithm):
         loss_safety_critic.backward(retain_graph=False)
         torch.nn.utils.clip_grad_norm_(self.safety_critic.parameters(), self.grad_clip_norm)
         self.optim_safety_critic.step()
+
+        return loss_safety_critic.detach()

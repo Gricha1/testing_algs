@@ -21,6 +21,7 @@ class SlacWrapper:
         
         start = np.copy(self.env.env.base_env.wrapped_env.get_xy())
         observation, reward, done, info = self.env.step(action)
+        success = reward > -5
         goal = observation['desired_goal']
         
         
@@ -30,6 +31,7 @@ class SlacWrapper:
             if done or self.action_repeat==1:
                 return self.get_obs(observation), reward, done, {'cost': info['safety_cost']}
             observation, reward1, done, info1 = self.env.step(action)
+            success = reward > -5 or success
             for k in track_info.keys():
                 track_info[k] += info1[k]
             track_reward += reward1
@@ -38,7 +40,7 @@ class SlacWrapper:
             track_info["safety_cost"] = 1 if track_info["safety_cost"] > 0 else 0
         end = np.copy(self.env.env.base_env.wrapped_env.get_xy())
         reward = np.sqrt(np.sum((goal - start)**2)) - np.sqrt(np.sum((goal - end)**2))
-        return self.get_obs(observation), reward, done, {'cost': track_info['safety_cost']}
+        return self.get_obs(observation), reward, done, {'cost': track_info['safety_cost'], 'success': success}
     
     def get_obs(self, obs):
         vector = obs['observation']
