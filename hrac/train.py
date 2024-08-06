@@ -634,7 +634,7 @@ def run_hrac(args):
                 predict_env = PredictEnv(env_model, env_name, model_type)
             manager_policy.set_predict_env(predict_env)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=cost_memmory)
-        if args.domain_name == "Safexp":
+        if args.domain_name == "Safexp" and args.controller_safe_model:
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.wm_buffer_size)
 
         def train_cost_model(replay_buffer,
@@ -643,8 +643,8 @@ def run_hrac(args):
             assert controller.use_safe_model
             print("train cost model")
             debug_info = manager_policy.train_cost_model(replay_buffer, controller=controller, 
-                                                            cost_model_iterations=cost_model_iterations,
-                                                            cost_model_batch_size=args.cost_model_batch_size)
+                                                         cost_model_iterations=cost_model_iterations,
+                                                         cost_model_batch_size=args.cost_model_batch_size)
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
@@ -729,7 +729,7 @@ def run_hrac(args):
                         obs = env.reset()
                         state = obs["observation"]
                         done = False
-                        if args.domain_name == "Safexp":
+                        if args.domain_name == "Safexp" and args.controller_safe_model:
                             if len(cost_model_buffer.trajectory) != 0:
                                 cost_model_buffer.add_trajectory_to_buffer()
                             cost_model_buffer.create_new_trajectory()
@@ -742,7 +742,7 @@ def run_hrac(args):
                     else:
                         world_model_buffer.add(
                             (state, next_state, None, action, None, None, [], [])) 
-                    if args.domain_name == "Safexp":
+                    if args.domain_name == "Safexp" and args.controller_safe_model:
                         cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
                     exploration_total_timesteps += 1
@@ -767,7 +767,7 @@ def run_hrac(args):
                         print("Episode {}".format(episode_num))
                         
                     ## Train World Model or Cost Model
-                    if args.train_safe_model:
+                    if args.controller_safe_model:
                         if args.domain_name == "Safexp":
                             buffer = cost_model_buffer
                         else:
@@ -865,7 +865,7 @@ def run_hrac(args):
                 state = obs["observation"]
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
-                if args.domain_name == "Safexp":
+                if args.domain_name == "Safexp" and args.controller_safe_model:
                     if len(cost_model_buffer.trajectory) != 0:
                         cost_model_buffer.add_trajectory_to_buffer()
                     cost_model_buffer.create_new_trajectory()
@@ -881,7 +881,7 @@ def run_hrac(args):
                     episode_safety_subgoal_rate = 0
                     episode_subgoals_count = 0
                 prev_action = None
-                if args.world_model or args.train_safe_model:
+                if args.world_model:
                     prev_imagined_state = None
                     imagined_state_freq = args.img_horizon
                     acc_wm_imagination_episode_metric = 0
@@ -938,10 +938,11 @@ def run_hrac(args):
                 ctrl_done = done
 
 
+            if args.domain_name == "Safexp" and args.controller_safe_model:
+                cost_model_buffer.append(next_state, info["safety_cost"])
+
             if args.world_model or args.controller_safe_model:
                 assert not controller_policy.PPO, "didnt implement wm + ppo controller"
-                if args.domain_name == "Safexp":
-                    cost_model_buffer.append(next_state, info["safety_cost"])
                 if world_model_buffer.cost_memmory:
                     world_model_buffer.add(
                         (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))

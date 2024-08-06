@@ -14,7 +14,8 @@ python main.py --domain_name Safexp \
                --cost_memmory \
                --modelfree_safety \
                --validation_without_image --eval_freq 30000 \
-               --train_safe_model --controller_safe_model \
+               --controller_safe_model \
+               --cost_model_batch_size 512 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 800 \
                --max_timesteps 4000000 \

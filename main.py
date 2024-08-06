@@ -118,7 +118,6 @@ if __name__ == "__main__":
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
-    parser.add_argument("--train_safe_model", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
 
     # Noise Parameters

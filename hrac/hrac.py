@@ -112,9 +112,10 @@ class Manager(object):
                                                        testing_mean_pred=self.testing_mean_wm)
         return imagined_state
 
-    def train_cost_model(self, replay_buffer, controller=None, 
-                          cost_model_iterations=10, 
-                          cost_model_batch_size=128):
+    def train_cost_model(self, replay_buffer, 
+                         controller=None, 
+                         cost_model_iterations=10, 
+                         cost_model_batch_size=128):
         debug_info = {}
         assert not(controller is None)
         debug_info["safe_model_loss"] = []
@@ -124,20 +125,21 @@ class Manager(object):
             if replay_buffer.name == "cost_trajectory_buffer":
                 x, c = replay_buffer.sample(cost_model_batch_size)
                 state = get_tensor(x, to_device=False) # cost for the next_state
+                state_device = state.to(device)
+                cost = get_tensor(c, to_device=False)
+                cost_device = cost.to(device)
             elif replay_buffer.cost_memmory:
                 x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
                 state = get_tensor(y, to_device=False) # cost for the next_state
-            else:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                c = None
-                state = get_tensor(x, to_device=False)
-            state_device = state.to(device)
-            if not(c is None):
+                state_device = state.to(device)
                 cost = get_tensor(c, to_device=False)
                 cost_device = cost.to(device)
             else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(x, to_device=False)
+                state_device = state.to(device)
                 cost_device = None
-            safe_model_loss, true, pred = controller.train_cost_model(state_device, cost=cost_device)
+            safe_model_loss, true, pred = controller.train_batch_cost_model(state_device, cost=cost_device)
             debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
             debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
             debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
@@ -480,7 +482,6 @@ class Controller(object):
         self.criterion = nn.SmoothL1Loss()            
 
         self.use_safe_model = use_safe_model
-        self.train_safe_model = False
         self.manager = manager
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
@@ -591,7 +592,7 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
     
-    def train_cost_model(self, init_state, cost=None):
+    def train_batch_cost_model(self, init_state, cost=None):
         pred = self.safe_model(init_state)
         numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
         if not(cost is None):
@@ -616,11 +617,6 @@ class Controller(object):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
         debug_batch_data = True
-        if self.train_safe_model:
-            debug_info["safe_model_loss"] = []
-            if debug_batch_data:
-                debug_info["safe_model_mean_true"] = [] 
-                debug_info["safe_model_mean_pred"] = [] 
         if self.PPO:
             x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
             b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
@@ -737,12 +733,6 @@ class Controller(object):
                 critic_loss.backward()
                 self.critic_optimizer.step()
 
-                if self.train_safe_model:
-                    safe_model_loss, true, pred = self.train_cost_model(init_state)
-                    debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
-                    debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
-                    debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
-
                 # Compute actor loss
                 actor_loss = self.actor_loss(state, sg, init_state)
 
@@ -767,10 +757,6 @@ class Controller(object):
             if self.PPO:
                 avg_act_loss = avg_act_loss / num_minibatches
                 avg_crit_loss = avg_crit_loss / num_minibatches
-
-        if self.train_safe_model:
-            for key_ in debug_info:
-                debug_info[key_] = np.mean(debug_info[key_])    
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 

@@ -152,6 +152,7 @@ class CostModelTrajectoryBuffer(object):
         self.next_idx = 0
 
     def create_new_trajectory(self):
+        del self.trajectory
         self.trajectory = []
 
     def append(self, s, cost):
@@ -162,7 +163,6 @@ class CostModelTrajectoryBuffer(object):
         costs = []
 
         current_trajectory = self.trajectory
-        # get equal count of safe & unsafe states
         unsafe_state = []
         safe_state = []
         for i in range(len(current_trajectory)):
@@ -186,6 +186,7 @@ class CostModelTrajectoryBuffer(object):
                 else:
                     safe_state.append(state)
 
+        # get equal count of safe & unsafe states
         min_len = min(len(unsafe_state), len(safe_state))
         unsafe_state = random.sample(unsafe_state, min_len)
         safe_state = random.sample(safe_state, min_len)
