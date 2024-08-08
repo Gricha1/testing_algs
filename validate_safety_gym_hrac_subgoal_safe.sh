@@ -1,5 +1,4 @@
-python main.py --visulazied_episode 0 --validate \
-               --load --loaded_exp_num 561 \
+python main.py --visulazied_episode 10 --validate \
                --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
@@ -7,6 +6,8 @@ python main.py --visulazied_episode 0 --validate \
                --vector_env \
                --seed 344 \
                --cost_memmory \
+               --cm_frame_stack_num 2 \
                --modelfree_safety \
                --controller_safe_model \
-               --wandb_postfix "validate"
+               --wandb_postfix "validate" \
+               #--load --loaded_exp_num 590 \

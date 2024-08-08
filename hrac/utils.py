@@ -137,8 +137,9 @@ class ReplayBuffer(object):
 
 class CostModelTrajectoryBuffer(object):
 
-    def __init__(self, maxsize):
+    def __init__(self, maxsize, frame_stack_num=1):
         self.maxsize = maxsize
+        self.frame_stack_num = frame_stack_num
         self.next_idx = 0
         self.trajectory = []
         self.storage = [[] for _ in range(2)]
@@ -167,17 +168,31 @@ class CostModelTrajectoryBuffer(object):
         safe_state = []
         for i in range(len(current_trajectory)):
             for j in range(len(current_trajectory)):
-                state_i = current_trajectory[i][0]
+                if self.frame_stack_num > 1:
+                    frame_stack_states_i = [sc_pair[0] for sc_pair in current_trajectory[i-self.frame_stack_num+1:i+1]]
+                else:
+                    state_i = current_trajectory[i][0]
                 _ = current_trajectory[i][1]
                 state_j = current_trajectory[j][0]
                 cost_j = current_trajectory[j][1]
 
                 manager_absolute_goal = state_j[:2]
-                agent_pose = state_i[:2]
-                obstacle_data = state_i[-16:]
                 part_of_state = []
-                part_of_state.extend(agent_pose)
-                part_of_state.extend(obstacle_data)
+                if self.frame_stack_num > 1:
+                    agent_poses = [state_i[:2] for state_i in frame_stack_states_i]
+                    obstacle_datas = [state_i[-16:] for state_i in frame_stack_states_i]
+                    # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
+                    while len(agent_poses) < self.frame_stack_num:
+                        agent_poses.append([0 for i in range(2)])
+                        obstacle_datas.append([0 for i in range(16)])
+                    for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas):
+                        part_of_state.extend(agent_pose)
+                        part_of_state.extend(obstacle_data)
+                else:
+                    agent_pose = state_i[:2]
+                    obstacle_data = state_i[-16:]
+                    part_of_state.extend(agent_pose)
+                    part_of_state.extend(obstacle_data)
                 state = []
                 state.extend(manager_absolute_goal)
                 state.extend(part_of_state)

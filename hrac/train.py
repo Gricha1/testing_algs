@@ -32,7 +32,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 """
 
 
-def evaluate_policy(env, env_name, manager_policy, controller_policy,
+def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model,
                     calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
                     renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
@@ -57,18 +57,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafeGym":
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1])
-            if controller_policy.use_safe_model:
+            if args.controller_safe_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
-                #if lidar_observation:
-                #    x_np = np.array(x, dtype=np.float32)
-                #    manager_absolute_goal = x_np[:, :2]
-                #    agent_pose = x_np[:, :2]
-                #    obstacle_data = x_np[:, -16:]
-                #    part_of_state = np.concatenate((agent_pose, obstacle_data), axis=1)
-                #    x_np = np.concatenate((manager_absolute_goal, part_of_state), axis=1)
-                #else:
-                #    x_np = np.array(x, dtype=np.float32)
                 x_np = np.array(x, dtype=np.float32)
                 if env_name == "SafeAntMaze":
                     x_with_zeros = np.concatenate((x_np, 
@@ -78,7 +69,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                     x_with_zeros = x_np
                 x_tensor = torch.tensor(x_with_zeros)
                 x_tensor = x_tensor.to(device)
-                pred = controller_policy.safe_model(x_tensor)
+                pred = cost_model.safe_model(x_tensor)
                 pred = (pred > 0.5).int().squeeze().tolist()
                 val_safe_model_f1 = f1_score(true, pred)
                 validation_date["safe_model_true_mean"] = np.mean(true)
@@ -105,6 +96,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 imagined_state_freq = 100
                 prev_imagined_state = None
 
+            current_trajectory = [state]
             prev_action = None
             done = False
             step_count = 0
@@ -131,8 +123,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                                 episode_imagine_subgoal_safety += manager_policy.state_safety_on_horizon(
                                                         state_torch, subgoal_torch, 
                                                         controller_policy, 
-                                                        max_horizon=manager_policy.img_horizon,
-                                                        safety_cost=controller_policy.safe_model,
+                                                        safety_cost=cost_model.safe_model,
                                                         all_steps_safety=True
                                                         )
                     episode_subgoals_count += 1
@@ -206,12 +197,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                         current_step_info["hazards"] = [hazard[:2] for hazard in env.hazards_pos]
                         current_step_info["hazards_radius"] = env.hazards_size
                         current_step_info["agent_full_obs"] = np.array(state)
+                        current_step_info["cm_frame_stack_num"] = args.cm_frame_stack_num
+                        current_step_info["prev_agent_full_observations"] = copy.deepcopy(current_trajectory)
                     if not args.validation_without_image:
                         screen = renderer.custom_render(current_step_info, 
                                                         debug_info=debug_info, 
                                                         plot_goal=True,
                                                         env_name=env_name,
-                                                        safe_model=controller_policy.safe_model if controller_policy.use_safe_model else None)
+                                                        safe_model=cost_model.safe_model if args.controller_safe_model else None)
                         positions_screens.append(screen.transpose(2, 0, 1))
 
                 goal = new_obs["desired_goal"]
@@ -230,11 +223,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy,
                 state = new_state
                 prev_action = action
 
+                current_trajectory.append(state)
+
             if "Safe" in env_name:
                 avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
                 avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
                 avg_episode_real_subgoal_safety += episode_cost / episode_subgoals_count
-
+                
+            del current_trajectory
         if not args.validation_without_image and not (renderer is None) and not (writer is None):
             writer.add_video(
                 "eval/pos_video",
@@ -375,7 +371,7 @@ def run_hrac(args):
         # test, cost unique = [0, 1, 2]
         print("get safedataset safetygym!!!")
         start_time = time.time()
-        env.safe_dataset = get_safetydataset_as_random_experience(env)
+        env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
         end_time = time.time()
         print("time for safe dataset:", end_time-start_time)
         renderer_args = {"plot_subgoal": True, 
@@ -503,7 +499,6 @@ def run_hrac(args):
         lidar_observation=True if args.domain_name == "Safexp" else False
     )
     
-    cost_memmory = args.cost_memmory
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -519,14 +514,11 @@ def run_hrac(args):
         PPO=args.PPO,
         hidden_dim_ppo=args.ppo_hidden_dim,
         weight_decay_ppo=args.ppo_weight_decay,
-        cost_function=env.cost_func if not cost_memmory else None,
-        use_safe_model=args.controller_safe_model,
-        safe_model_loss_coef=args.safe_model_loss_coef,
+        cost_function=None if args.domain_name == "Safexp" or args.cost_memmory else env.cost_func,
         controller_imagination_safety_loss=args.controller_imagination_safety_loss,
         controller_grad_clip=args.controller_grad_clip,
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
-        lidar_observation=True if args.domain_name == "Safexp" else False
     )
 
     calculate_controller_reward = get_reward_function(
@@ -578,9 +570,12 @@ def run_hrac(args):
                 returns = advantages + np.array(controller_buffer.storage[7]).squeeze(1)
             controller_buffer.advantages = advantages
             controller_buffer.returns = returns
-        ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(controller_buffer, 
-            episode_timesteps if not PPO else args.ppo_update_epochs,
-            batch_size=args.ppo_ctrl_batch_size if PPO else args.ctrl_batch_size, discount=args.ppo_gamma if PPO else args.ctrl_discount, 
+        ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(
+            controller_buffer, 
+            safe_model=cost_model.safe_model,
+            iterations=episode_timesteps if not PPO else args.ppo_update_epochs,
+            batch_size=args.ppo_ctrl_batch_size if PPO else args.ctrl_batch_size, 
+            discount=args.ppo_gamma if PPO else args.ctrl_discount, 
             tau=args.ctrl_soft_sync_rate, minibatch_size=args.ppo_minibatch_size, 
             clip_coef=args.ppo_clip_coef, clip_vloss=args.ppo_clip_vloss, norm_adv=args.ppo_norm_adv, 
             max_grad_norm=args.ppo_max_grad_norm, vf_coef=args.ppo_vf_coef, 
@@ -615,7 +610,7 @@ def run_hrac(args):
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
-    ## Initialize world model
+    ## Initialize world model & cost model
     num_networks = args.num_networks
     num_elites = args.num_elites
     pred_hidden_size = args.pred_hidden_size
@@ -625,31 +620,39 @@ def run_hrac(args):
     cost_size = 0
     env_name = 'safepg2'
     model_type='pytorch'
-    if args.world_model or args.controller_safe_model:
-        if args.world_model:
-            with TensorWrapper():
-                env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
-                                                reward_size, cost_size, pred_hidden_size,
-                                                learning_rate=learning_rate, use_decay=use_decay)
-                predict_env = PredictEnv(env_model, env_name, model_type)
-            manager_policy.set_predict_env(predict_env)
-        world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=cost_memmory)
-        if args.domain_name == "Safexp" and args.controller_safe_model:
-            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.wm_buffer_size)
-
+    if args.controller_safe_model:
+        cost_model = hrac.CostModel(state_dim, goal_dim, 
+                                    lidar_observation=True if args.domain_name == "Safexp" else False, 
+                                    frame_stack_num=args.cm_frame_stack_num,
+                                    safe_model_loss_coef=args.safe_model_loss_coef, 
+                                    lr=args.ctrl_crit_lr)
+        if args.domain_name == "Safexp":
+            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
+                                                                frame_stack_num=args.cm_frame_stack_num)
+            
         def train_cost_model(replay_buffer,
-                             controller=None,
-                             cost_model_iterations=10):
-            assert controller.use_safe_model
+                             cost_model_iterations=10,
+                             cost_model_batch_size=128):
             print("train cost model")
-            debug_info = manager_policy.train_cost_model(replay_buffer, controller=controller, 
-                                                         cost_model_iterations=cost_model_iterations,
-                                                         cost_model_batch_size=args.cost_model_batch_size)
+            debug_info = cost_model.train_cost_model(replay_buffer, 
+                                                     cost_model_iterations=cost_model_iterations,
+                                                     cost_model_batch_size=cost_model_batch_size)
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
+            writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
+    else:
+        cost_model = None
 
+    if args.world_model:
+        with TensorWrapper():
+            env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
+                                              reward_size, cost_size, pred_hidden_size,
+                                              learning_rate=learning_rate, use_decay=use_decay)
+            predict_env = PredictEnv(env_model, env_name, model_type)
+        manager_policy.set_predict_env(predict_env)
+        world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=args.cost_memmory)
             
         def train_world_model(replay_buffer, acc_wm_imagination_episode_metric):
             with TensorWrapper():
@@ -667,6 +670,7 @@ def run_hrac(args):
     if args.load:
         try:
             manager_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
@@ -680,7 +684,7 @@ def run_hrac(args):
     if args.validate:
         # Start validation ...
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
             a_net=a_net, args=args)
@@ -736,12 +740,13 @@ def run_hrac(args):
                     action = env.action_space.sample()
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
-                    if world_model_buffer.cost_memmory:
-                        world_model_buffer.add(
-                        (state, next_state, None, action, None, info["safety_cost"], None, [], [])) 
-                    else:
-                        world_model_buffer.add(
-                            (state, next_state, None, action, None, None, [], [])) 
+                    if args.world_model:
+                        if world_model_buffer.cost_memmory:
+                            world_model_buffer.add(
+                            (state, next_state, None, action, None, info["safety_cost"], None, [], [])) 
+                        else:
+                            world_model_buffer.add(
+                                (state, next_state, None, action, None, None, [], [])) 
                     if args.domain_name == "Safexp" and args.controller_safe_model:
                         cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
@@ -773,8 +778,9 @@ def run_hrac(args):
                         else:
                             buffer = world_model_buffer
                         train_cost_model(buffer,
-                                         controller=controller_policy,
-                                         cost_model_iterations=episode_timesteps)
+                                         cost_model_iterations=episode_timesteps,
+                                         cost_model_batch_size=args.cost_model_batch_size)
+                        
                     if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
                         train_world_model(world_model_buffer, acc_wm_imagination_episode_metric)
                     
@@ -791,10 +797,15 @@ def run_hrac(args):
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
                         print("train subgoal policy")
-                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = manager_policy.train(controller_policy,
-                            manager_buffer, ceil(episode_timesteps/args.train_manager_freq),
-                            batch_size=args.man_batch_size, discount=args.man_discount, tau=args.man_soft_sync_rate,
-                            a_net=a_net, r_margin=r_margin)
+                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = \
+                                            manager_policy.train(controller_policy,
+                                                                 manager_buffer, 
+                                                                 cost_model,
+                                                                 ceil(episode_timesteps/args.train_manager_freq),
+                                                                 batch_size=args.man_batch_size, 
+                                                                 discount=args.man_discount, 
+                                                                 tau=args.man_soft_sync_rate,
+                                                                 a_net=a_net, r_margin=r_margin)
                         
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
@@ -820,7 +831,7 @@ def run_hrac(args):
                     if timesteps_since_eval >= args.eval_freq:
                         timesteps_since_eval = 0
                         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date =\
-                            evaluate_policy(env, args.env_name, manager_policy, controller_policy,
+                            evaluate_policy(env, args.env_name, manager_policy, controller_policy, cost_model,
                                 calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
                                 renderer=renderer, writer=writer, total_timesteps=total_timesteps,
@@ -847,6 +858,8 @@ def run_hrac(args):
                         if args.save_models:
                             controller_policy.save("./models", args.env_name, args.algo, exp_num)
                             manager_policy.save("./models", args.env_name, args.algo, exp_num)
+                            if args.controller_safe_model:
+                                cost_model.save("./models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
@@ -941,7 +954,7 @@ def run_hrac(args):
             if args.domain_name == "Safexp" and args.controller_safe_model:
                 cost_model_buffer.append(next_state, info["safety_cost"])
 
-            if args.world_model or args.controller_safe_model:
+            if args.world_model:
                 assert not controller_policy.PPO, "didnt implement wm + ppo controller"
                 if world_model_buffer.cost_memmory:
                     world_model_buffer.add(
@@ -1005,7 +1018,7 @@ def run_hrac(args):
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,
             a_net=a_net, args=args)
@@ -1020,6 +1033,8 @@ def run_hrac(args):
         if args.save_models:
             controller_policy.save("./models", args.env_name, args.algo, exp_num)
             manager_policy.save("./models", args.env_name, args.algo, exp_num)
+            if args.controller_safe_model:
+                cost_model.save("./models", args.env_name, args.algo, exp_num)
 
         writer.close()
 

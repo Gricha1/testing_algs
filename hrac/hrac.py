@@ -112,39 +112,6 @@ class Manager(object):
                                                        testing_mean_pred=self.testing_mean_wm)
         return imagined_state
 
-    def train_cost_model(self, replay_buffer, 
-                         controller=None, 
-                         cost_model_iterations=10, 
-                         cost_model_batch_size=128):
-        debug_info = {}
-        assert not(controller is None)
-        debug_info["safe_model_loss"] = []
-        debug_info["safe_model_mean_true"] = []
-        debug_info["safe_model_mean_pred"] = []
-        for i in range(cost_model_iterations):
-            if replay_buffer.name == "cost_trajectory_buffer":
-                x, c = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False) # cost for the next_state
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
-            elif replay_buffer.cost_memmory:
-                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(y, to_device=False) # cost for the next_state
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
-            else:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False)
-                state_device = state.to(device)
-                cost_device = None
-            safe_model_loss, true, pred = controller.train_batch_cost_model(state_device, cost=cost_device)
-            debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
-            debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
-            debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
-        return debug_info
-
     def train_world_model(self, replay_buffer):
         if replay_buffer.cost_memmory:
             x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
@@ -185,8 +152,9 @@ class Manager(object):
         return self.critic(state, goal, subgoal)
     
     def state_safety_on_horizon(self, state, actions, controller_policy, 
-                                max_horizon, safety_cost, 
-                                all_steps_safety=False, train=False):
+                                safety_cost, 
+                                all_steps_safety=False, 
+                                train=False):
 
         assert not(self.predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
@@ -222,7 +190,7 @@ class Manager(object):
                 safety /= self.img_horizon
         return safety
             
-    def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None):
+    def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None, cost_model=None):
         actions = self.actor(state, goal)
         
         eval = -self.critic.Q1(state, goal, actions).mean()
@@ -236,11 +204,10 @@ class Manager(object):
         safety_model_free_loss = 0
         if self.modelbased_safety:
             safety_model_based_loss = self.state_safety_on_horizon(state, actions, 
-                                                        controller_policy, 
-                                                        max_horizon=self.img_horizon,
-                                                        safety_cost=controller_policy.safe_model,
-                                                        all_steps_safety=self.cumul_modelbased_safety,
-                                                        train=True)
+                                                                   controller_policy, 
+                                                                   safety_cost=cost_model.safe_model,
+                                                                   all_steps_safety=self.cumul_modelbased_safety,
+                                                                   train=True)
             safety_model_based_loss = safety_model_based_loss.mean()
         if self.modelfree_safety:
             copy_state = state.detach()
@@ -248,17 +215,26 @@ class Manager(object):
             manager_absolute_goal += copy_state[:, :actions.shape[1]]
             if self.lidar_observation:
                 assert len(copy_state[0, :]) == 30
-                agent_pose = copy_state[:, :2]
-                obstacle_data = copy_state[:, -16:]
-                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                # test
+                if cost_model.frame_stack_num > 1:
+                    agent_pose = copy_state[:, :2]
+                    obstacle_data = copy_state[:, -16:]
+                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                    for i in range(cost_model.frame_stack_num - 1):
+                        part_of_state = torch.cat((part_of_state, agent_pose, obstacle_data), dim=1)
+                else:
+                    agent_pose = copy_state[:, :2]
+                    obstacle_data = copy_state[:, -16:]
+                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
                 manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             else:
                 zeros_to_add = torch.zeros(actions.shape[0], 
                                             state.shape[1] - actions.shape[1]).to(device)
                 manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
-            safety_model_free_loss = controller_policy.safe_model(manager_absolute_goal)
+            safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
-        safety_loss = self.coef_safety_modelbased * safety_model_based_loss + self.coef_safety_modelfree * safety_model_free_loss 
+        safety_loss = self.coef_safety_modelbased * safety_model_based_loss + \
+                      self.coef_safety_modelfree * safety_model_free_loss 
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
@@ -307,7 +283,8 @@ class Manager(object):
 
         return candidates[np.arange(batch_size), max_indices]
 
-    def train(self, controller_policy, replay_buffer, iterations, batch_size=100, discount=0.99,
+    def train(self, controller_policy, replay_buffer, cost_model, 
+              iterations, batch_size=100, discount=0.99,
               tau=0.005, a_net=None, r_margin=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
@@ -363,7 +340,8 @@ class Manager(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, controller_policy)
+            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, 
+                                                                          controller_policy, cost_model)
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
             if self.modelbased_safety or self.modelfree_safety:
@@ -435,9 +413,7 @@ class Manager(object):
             np.save("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo), mu)
             np.save("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo), std)
             np.save("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo), elite_model_idxes)
-        # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ManagerActorOptim.pth".format(dir, env_name, algo))
-        # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ManagerCriticOptim.pth".format(dir, env_name, algo))
-
+        
     def load(self, dir, env_name, algo, exp_num, load_wm_as_pkl=True):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo)))
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
@@ -457,18 +433,91 @@ class Manager(object):
                 self.predict_env.model.scaler.set_mu_std(mu, std)
                 elite_model_idxes = np.load("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo))
                 self.predict_env.model.set_elite_model_idxes(elite_model_idxes)
-        # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ManagerActorOptim.pth".format(dir, env_name, algo)))
-        # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ManagerCriticOptim.pth".format(dir, env_name, algo)))
+                
+class CostModel(object):
+    def __init__(self, state_dim, goal_dim, lidar_observation, 
+                       frame_stack_num, 
+                       safe_model_loss_coef, lr):
+        self.lidar_observation = lidar_observation
+        self.safe_model_loss_coef = safe_model_loss_coef        
+        self.frame_stack_num = frame_stack_num
+        if self.lidar_observation:
+            agent_xy = 2     
+            lidar_obs = 16       
+            self.safe_model = ControllerSafeModel(goal_dim + (agent_xy + lidar_obs) * frame_stack_num).to(device)
+        else:
+            self.safe_model = ControllerSafeModel(state_dim).to(device)
+        
+        self.safe_model_criterion = nn.BCELoss()
+        self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
+                                                lr=lr, weight_decay=0.0001)
+        
+
+    def train_cost_model(self, replay_buffer, 
+                         cost_model_iterations=10, 
+                         cost_model_batch_size=128):
+        debug_info = {}
+        debug_info["safe_model_loss"] = []
+        debug_info["safe_model_mean_true"] = []
+        debug_info["safe_model_mean_pred"] = []
+        for i in range(cost_model_iterations):
+            if replay_buffer.name == "cost_trajectory_buffer":
+                x, c = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(x, to_device=False) # cost for the next_state
+                state_device = state.to(device)
+                cost = get_tensor(c, to_device=False)
+                cost_device = cost.to(device)
+            elif replay_buffer.cost_memmory:
+                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(y, to_device=False) # cost for the next_state
+                state_device = state.to(device)
+                cost = get_tensor(c, to_device=False)
+                cost_device = cost.to(device)
+            else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                state = get_tensor(x, to_device=False)
+                state_device = state.to(device)
+                cost_device = None
+            safe_model_loss, true, pred = self.train_batch_cost_model(state_device, cost=cost_device)
+            debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
+            debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
+            debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
+        return debug_info
+    
+    def train_batch_cost_model(self, init_state, cost=None):
+        pred = self.safe_model(init_state)
+        numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
+        if not(cost is None):
+            true = cost
+        else:
+            true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
+
+        # Compute safet_model loss
+        safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)
+
+        # Optimize the safe_model
+        self.safe_model_optimizer.zero_grad()
+        safe_model_loss.backward()
+        self.safe_model_optimizer.step()
+
+        return safe_model_loss, true, pred
+    
+
+    def save(self, dir, env_name, algo, exp_num):
+        torch.save(self.safe_model.state_dict(), "{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo))
+        
+    def load(self, dir, env_name, algo, exp_num):
+        self.safe_model.load_state_dict(torch.load("{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo)))
 
 
 class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None, use_safe_model=False, cost_function=None,
-                 safe_model_loss_coef=1.0, controller_imagination_safety_loss=False,
-                 manager=None, controller_grad_clip=0, controller_safety_coef=0,
-                 lidar_observation=False
+                 weight_decay_ppo=None, 
+                 cost_function=None,
+                 controller_imagination_safety_loss=False,
+                 manager=None, controller_grad_clip=0, controller_safety_coef=0,                 
     ):
         self.PPO = PPO
         self.state_dim = state_dim
@@ -481,24 +530,13 @@ class Controller(object):
         self.absolute_goal = absolute_goal
         self.criterion = nn.SmoothL1Loss()            
 
-        self.use_safe_model = use_safe_model
         self.manager = manager
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
         self.controller_grad_clip = controller_grad_clip
         if self.controller_imagination_safety_loss:
             assert self.manager
-        if use_safe_model:
-            self.lidar_observation = lidar_observation
-            self.cost_function = cost_function
-            self.safe_model_loss_coef = safe_model_loss_coef
-            if self.lidar_observation:
-                self.safe_model = ControllerSafeModel(goal_dim + 2 + 16).to(device)
-            else:
-                self.safe_model = ControllerSafeModel(state_dim).to(device)
-            self.safe_model_criterion = nn.BCELoss()
-            self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
-                                                 lr=critic_lr, weight_decay=0.0001)
+        self.cost_function = cost_function
 
         if self.PPO:
             self.agent = PPOAgent(state_dim, goal_dim, action_dim,
@@ -564,14 +602,14 @@ class Controller(object):
         action = get_tensor(action)
         return self.critic(state, sg, action)
 
-    def actor_loss(self, state, sg, init_state):
+    def actor_loss(self, state, sg, init_state, cost_model):
         if self.PPO: assert 1 == 0
         actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
         if self.controller_imagination_safety_loss:
             safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
                                                                 controller_policy=self, 
                                                                 max_horizon=self.manager.img_horizon,
-                                                                safety_cost=self.safe_model,
+                                                                safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=False,
                                                                 train=True)
             actor_loss += self.controller_safety_coef * safety_loss.mean()
@@ -591,26 +629,8 @@ class Controller(object):
         subgoals = (subgoal + states[:, 0, :self.goal_dim])[:, None] - \
                    states[:, :, :self.goal_dim]
         return subgoals
-    
-    def train_batch_cost_model(self, init_state, cost=None):
-        pred = self.safe_model(init_state)
-        numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
-        if not(cost is None):
-            true = cost
-        else:
-            true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
 
-        # Compute safet_model loss
-        safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)
-
-        # Optimize the safe_model
-        self.safe_model_optimizer.zero_grad()
-        safe_model_loss.backward()
-        self.safe_model_optimizer.step()
-
-        return safe_model_loss, true, pred
-
-    def train(self, replay_buffer, iterations, batch_size=100, discount=0.99, tau=0.005, 
+    def train(self, replay_buffer, safe_model, iterations, batch_size=100, discount=0.99, tau=0.005, 
               minibatch_size=None, clip_coef=None, clip_vloss=None,
               norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None,
               num_minibatches=None):
@@ -734,7 +754,7 @@ class Controller(object):
                 self.critic_optimizer.step()
 
                 # Compute actor loss
-                actor_loss = self.actor_loss(state, sg, init_state)
+                actor_loss = self.actor_loss(state, sg, init_state, safe_model)
 
                 # Optimize the actor
                 self.actor_optimizer.zero_grad()
@@ -768,10 +788,6 @@ class Controller(object):
             torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
             torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
             torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
-            if self.use_safe_model:
-                torch.save(self.safe_model.state_dict(), "{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo))
-            # torch.save(self.actor_optimizer.state_dict(), "{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo))
-            # torch.save(self.critic_optimizer.state_dict(), "{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo))
 
     def load(self, dir, env_name, algo, exp_num):
         if self.PPO:
@@ -781,7 +797,3 @@ class Controller(object):
             self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
             self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
             self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
-            if self.use_safe_model:
-                self.safe_model.load_state_dict(torch.load("{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo)))
-            # self.actor_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerActorOptim.pth".format(dir, env_name, algo)))
-            # self.critic_optimizer.load_state_dict(torch.load("{}/{}_{}_ControllerCriticOptim.pth".format(dir, env_name, algo)))

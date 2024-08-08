@@ -26,8 +26,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
-    parser.add_argument("--load_adj_net", default=False, action="store_true")
-
+    
     parser.add_argument("--image_size", type=int, default=2)
     parser.add_argument("--vector_env", default=False, action="store_true")
     parser.add_argument("--action_repeat", type=int, default=2)
@@ -35,8 +34,8 @@ if __name__ == "__main__":
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
 
-
     # Adjacency Network Parameters
+    parser.add_argument("--load_adj_net", default=False, action="store_true")
     parser.add_argument("--adj_loss_coef", default=1., type=float)
     parser.add_argument("--gid", default=0, type=int)
     parser.add_argument("--traj_buffer_size", default=50_000, type=int) # 50_000
@@ -92,6 +91,23 @@ if __name__ == "__main__":
     parser.add_argument("--ppo_hidden_dim", default=300, type=int)
     parser.add_argument("--ppo_weight_decay", default=None, type=float)
 
+    # Safety Subgoal Parameters
+    parser.add_argument("--modelbased_safety", action='store_true', default=False)
+    parser.add_argument("--modelfree_safety", action='store_true', default=False)
+    parser.add_argument("--cumul_modelbased_safety", action='store_true', default=False)
+    parser.add_argument("--img_horizon", default=20, type=int)    
+    parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
+    parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
+    # Cost Model Parameters
+    parser.add_argument("--controller_safe_model", action='store_true', default=False)
+    parser.add_argument("--cost_model_batch_size", default=128, type=int)
+    parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
+    parser.add_argument("--cm_frame_stack_num", default=1, type=int)
+
+    # Safety Controller Parameters
+    parser.add_argument("--controller_safety_coef", default=4000., type=float)
+    parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
+    parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     # WorldModel Parameters
     parser.add_argument("--cost_memmory", action='store_true', default=False)
     parser.add_argument("--world_model", action='store_true', default=False)
@@ -104,21 +120,6 @@ if __name__ == "__main__":
     parser.add_argument("--pred_hidden_size", default=200, type=int)
     parser.add_argument("--use_decay", default=True, type=bool)
     parser.add_argument("--testing_mean_wm", action='store_true', default=False)
-
-    # Safety Subgoal Parameters
-    parser.add_argument("--modelbased_safety", action='store_true', default=False)
-    parser.add_argument("--modelfree_safety", action='store_true', default=False)
-    parser.add_argument("--cumul_modelbased_safety", action='store_true', default=False)
-    parser.add_argument("--img_horizon", default=20, type=int)    
-    parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
-    parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
-
-    # Safety model Parameters
-    parser.add_argument("--controller_safety_coef", default=4000., type=float)
-    parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
-    parser.add_argument("--controller_safe_model", action='store_true', default=False)
-    parser.add_argument("--safe_model_loss_coef", default=1., type=float)
-    parser.add_argument("--cost_model_batch_size", default=128, type=int)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)
@@ -138,6 +139,10 @@ if __name__ == "__main__":
             " to train safety you need world model"
     assert not args.cumul_modelbased_safety or (args.modelbased_safety and args.cumul_modelbased_safety)
     assert args.img_horizon <= args.manager_propose_freq
+    assert not args.controller_safe_model or \
+        ( (args.controller_safe_model and args.domain_name == "Safexp") or \
+          (args.controller_safe_model and args.domain_name != "Safexp" and args.world_model)
+        )
 
     # PPO
     args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)
