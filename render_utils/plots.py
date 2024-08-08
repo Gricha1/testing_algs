@@ -11,17 +11,24 @@ def plot_values(fig, ax_values, safe_model, render_info={}, current_step_info={}
     grid_resolution_x = render_info["grid_resolution_x"]
     grid_resolution_y = render_info["grid_resolution_y"]
     agent_full_obs = current_step_info["agent_full_obs"]
+    cm_frame_stack_num = current_step_info["cm_frame_stack_num"]
+    prev_agent_full_observations = current_step_info["prev_agent_full_observations"]
 
     grid_states = []              
-    grid_goals = []
     grid_dx = (env_max_x - env_min_x) / grid_resolution_x
     grid_dy = (env_max_y - env_min_y) / grid_resolution_y
     for grid_state_y in np.linspace(env_min_y + grid_dy/2, env_max_y - grid_dy/2, grid_resolution_y):
         for grid_state_x in np.linspace(env_min_x + grid_dx/2, env_max_x - grid_dx/2, grid_resolution_x):
-            grid_state = [grid_state_x, grid_state_y]
-            #for _ in range(render_info["state_dim"] - 2):
-            #    grid_state.append(0)
-            grid_state = np.concatenate([grid_state, agent_full_obs[:2], agent_full_obs[-16:]])
+            grid_state = [grid_state_x, grid_state_y]            
+            if cm_frame_stack_num > 1:
+                for i in range(cm_frame_stack_num):
+                    if abs(-i-1) > len(prev_agent_full_observations):
+                        agent_full_obs_temp = [0 for i in range(30)]
+                    else:
+                        agent_full_obs_temp = prev_agent_full_observations[-i-1]
+                    grid_state = np.concatenate([grid_state, agent_full_obs_temp[:2], agent_full_obs_temp[-16:]])
+            else:
+                grid_state = np.concatenate([grid_state, agent_full_obs[:2], agent_full_obs[-16:]])
             grid_states.append(grid_state.tolist())
     grid_states = torch.FloatTensor(np.array(grid_states)).to(device)
     grid_vs = safe_model.predict(grid_states)
