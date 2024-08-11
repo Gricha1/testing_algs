@@ -13,10 +13,11 @@ python main.py --domain_name Safexp \
                --vector_env \
                --seed $seed \
                --world_model \
-               --validation_without_image --eval_freq 1000 \
+               --validation_without_image --eval_freq 30000 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --controller_safety_coef 6 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
-               #--controller_safe_model \
+               --controller_safe_model \
+               --cost_oracle
 

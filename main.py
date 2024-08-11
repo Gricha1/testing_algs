@@ -111,6 +111,7 @@ if __name__ == "__main__":
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     # WorldModel Parameters
     parser.add_argument("--wm_batch_size", default=256, type=int) # 20 episodes
+    parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
     parser.add_argument("--cost_memmory", action='store_true', default=False)
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
