@@ -31,7 +31,7 @@ def plot_values(fig, ax_values, safe_model, render_info={}, current_step_info={}
                 grid_state = np.concatenate([grid_state, agent_full_obs[:2], agent_full_obs[-16:]])
             grid_states.append(grid_state.tolist())
     grid_states = torch.FloatTensor(np.array(grid_states)).to(device)
-    grid_vs = safe_model.predict(grid_states)
+    grid_vs = safe_model(grid_states)
     grid_vs = grid_vs.detach().cpu().numpy().reshape(grid_resolution_x, grid_resolution_y)[::-1]
     #mask = grid_vs >= 0.5
     #grid_vs[mask] = 1

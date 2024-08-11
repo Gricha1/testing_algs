@@ -34,8 +34,8 @@ class CustomVideoRendered:
             self.render_info["env_min_y"], self.render_info["env_max_y"] = -10, 10
         else:
             assert 1 == 0, "not recognized task lvl"
-        self.render_info["grid_resolution_x"] = 20
-        self.render_info["grid_resolution_y"] = 20
+        self.render_info["grid_resolution_x"] = 40
+        self.render_info["grid_resolution_y"] = 40
         self.render_info["state_dim"] = env.state_dim
         if self.plot_world_model_state or self.world_model_comparsion:
             self.robot_poses = None
