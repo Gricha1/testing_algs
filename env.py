@@ -3,6 +3,7 @@ from gym.wrappers.transform_observation import TransformObservation
 from gym.wrappers.transform_reward import TransformReward
 from gym.spaces.box import Box
 import numpy as np
+import torch
 import safety_gym
 """An observation wrapper that augments observations by pixel values."""
 
@@ -257,30 +258,58 @@ class GoalConditionedWrapper(ObservationWrapper):
 
         return gc_observation
 
-    def _add_pixel_observation(self, observation):
-        if self._pixels_only:
-            observation = collections.OrderedDict()
-        elif self._observation_is_dict:
-            observation = type(observation)(observation)
+    
+class SafetyEnvWrapper:
+    def __init__(self, env):
+        self.env = env
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space
+
+    def seed(self, seed):
+        return self.env.seed(seed)
+    
+    @property
+    def goal_size(self):
+        return self.env.goal_size
+
+    @property
+    def hazards_size(self):
+        return self.env.hazards_size
+    
+    @property
+    def hazards_pos(self):
+        return self.env.hazards_pos
+
+    def cost_func(self, state, hazard_poses=None):
+        # test add hazard_poses process
+        current_hazards = [hazard[:2] for hazard in self.hazards_pos]
+
+        if len(state.shape) == 1:
+            current_hazards_tensor = np.array(current_hazards)
+            distances = np.sqrt(np.sum((state[:2] - current_hazards_tensor) ** 2, axis=1))
+            #distances = torch.sqrt(torch.sum((state[:2] - current_hazards_tensor) ** 2, axis=1))
+            cost = 1 if np.sum(distances < self.hazards_size) > 0 else 0
         else:
-            observation = collections.OrderedDict()
-            observation[STATE_KEY] = observation
-        if self.task == "button":
-            if self.buttons is None:
-                self.buttons = [i for i, name in enumerate(self.env.unwrapped.sim.model.geom_names) if name.startswith("button")]
-            for j, button in enumerate(self.buttons):
-                if j == self.env.unwrapped.goal_button:
-                    self.env.unwrapped.sim.model.geom_rgba[button] = self.COLOR_GOAL
-                else:   
-                    self.env.unwrapped.sim.model.geom_rgba[button] = self.COLOR_BUTTON
-        pixel_observations = {
-            pixel_key: self.env.sim.render(**self._render_kwargs[pixel_key])[::-1, :, :]
-            for pixel_key in self._pixel_keys
-        }
+            batch_size = state.shape[0]
+            device = state.device
+            current_hazards_tensor = torch.tensor(current_hazards, dtype=torch.float).to(device)
+            cost = torch.zeros(batch_size, dtype=torch.float)
 
-        observation.update(pixel_observations)
+            for i in range(batch_size):
+                distances = torch.sqrt(torch.sum((state[i, :2] - current_hazards_tensor) ** 2, axis=1))
+                cost[i] = 1 if torch.sum(distances < self.hazards_size) > 0 else 0
 
-        return observation
+        return cost
+    
+    def reset(self):
+        return self.env.reset()
+    
+    def step(self, action):
+        new_obs, reward, done, info = self.env.step(action)
+        state = new_obs["observation"]
+        info["safety_cost"] = self.cost_func(state)
+
+        return new_obs, reward, done, info
 
 gym.logger.set_level(40)
 
@@ -295,7 +324,8 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
     if not use_pixels:
         if goal_conditioned:
             gc_env = GoalConditionedWrapper(ar_env)
-            return gc_env 
+            s_env = SafetyEnvWrapper(gc_env)
+            return s_env 
         return ar_env
 
 

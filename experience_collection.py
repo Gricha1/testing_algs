@@ -8,6 +8,8 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1):
     ## Collect transitions with random policy for world model, cost model
     unsafe_state = []
     safe_state = []
+    unsafe_hazard_poses = []
+    safe_hazard_poses = []
     done = True
     # current_trajectory = [(state, cost), (state, cost), ...]
     current_trajectory = []
@@ -27,6 +29,7 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1):
                         _ = current_trajectory[i][1]
                         state_j = current_trajectory[j][0]
                         cost_j = current_trajectory[j][1]
+                        hazards_i = current_trajectory[i][2]
 
                         manager_absolute_goal = state_j[:2]
                         part_of_state = []
@@ -51,9 +54,11 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1):
                         if cost_j >= 1: # test could be [0, 1, 2]
                             if len(unsafe_state) < states_count:
                                 unsafe_state.append(state)
+                                unsafe_hazard_poses.append(hazards_i)
                         else:
                             if len(safe_state) < states_count:
                                 safe_state.append(state)
+                                safe_hazard_poses.append(hazards_i)
             current_trajectory = []
 
         action = env.action_space.sample()
@@ -61,7 +66,8 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1):
         next_state = next_tup["observation"]
         cost = info["safety_cost"]        
         state = next_state
-        current_trajectory.append((state, cost))
+        current_hazards = np.array([hazard[:2] for hazard in env.hazards_pos])
+        current_trajectory.append((state, cost, current_hazards))
         #if cost >= 1:
         #    if len(unsafe_state) < states_count:
         #        unsafe_state.append(state)
@@ -74,6 +80,10 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1):
     costs.extend([1 for i in range(len(unsafe_state))])
     costs.extend([0 for i in range(len(safe_state))])
 
+    hazard_poses = []
+    hazard_poses.extend(unsafe_hazard_poses)
+    hazard_poses.extend(safe_hazard_poses)
+
     assert len(np.unique(costs)) <= 2, f"unique: {np.unique(costs)}"
-    assert len(states) == len(costs)
-    return states, costs
+    assert len(states) == len(costs) == len(hazard_poses)
+    return states, costs, hazard_poses
