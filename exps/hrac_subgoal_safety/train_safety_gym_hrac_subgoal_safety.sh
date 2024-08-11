@@ -4,7 +4,7 @@ else
     seed=$1
 fi
 
-
+cd ../..
 python main.py --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
@@ -14,10 +14,11 @@ python main.py --domain_name Safexp \
                --modelfree_safety \
                --validation_without_image --eval_freq 30000 \
                --controller_safe_model \
-               --cm_frame_stack_num 2 \
+               --cm_frame_stack_num 1 \
                --cost_model_batch_size 128 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 800 \
                --max_timesteps 4000000 \
-               --wandb_postfix "" 
+               --wandb_postfix "" \
+               --cost_oracle
 

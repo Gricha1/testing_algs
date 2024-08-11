@@ -99,6 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
     # Cost Model Parameters
+    parser.add_argument("--cost_oracle", action='store_true', default=False)
     parser.add_argument("--controller_safe_model", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
     parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
@@ -109,11 +110,11 @@ if __name__ == "__main__":
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     # WorldModel Parameters
+    parser.add_argument("--wm_batch_size", default=256, type=int) # 20 episodes
     parser.add_argument("--cost_memmory", action='store_true', default=False)
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)
-    parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--num_networks", default=8, type=int)
     parser.add_argument("--num_elites", default=6, type=int)

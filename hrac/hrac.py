@@ -112,7 +112,7 @@ class Manager(object):
                                                        testing_mean_pred=self.testing_mean_wm)
         return imagined_state
 
-    def train_world_model(self, replay_buffer):
+    def train_world_model(self, replay_buffer, batch_size=256):
         if replay_buffer.cost_memmory:
             x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
         else:
@@ -126,7 +126,7 @@ class Manager(object):
         inputs = np.concatenate((state, action), axis=-1)
 
         labels = delta_state.numpy()
-        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=256, holdout_ratio=0.2)
+        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=batch_size, holdout_ratio=0.2)
         del state, action, next_state
         
         return loss
@@ -151,7 +151,8 @@ class Manager(object):
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
     
-    def state_safety_on_horizon(self, state, actions, controller_policy, 
+    def state_safety_on_horizon(self, state, actions, 
+                                controller_policy, 
                                 safety_cost, 
                                 all_steps_safety=False, 
                                 train=False):
@@ -630,7 +631,7 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
 
-    def train(self, replay_buffer, safe_model, iterations, batch_size=100, discount=0.99, tau=0.005, 
+    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, 
               minibatch_size=None, clip_coef=None, clip_vloss=None,
               norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None,
               num_minibatches=None):
@@ -754,7 +755,7 @@ class Controller(object):
                 self.critic_optimizer.step()
 
                 # Compute actor loss
-                actor_loss = self.actor_loss(state, sg, init_state, safe_model)
+                actor_loss = self.actor_loss(state, sg, init_state, cost_model)
 
                 # Optimize the actor
                 self.actor_optimizer.zero_grad()
