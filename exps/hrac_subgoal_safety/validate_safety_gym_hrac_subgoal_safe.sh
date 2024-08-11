@@ -1,5 +1,5 @@
 cd ../..
-python main.py --visulazied_episode 10 --validate \
+python main.py --visulazied_episode 0 --validate \
                --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
@@ -10,5 +10,5 @@ python main.py --visulazied_episode 10 --validate \
                --modelfree_safety \
                --controller_safe_model \
                --wandb_postfix "validate" \
-               --load --loaded_exp_num 626 \
+               --load --loaded_exp_num 633 \
                --cost_oracle

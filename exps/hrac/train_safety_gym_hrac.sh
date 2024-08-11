@@ -4,6 +4,7 @@ else
     seed=$1
 fi
 
+cd ../..
 python main.py --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
