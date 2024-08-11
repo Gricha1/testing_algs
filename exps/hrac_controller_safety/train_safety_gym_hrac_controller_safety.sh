@@ -13,6 +13,7 @@ python main.py --domain_name Safexp \
                --vector_env \
                --seed $seed \
                --world_model \
+               --controller_imagination_safety_loss \
                --validation_without_image --eval_freq 30000 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --controller_safety_coef 6 \

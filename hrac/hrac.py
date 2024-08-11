@@ -609,7 +609,6 @@ class Controller(object):
         if self.controller_imagination_safety_loss:
             safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
                                                                 controller_policy=self, 
-                                                                max_horizon=self.manager.img_horizon,
                                                                 safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=False,
                                                                 train=True)

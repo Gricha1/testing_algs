@@ -4,6 +4,7 @@ else
     seed=$1
 fi
 
+cd ../..
 python main.py --seed $seed \
                --modelfree_safety \
                --controller_imagination_safety_loss \
