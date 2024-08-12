@@ -26,14 +26,8 @@ class CustomVideoRendered:
         self.env = env
         self.world_model_comparsion = world_model_comparsion
         self.controller_safe_model = controller_safe_model
-        if "1" in args.task_name:
-            self.render_info["env_min_x"], self.render_info["env_max_x"] = -5, 5
-            self.render_info["env_min_y"], self.render_info["env_max_y"] = -5, 5
-        elif "2" in args.task_name:
-            self.render_info["env_min_x"], self.render_info["env_max_x"] = -10, 10
-            self.render_info["env_min_y"], self.render_info["env_max_y"] = -10, 10
-        else:
-            assert 1 == 0, "not recognized task lvl"
+        self.render_info["env_min_x"], self.render_info["env_max_x"] = -5, 5
+        self.render_info["env_min_y"], self.render_info["env_max_y"] = -5, 5
         self.render_info["grid_resolution_x"] = 40
         self.render_info["grid_resolution_y"] = 40
         self.render_info["state_dim"] = env.state_dim
