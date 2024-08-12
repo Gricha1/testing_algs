@@ -200,6 +200,13 @@ class CustomVideoRendered:
                     dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
                 if "dist_a_net_s_g" in debug_info:
                     dist_a_net_s_g = debug_info["dist_a_net_s_g"]
+                if "dist_to_goal" in debug_info:
+                    dist_to_goal = debug_info["dist_to_goal"]
+                    self.render_info["ax_states"].text(env_max_x - 7.5, env_max_y - 1, f"d_g:{int(dist_to_goal*100)/100}")
+                if "goals_achieved" in debug_info:
+                    goals_achieved = debug_info["goals_achieved"]
+                    self.render_info["ax_states"].text(env_max_x - 5.5, env_max_y - 1, f"g_a:{goals_achieved}")
+
                 if "imagine_subgoal_safety" in debug_info:
                     imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
                     self.render_info["ax_states"].text(env_max_x - 5, env_max_y - 1, f"Is:{int(imagine_subgoal_safety*100)/100}")

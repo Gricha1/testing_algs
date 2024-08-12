@@ -31,16 +31,26 @@ class ActionRepeatWrapper(Wrapper):
         observation, reward, done, info = self.env.step(action)
         track_info = info.copy()
         track_reward = reward
+        # fix bug with goal met on goal continue
+        goal_met = False
+        if "goal_met" in info:
+            goal_met = True
         for i in range(self.action_repeat-1):
             if done or self.action_repeat==1:
                 return observation, reward, done, info
             observation1, reward1, done1, info1 = self.env.step(action)
+            # fix bug with goal met on goal continue
+            if "goal_met" in info1:
+                goal_met = True
             track_info["cost"] += info1["cost"]
             track_reward += reward1
 
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
         track_info["safety_cost"] = track_info["cost"]
+        # fix bug with goal met on goal continue
+        if goal_met:
+            track_info["goal_met"] = True
         return observation1, track_reward, done1, track_info
     
 
@@ -265,6 +275,11 @@ class SafetyEnvWrapper:
         self.observation_space = env.observation_space
         self.action_space = env.action_space
 
+        # update safety gym config, delete goal continue
+        #new_safety_gym_config = {"continue_goal": False}
+        #self.env.parse(new_safety_gym_config)
+        #assert not self.env.config["continue_goal"]
+        
     def seed(self, seed):
         return self.env.seed(seed)
     
