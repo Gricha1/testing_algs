@@ -24,16 +24,20 @@ class ActionRepeatWrapper(Wrapper):
         observation, reward, done, info = self.env.step(action)
         track_info = info.copy()
         track_reward = reward
+        success = reward > -5
         for i in range(self.action_repeat-1):
             if done or self.action_repeat==1:
                 return observation, reward, done, info
             observation1, reward1, done1, info1 = self.env.step(action)
+            success1 = reward1 > -5
+            success |= success1 
             track_info["cost"] += info1["cost"]
             track_reward += reward1
 
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
         track_info["safety_cost"] = track_info["cost"]
+        track_info['success'] = success
         return observation1, track_reward, done1, track_info
     
 
