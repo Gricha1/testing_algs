@@ -104,6 +104,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             prev_action = None
             done = False
             step_count = 0
+            episode_goals_achieved = 0
             episode_reward = 0
             episode_cost = 0
             episode_controller_rew = 0
@@ -147,7 +148,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     assert "Goal" in args.task_name
                     if "goal_met" in info:
                         goals_achieved += 1
-                        done = True
+                        episode_goals_achieved += 1
+                        #done = True
                 elif env_name != "AntGather" and env.success_fn(reward):
                     goals_achieved += 1
                     done = True
@@ -166,7 +168,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
                     debug_info["t"] = step_count
-                    debug_info["goals_achieved"] = goals_achieved
+                    debug_info["goals_achieved"] = episode_goals_achieved
                     debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
