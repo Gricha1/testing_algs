@@ -48,6 +48,8 @@ if __name__ == "__main__":
     parser.add_argument("--r_embedding_dim", default=32, type=int)
 
     # Manager Parameters
+    parser.add_argument("--subgoal_lower_x", default=5.0, type=float)
+    parser.add_argument("--subgoal_lower_y", default=5.0, type=float)
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)

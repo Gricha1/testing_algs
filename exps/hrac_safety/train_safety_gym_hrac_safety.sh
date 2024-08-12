@@ -4,13 +4,23 @@ else
     seed=$1
 fi
 
+if [ -z "$2" ]; then
+    level=1
+else
+    level=$2
+fi
+
+
+
 cd ../..
 python main.py --domain_name Safexp \
-               --task_name PointGoal1 \
+               --task_name PointGoal$level \
                --env_name SafeGym \
                --goal_conditioned \
                --vector_env \
                --seed $seed \
+               --subgoal_lower_x 2 \
+               --subgoal_lower_x 2 \
                --world_model \
                --modelfree_safety \
                --controller_imagination_safety_loss \

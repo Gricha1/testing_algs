@@ -4,6 +4,7 @@ else
     seed=$1
 fi
 
+cd ../..
 python main.py --seed $seed \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \

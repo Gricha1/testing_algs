@@ -393,14 +393,8 @@ def run_hrac(args):
         env.seed(args.seed)
         # test
         # subgoal scale, only low[:2] is matter
-        if "1" in args.task_name:
-            low = np.array((-5, -5, -0.5, -1, -1, -1, -1,
-                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
-        elif "2" in args.task_name:
-            low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
-                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
-        else:
-            assert 1 == 0, "not recognized task lvl"
+        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
+                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
 
