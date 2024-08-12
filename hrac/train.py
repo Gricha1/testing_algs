@@ -144,6 +144,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 if "Safe" in env_name:
                     cost = info["safety_cost"]
                 if env_name == "SafeGym":
+                    assert "Goal" in args.task_name
                     if "goal_met" in info:
                         goals_achieved += 1
                         done = True
@@ -165,6 +166,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
                     debug_info["t"] = step_count
+                    debug_info["goals_achieved"] = goals_achieved
+                    debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
                         x = a_net((torch.from_numpy(state[:2]).type('torch.FloatTensor')).to("cuda"))
