@@ -115,10 +115,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     subgoal = manager_policy.sample_goal(state, goal)
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
-                        if env_name == "SafeAntMaze":
+                        if "Safe" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        if env_name == "SafeAntMaze":
+                        if "Safe" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                         if args.world_model and args.controller_safe_model:
                             with torch.no_grad():
@@ -248,11 +248,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
         if "Safe" in env_name:
             avg_episode_safety_subgoal_rate /= eval_episodes
             validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
+            avg_episode_real_subgoal_safety /= eval_episodes
+            validation_date["real_subgoal_safety"] = avg_episode_real_subgoal_safety
             if args.world_model:
                 avg_episode_imagine_subgoal_safety /= eval_episodes
-                avg_episode_real_subgoal_safety /= eval_episodes
                 validation_date["imagine_subgoal_safety"] = avg_episode_imagine_subgoal_safety
-                validation_date["real_subgoal_safety"] = avg_episode_real_subgoal_safety
             avg_cost /= eval_episodes
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
