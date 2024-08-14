@@ -48,12 +48,12 @@ class PPOAgent(nn.Module):
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 class Actor(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim, max_action):
+    def __init__(self, state_dim, goal_dim, action_dim, max_action, hidden_dim=300):
         super().__init__()
 
-        self.l1 = nn.Linear(state_dim + goal_dim, 300)
-        self.l2 = nn.Linear(300, 300)
-        self.l3 = nn.Linear(300, action_dim)
+        self.l1 = nn.Linear(state_dim + goal_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, action_dim)
         
         self.max_action = max_action
     
@@ -71,18 +71,18 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim):
+    def __init__(self, state_dim, goal_dim, action_dim, hidden_dim=300):
         super().__init__()
 
         # Q1 architecture
-        self.l1 = nn.Linear(state_dim + goal_dim + action_dim, 300)
-        self.l2 = nn.Linear(300, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(state_dim + goal_dim + action_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, 1)
 
         # Q2 architecture
-        self.l4 = nn.Linear(state_dim + goal_dim + action_dim, 300)
-        self.l5 = nn.Linear(300, 300)
-        self.l6 = nn.Linear(300, 1)
+        self.l4 = nn.Linear(state_dim + goal_dim + action_dim, hidden_dim)
+        self.l5 = nn.Linear(hidden_dim, hidden_dim)
+        self.l6 = nn.Linear(hidden_dim, 1)
 
     def forward(self, x, g=None, u=None):
         if g is not None:
@@ -112,12 +112,12 @@ class Critic(nn.Module):
     
 
 class SafeCritic(nn.Module):
-    def __init__(self, state_dim):
+    def __init__(self, state_dim, hidden_dim=300):
         super().__init__()
 
-        self.l1 = nn.Linear(state_dim, 300)
-        self.l2 = nn.Linear(300, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(state_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, 1)
 
     def forward(self, x):
         x1 = F.relu(self.l1(x))

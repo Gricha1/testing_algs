@@ -19,8 +19,6 @@ python main.py --domain_name Safexp \
                --goal_conditioned \
                --vector_env \
                --seed $seed \
-               --subgoal_lower_x 2 \
-               --subgoal_lower_x 2 \
                --world_model \
                --modelfree_safety \
                --controller_imagination_safety_loss \
