@@ -175,14 +175,30 @@ class Manager(object):
                                                     torch_deviced=True,
                                                     testing_mean_pred=self.testing_mean_wm)
             if all_steps_safety:
-                safety = safety_cost(next_img_state)
+                if self.lidar_observation:
+                    agent_pose = next_img_state[:, :2]
+                    obstacle_data = next_img_state[:, -16:]
+                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                    manager_absolute_goal = agent_pose
+                    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                    safety = safety_cost(manager_absolute_goal)
+                else:
+                    safety = safety_cost(next_img_state)
                 safeties.append(safety)
             manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
                                                                          manager_proposed_goal, 
                                                                          next_img_state)
             h += 1
         if not all_steps_safety:
-            safety = safety_cost(next_img_state)
+            if self.lidar_observation:
+                agent_pose = next_img_state[:, :2]
+                obstacle_data = next_img_state[:, -16:]
+                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                manager_absolute_goal = agent_pose
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                safety = safety_cost(manager_absolute_goal)
+            else:
+                safety = safety_cost(next_img_state)
         else:
             safety = 0
             for el in safeties:

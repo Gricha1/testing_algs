@@ -652,7 +652,8 @@ def run_hrac(args):
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
-            writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
+            if args.domain_name == "Safexp" and not args.cost_oracle:
+                writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
     else:
         cost_model = None
 
@@ -792,16 +793,15 @@ def run_hrac(args):
                             buffer = cost_model_buffer
                         else:
                             buffer = world_model_buffer
-                        if not args.cost_oracle:
-                            train_cost_model(buffer,
-                                            cost_model_iterations=episode_timesteps,
-                                            cost_model_batch_size=args.cost_model_batch_size)
+                        train_cost_model(buffer,
+                                        cost_model_iterations=episode_timesteps,
+                                        cost_model_batch_size=args.cost_model_batch_size)
                             
                     if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
                         train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
                                           batch_size=args.wm_batch_size)
                     
-                    ## Train TD3 or PPO controller
+                    ## Train TD3 or PPO controller                    
                     train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, 
                                     episode_timesteps, 
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
@@ -920,6 +920,7 @@ def run_hrac(args):
                     wm_imagination_episode_metric = 0
 
                 subgoal = manager_policy.sample_goal(state, goal)
+                episode_subgoals_count += 1
                 if not args.absolute_goal:
                     subgoal = man_noise.perturb_action(subgoal,
                         min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
