@@ -643,7 +643,8 @@ def run_hrac(args):
             
         def train_cost_model(replay_buffer,
                              cost_model_iterations=10,
-                             cost_model_batch_size=128):
+                             cost_model_batch_size=128,
+                             total_timesteps=0):
             print("train cost model")
             debug_info = cost_model.train_cost_model(replay_buffer, 
                                                      cost_model_iterations=cost_model_iterations,
@@ -666,7 +667,8 @@ def run_hrac(args):
         manager_policy.set_predict_env(predict_env)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=args.cost_memmory)
             
-        def train_world_model(replay_buffer, acc_wm_imagination_episode_metric, batch_size=256):
+        def train_world_model(replay_buffer, acc_wm_imagination_episode_metric, batch_size=256, 
+                              episode_num=0, total_timesteps=0):
             with TensorWrapper():
                 print("train world model")
                 world_model_loss = manager_policy.train_world_model(replay_buffer, batch_size=batch_size)
@@ -768,6 +770,18 @@ def run_hrac(args):
                     state = next_state
                     exploration_total_timesteps += 1
 
+
+        if args.wm_pretrain and args.world_model:
+            print("pretraining world model")
+            acc_wm_imagination_episode_metric = 0
+            total_timesteps = 0 
+            episode_num = 0
+            for i in range(args.wm_pretrain_epoches):
+                print(f"pretrain world model {i}/{args.wm_pretrain_epoches}")
+                train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
+                                    batch_size=args.wm_batch_size, episode_num=episode_num,
+                                    total_timesteps=total_timesteps)
+
         ## Logging Parameters
         total_timesteps = 0
         timesteps_since_eval = 0
@@ -795,11 +809,14 @@ def run_hrac(args):
                             buffer = world_model_buffer
                         train_cost_model(buffer,
                                         cost_model_iterations=episode_timesteps,
-                                        cost_model_batch_size=args.cost_model_batch_size)
+                                        cost_model_batch_size=args.cost_model_batch_size,
+                                        total_timesteps=total_timesteps)
                             
                     if args.world_model and (episode_num == 1 or (episode_num % args.wm_train_freq == 0)):
                         train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
-                                          batch_size=args.wm_batch_size)
+                                          batch_size=args.wm_batch_size, 
+                                          episode_num=episode_num,
+                                          total_timesteps=total_timesteps)
                     
                     ## Train TD3 or PPO controller                    
                     train_controller(controller_policy.PPO, controller_buffer, ctrl_done, next_state, subgoal, 

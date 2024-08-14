@@ -29,6 +29,9 @@ python main.py --domain_name Safexp \
                --coef_safety_modelfree 800 \
                --controller_safety_coef 6 \
                --max_timesteps 4000000 \
-               --wandb_postfix "" \
-               --cost_oracle
+               --img_horizon 15 \
+               --wm_pretrain \
+               --wm_pretrain_epoches 100 \
+               --wm_n_initial_exploration_steps 30000 \
+               --wandb_postfix "" 
 

@@ -135,10 +135,6 @@ class ControllerSafeModel(nn.Module):
     
     def forward(self, x):
         return self.critic(x)
-    
-    def predict(self, x):
-        return self.critic(x)
-
 
 class ControllerActor(nn.Module):
     def __init__(self, state_dim, goal_dim, action_dim, scale=1):

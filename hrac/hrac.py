@@ -232,7 +232,7 @@ class Manager(object):
             manager_absolute_goal += copy_state[:, :actions.shape[1]]
             if self.lidar_observation:
                 assert len(copy_state[0, :]) == 30
-                # test
+                # test copy states
                 if cost_model.frame_stack_num > 1:
                     agent_pose = copy_state[:, :2]
                     obstacle_data = copy_state[:, -16:]
