@@ -235,7 +235,7 @@ class Manager(object):
         norm = torch.norm(actions)*self.action_norm_reg
         goal_loss = None
         safety_loss = None
-        cost_loss = None
+        cost_loss = 0
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
@@ -386,25 +386,27 @@ class Manager(object):
             critic_loss.backward()
             self.critic_optimizer.step()
 
-            # Cost critic
-            target_C1, target_C2 = self.cost_critic_target(next_state, goal,
-                                          next_action)
-            # TODO: check max 
-            target_C = torch.max(target_C1, target_C2)
-            target_C = cost + (done * discount * target_C)
-            target_C_no_grad = target_C.detach()
+            cost_critic_loss = 0
+            if self.use_lagrange:
+                # Cost critic
+                target_C1, target_C2 = self.cost_critic_target(next_state, goal,
+                                            next_action)
+                # TODO: check max 
+                target_C = torch.max(target_C1, target_C2)
+                target_C = cost + (done * discount * target_C)
+                target_C_no_grad = target_C.detach()
 
-            # Get current C estimate
-            current_C1, current_C2 = self.cost_critic(state, goal, subgoal)
+                # Get current C estimate
+                current_C1, current_C2 = self.cost_critic(state, goal, subgoal)
 
-            # Compute critic loss
-            cost_critic_loss = self.cost_criterion(current_C1, target_C_no_grad) +\
-                          self.cost_criterion(current_C2, target_C_no_grad)
+                # Compute critic loss
+                cost_critic_loss = self.cost_criterion(current_C1, target_C_no_grad) +\
+                            self.cost_criterion(current_C2, target_C_no_grad)
 
-            # Optimize the critic
-            self.cost_critic_optimizer.zero_grad()
-            cost_critic_loss.backward()
-            self.cost_critic_optimizer.step()
+                # Optimize the critic
+                self.cost_critic_optimizer.zero_grad()
+                cost_critic_loss.backward()
+                self.cost_critic_optimizer.step()
 
             # Compute actor loss
             eval_loss, norm_loss, goal_loss, safety_subgoals_loss, cost_loss = \
@@ -499,10 +501,12 @@ class Manager(object):
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.cost_critic.state_dict(), "{}/{}/{}_{}_ManagerCostCritic.pth".format(dir, exp_num, env_name, algo))
+        
         torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.cost_critic_target.state_dict(), "{}/{}/{}_{}_ManagerCostCriticTarget.pth".format(dir, exp_num, env_name, algo))
+        if self.use_lagrange:
+            torch.save(self.cost_critic.state_dict(), "{}/{}/{}_{}_ManagerCostCritic.pth".format(dir, exp_num, env_name, algo))
+            torch.save(self.cost_critic_target.state_dict(), "{}/{}/{}_{}_ManagerCostCriticTarget.pth".format(dir, exp_num, env_name, algo))
         if not(self.predict_env is None):
             # save as pkl
             torch.save(self.predict_env.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
