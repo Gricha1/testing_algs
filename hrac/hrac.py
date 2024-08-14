@@ -1,4 +1,5 @@
 import random
+from collections import deque
 
 import torch
 import torch.nn as nn
@@ -54,7 +55,17 @@ class Manager(object):
                  cumul_modelbased_safety=False,
                  coef_safety_modelbased=1.0,
                  coef_safety_modelfree=1.0,
-                 lidar_observation=False):
+                 lidar_observation=False,
+                 use_lagrange=False,
+                 pid_kp=1e-6,
+                 pid_ki=1e-7,
+                 pid_kd=1e-7,
+                 pid_d_delay=10,
+                 pid_delta_p_ema_alpha=0.95,
+                 pid_delta_d_ema_alpha=0.95,
+                 penalty_max=100.,
+                 lagrangian_multiplier_init=0.0,
+                 cost_limit=25.,):
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -97,6 +108,32 @@ class Manager(object):
         self.subgoal_grad_clip = subgoal_grad_clip
         self.coef_safety_modelbased = coef_safety_modelbased
         self.coef_safety_modelfree = coef_safety_modelfree
+
+        # Lagrange
+        self.use_lagrange = use_lagrange
+        if self.use_lagrange:
+            self.cost_criterion = nn.SmoothL1Loss()
+            self.cost_critic = ManagerCritic(state_dim, goal_dim, action_dim).to(device)
+            self.cost_critic_target = ManagerCritic(state_dim, goal_dim, action_dim).to(device)
+
+            self.cost_critic_target.load_state_dict(self.cost_critic.state_dict())
+            self.cost_critic_optimizer = torch.optim.Adam(self.cost_critic.parameters(),
+                                                    lr=critic_lr, weight_decay=0.0001)
+            
+            self._pid_kp = pid_kp
+            self._pid_ki = pid_ki
+            self._pid_kd = pid_kd
+            self._pid_d_delay = pid_d_delay
+            self._pid_delta_p_ema_alpha = pid_delta_p_ema_alpha
+            self._pid_delta_d_ema_alpha = pid_delta_d_ema_alpha
+            self._penalty_max = penalty_max
+            self._pid_i = lagrangian_multiplier_init
+            self._cost_ds = deque(maxlen=self._pid_d_delay)
+            self._cost_ds.append(0.0)
+            self._delta_p = 0.0
+            self._cost_d = 0.0
+            self._cost_limit = cost_limit
+            self._cost_penalty = 0.0
 
     def set_predict_env(self, predict_env):
         self.predict_env = predict_env
@@ -198,6 +235,7 @@ class Manager(object):
         norm = torch.norm(actions)*self.action_norm_reg
         goal_loss = None
         safety_loss = None
+        cost_loss = None
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
@@ -235,8 +273,11 @@ class Manager(object):
             safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelbased * safety_model_based_loss + \
-                      self.coef_safety_modelfree * safety_model_free_loss 
-        return eval + norm, goal_loss, safety_loss
+                      self.coef_safety_modelfree * safety_model_free_loss
+
+        if self.use_lagrange:
+            cost_loss = self.cost_critic.Q1(state, goal, actions).mean() 
+        return eval, norm, goal_loss, safety_loss, cost_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -288,6 +329,7 @@ class Manager(object):
               iterations, batch_size=100, discount=0.99,
               tau=0.005, a_net=None, r_margin=None):
         avg_act_loss, avg_crit_loss = 0., 0.
+        avg_eval_loss, avg_cost_loss, avg_cost_critic_loss = 0., 0., 0.
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
@@ -297,7 +339,10 @@ class Manager(object):
             avg_safety_subgoals_loss = None
         for it in range(iterations):
             # Sample replay buffer
-            x, y, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
+            if self.use_lagrange:
+                x, y, g, sgorig, r, c, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
+            else:
+                x, y, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
             batch_size = min(batch_size, x.shape[0])
 
             if self.correction and not self.absolute_goal:
@@ -311,7 +356,8 @@ class Manager(object):
             # print(g)
             goal = get_tensor(g)
             subgoal = get_tensor(sg)
-
+            if self.use_lagrange:
+                cost = get_tensor(c)
             reward = get_tensor(r)
             done = get_tensor(1 - d)
 
@@ -340,9 +386,33 @@ class Manager(object):
             critic_loss.backward()
             self.critic_optimizer.step()
 
+            # Cost critic
+            target_C1, target_C2 = self.cost_critic_target(next_state, goal,
+                                          next_action)
+            # TODO: check max 
+            target_C = torch.max(target_C1, target_C2)
+            target_C = cost + (done * discount * target_C)
+            target_C_no_grad = target_C.detach()
+
+            # Get current C estimate
+            current_C1, current_C2 = self.cost_critic(state, goal, subgoal)
+
+            # Compute critic loss
+            cost_critic_loss = self.cost_criterion(current_C1, target_C_no_grad) +\
+                          self.cost_criterion(current_C2, target_C_no_grad)
+
+            # Optimize the critic
+            self.cost_critic_optimizer.zero_grad()
+            cost_critic_loss.backward()
+            self.cost_critic_optimizer.step()
+
             # Compute actor loss
-            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, 
-                                                                          controller_policy, cost_model)
+            eval_loss, norm_loss, goal_loss, safety_subgoals_loss, cost_loss = \
+                self.actor_loss(state, goal, a_net, r_margin, controller_policy, cost_model)
+            if self.use_lagrange:
+                actor_loss = norm_loss + (eval_loss + self._cost_penalty * cost_loss) / (1 + self._cost_penalty)
+            else:
+                actor_loss = eval_loss + norm_loss
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
             if self.modelbased_safety or self.modelfree_safety:
@@ -372,6 +442,9 @@ class Manager(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
+            avg_eval_loss += eval_loss
+            avg_cost_critic_loss += cost_critic_loss
+            avg_cost_loss += cost_loss
             if a_net is not None:
                 avg_goal_loss += goal_loss
             if self.modelbased_safety or self.modelfree_safety:
@@ -382,6 +455,11 @@ class Manager(object):
                                            self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
+            if self.use_lagrange:
+                for param, target_param in zip(self.cost_critic.parameters(),
+                                           self.cost_critic_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
             for param, target_param in zip(self.actor.parameters(),
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
@@ -389,7 +467,28 @@ class Manager(object):
         debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
         if self.modelbased_safety or self.modelfree_safety:
             avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
-        return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss, debug_maganer_info
+        avg_act_loss /= iterations
+        avg_crit_loss /= iterations
+        avg_goal_loss /= iterations
+        avg_eval_loss /= iterations
+        avg_cost_critic_loss /= iterations
+        avg_cost_loss /= iterations
+        return avg_act_loss, avg_crit_loss, avg_goal_loss, avg_safety_subgoals_loss,\
+            debug_maganer_info, avg_eval_loss, avg_cost_critic_loss, avg_cost_loss
+    
+    def pid_update(self, ep_cost_avg):
+        delta = float(ep_cost_avg - self._cost_limit)
+        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
+        a_p = self._pid_delta_p_ema_alpha
+        self._delta_p *= a_p
+        self._delta_p += (1 - a_p) * delta
+        a_d = self._pid_delta_d_ema_alpha
+        self._cost_d *= a_d
+        self._cost_d += (1 - a_d) * float(ep_cost_avg)
+        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
+        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+        self._cost_penalty = max(0.0, pid_o)
+        self._cost_ds.append(self._cost_d)
 
     def load_pretrained_weights(self, filename):
         state = torch.load(filename)
@@ -400,8 +499,10 @@ class Manager(object):
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.cost_critic.state_dict(), "{}/{}/{}_{}_ManagerCostCritic.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.cost_critic_target.state_dict(), "{}/{}/{}_{}_ManagerCostCriticTarget.pth".format(dir, exp_num, env_name, algo))
         if not(self.predict_env is None):
             # save as pkl
             torch.save(self.predict_env.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))

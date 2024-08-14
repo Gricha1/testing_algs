@@ -22,7 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", default="SafeAntMaze", type=str)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
-    parser.add_argument("--log_dir", default="./logs", type=str)
+    parser.add_argument("--log_dir", default="/logdir", type=str)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
@@ -124,6 +124,18 @@ if __name__ == "__main__":
     parser.add_argument("--pred_hidden_size", default=200, type=int)
     parser.add_argument("--use_decay", default=True, type=bool)
     parser.add_argument("--testing_mean_wm", action='store_true', default=False)
+
+    # Lagrange parameters
+    parser.add_argument("--use_lagrange", action='store_true', default=False)
+    parser.add_argument("--pid_kp", default=1e-6, type=float)
+    parser.add_argument("--pid_ki", default=1e-7, type=float)
+    parser.add_argument("--pid_kd", default=1e-7, type=float)
+    parser.add_argument("--pid_d_delay", default=10, type=int)
+    parser.add_argument("--pid_delta_p_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--pid_delta_d_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--penalty_max", default=1e-6, type=float)
+    parser.add_argument("--lagrangian_multiplier_init", default=0., type=float)
+    parser.add_argument("--cost_limit", default=25., type=float)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)

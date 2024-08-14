@@ -339,7 +339,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                         device=device, verbose=False, args=args)
 
     if args.save_models:
-        r_filename = os.path.join(f"./models/{exp_num}", "{}_{}_a_network.pth".format(args.env_name, args.algo))
+        r_filename = os.path.join(f"/logdir/models/{exp_num}", "{}_{}_a_network.pth".format(args.env_name, args.algo))
         torch.save(a_net.state_dict(), r_filename)
         #print("----- Adjacency network {} saved. -----".format(episode_num))
 
@@ -441,11 +441,11 @@ def run_hrac(args):
         os.makedirs("./results")
     if args.save_models:
         exp_num = 0
-        while os.path.exists(f"./models/{exp_num}"):
+        while os.path.exists(f"/logdir/models/{exp_num}"):
             exp_num += 1
-        os.makedirs(f"./models/{exp_num}")
+        os.makedirs(f"/logdir/models/{exp_num}")
         if not args.not_use_wandb:
-            wandb.config["model_save_path"] = f"./models/{exp_num}"
+            wandb.config["model_save_path"] = f"/logdir/models/{exp_num}"
     if not os.path.exists(args.log_dir):
         os.makedirs(args.log_dir)
     output_dir = os.path.join(args.log_dir, args.algo)
@@ -499,7 +499,17 @@ def run_hrac(args):
         testing_mean_wm=args.testing_mean_wm,
         subgoal_grad_clip=args.subgoal_grad_clip,
         cumul_modelbased_safety=args.cumul_modelbased_safety,
-        lidar_observation=True if args.domain_name == "Safexp" else False
+        lidar_observation=True if args.domain_name == "Safexp" else False,
+        use_lagrange=args.use_lagrange,
+        pid_kp=args.pid_kp,
+        pid_ki=args.pid_ki,
+        pid_kd=args.pid_kd,
+        pid_d_delay=args.pid_d_delay,
+        pid_delta_p_ema_alpha=args.pid_delta_p_ema_alpha,
+        pid_delta_d_ema_alpha=args.pid_delta_d_ema_alpha,
+        penalty_max=args.penalty_max,
+        lagrangian_multiplier_init=args.lagrangian_multiplier_init,
+        cost_limit=args.cost_limit,
     )
     
     controller_policy = hrac.Controller(
@@ -545,7 +555,7 @@ def run_hrac(args):
 
     if args.PPO:
         args.ppo_ctrl_batch_size == args.ppo_ctrl_buffer_size
-    manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
+    manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size, cost_memmory=args.use_lagrange)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, ppo_memory=args.PPO)
 
     ## Train HRAC or PPO controller
@@ -609,7 +619,7 @@ def run_hrac(args):
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:
         print("Loading adjacency network...")
-        a_net.load_state_dict(torch.load(f"./models/{args.loaded_exp_num}/{args.env_name}_{args.algo}_a_network.pth"))
+        a_net.load_state_dict(torch.load(f"/logdir/models/{args.loaded_exp_num}/{args.env_name}_{args.algo}_a_network.pth"))
     a_net.to(device)
     optimizer_r = optim.Adam(a_net.parameters(), lr=args.lr_r)
 
@@ -680,11 +690,11 @@ def run_hrac(args):
 
     if args.load:
         try:
-            manager_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            manager_policy.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             if args.controller_safe_model:
                 if not args.cost_oracle:
-                    cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
-            controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+                    cost_model.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            controller_policy.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
         except Exception as e:
@@ -814,7 +824,8 @@ def run_hrac(args):
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
                         print("train subgoal policy")
-                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = \
+                        man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, \
+                            debug_maganer_info, man_eval_loss, man_cost_crit_loss, man_cost_loss = \
                                             manager_policy.train(controller_policy,
                                                                  manager_buffer, 
                                                                  cost_model,
@@ -827,6 +838,12 @@ def run_hrac(args):
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
                         writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
+                        if args.use_lagrange:
+                            writer.add_scalar("data/manager_eval_loss", man_eval_loss, total_timesteps)
+                            writer.add_scalar("data/manager_cost_critic_loss", man_cost_crit_loss, total_timesteps)
+                            writer.add_scalar("data/manager_cost_loss", man_cost_loss, total_timesteps)
+                            writer.add_scalar("data/lagrange_mult", manager_policy._cost_penalty, total_timesteps)
+
                         for key_ in debug_maganer_info:
                             if type(debug_maganer_info[key_]) == list:
                                 debug_maganer_info[key_] = np.mean(debug_maganer_info[key_])
@@ -873,11 +890,11 @@ def run_hrac(args):
                         output_data["dist"].append(-avg_controller_rew)
 
                         if args.save_models:
-                            controller_policy.save("./models", args.env_name, args.algo, exp_num)
-                            manager_policy.save("./models", args.env_name, args.algo, exp_num)
+                            controller_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
+                            manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
                             if args.controller_safe_model:
                                 if not args.cost_oracle:
-                                    cost_model.save("./models", args.env_name, args.algo, exp_num)
+                                    cost_model.save("/logdir/models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
@@ -928,7 +945,10 @@ def run_hrac(args):
                         min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
 
                 timesteps_since_subgoal = 0
-                manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+                if args.use_lagrange:
+                    manager_transition = [state, None, goal, subgoal, 0, 0, False, [state], []]
+                else:
+                    manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
             if controller_policy.PPO:
                 with torch.no_grad():
@@ -946,6 +966,8 @@ def run_hrac(args):
             cost = info["safety_cost"]
 
             manager_transition[4] += manager_reward * args.man_rew_scale
+            if args.use_lagrange:
+                manager_transition[5] += cost
             ep_manager_reward += manager_reward * args.man_rew_scale
             manager_transition[-1].append(action)
 
@@ -963,6 +985,8 @@ def run_hrac(args):
             if "Safe" in args.env_name:
                 episode_cost += cost
                 controller_episode_cost += 0
+                if args.use_lagrange:
+                    manager_policy.pid_update(episode_cost)
 
             if args.inner_dones:
                 ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
@@ -1012,7 +1036,7 @@ def run_hrac(args):
 
             if timesteps_since_subgoal % args.manager_propose_freq == 0:
                 manager_transition[1] = state
-                manager_transition[5] = float(done)
+                manager_transition[-3] = float(done)
 
                 manager_buffer.add(manager_transition)
                 subgoal = manager_policy.sample_goal(state, goal)
@@ -1034,7 +1058,10 @@ def run_hrac(args):
                         min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
 
                 timesteps_since_subgoal = 0
-                manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+                if args.use_lagrange:
+                    manager_transition = [state, None, goal, subgoal, 0, 0, False, [state], []]
+                else:
+                    manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
@@ -1051,11 +1078,11 @@ def run_hrac(args):
         output_data["dist"].append(-avg_controller_rew)
 
         if args.save_models:
-            controller_policy.save("./models", args.env_name, args.algo, exp_num)
-            manager_policy.save("./models", args.env_name, args.algo, exp_num)
+            controller_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
+            manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
             if args.controller_safe_model:
                 if not args.cost_oracle:
-                    cost_model.save("./models", args.env_name, args.algo, exp_num)
+                    cost_model.save("/logdir/models", args.env_name, args.algo, exp_num)
 
         writer.close()
 
