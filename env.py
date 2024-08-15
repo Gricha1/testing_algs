@@ -207,7 +207,8 @@ class GoalConditionedWrapper(ObservationWrapper):
 
 
     def __init__(self,
-                 env):
+                 env,
+                 pseudo_lidar=False):
         """Initializes a new goal conditioned Wrapper.
 
         Args:
@@ -217,6 +218,7 @@ class GoalConditionedWrapper(ObservationWrapper):
         super(GoalConditionedWrapper, self).__init__(env)
 
         wrapped_observation_space = env.observation_space
+        self.pseudo_lidar = pseudo_lidar
 
         self.observation_space = spaces.Dict()
         gc_spaces = {"observation": spaces.Box(
@@ -250,11 +252,19 @@ class GoalConditionedWrapper(ObservationWrapper):
         # goal_lidar = observation[12:28]
         hazards_lidar = observation[28:44]
         new_vec_observation = np.concatenate([agent_xy,
-                                              accelerometer,
-                                              velocimeter,
-                                              gyro,
-                                              magnetometer,
-                                              hazards_lidar]) # (30,)
+                                                accelerometer,
+                                                velocimeter,
+                                                gyro,
+                                                magnetometer])
+        if self.pseudo_lidar:
+            hazards_poses = [hazard[:2] for hazard in self.hazards_pos]
+            hazards_flat = []
+            for hazard_pose in hazards_poses:
+                hazards_flat.extend(hazard_pose)
+            assert len(hazards_flat) == 16
+            new_vec_observation = np.concatenate([new_vec_observation, hazards_flat]) # (30,)
+        else:
+            new_vec_observation = np.concatenate([new_vec_observation, hazards_lidar])
         
         agent_goal_xy = np.array(self._env.env.goal_pos)[:2]
         # test boundary
@@ -328,7 +338,7 @@ class SafetyEnvWrapper:
 
 gym.logger.set_level(40)
 
-def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False):
+def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False, pseudo_lidar=False):
     env = gym.make(
         domain_name, 
     )
@@ -338,7 +348,7 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
     ar_env = ActionRepeatWrapper(env, repeat=action_repeat)
     if not use_pixels:
         if goal_conditioned:
-            gc_env = GoalConditionedWrapper(ar_env)
+            gc_env = GoalConditionedWrapper(ar_env, pseudo_lidar=pseudo_lidar)
             s_env = SafetyEnvWrapper(gc_env)
             return s_env 
         return ar_env
