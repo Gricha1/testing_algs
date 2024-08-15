@@ -202,9 +202,12 @@ class CostModelTrajectoryBuffer(object):
                     safe_state.append(state)
 
         # get equal count of safe & unsafe states
+        # add = trajectory_len samples to buffer
         min_len = min(len(unsafe_state), len(safe_state))
-        unsafe_state = random.sample(unsafe_state, min_len)
-        safe_state = random.sample(safe_state, min_len)
+        samples_to_add = len(current_trajectory)
+        samples_to_add = min(samples_to_add, min_len) // 2
+        unsafe_state = random.sample(unsafe_state, samples_to_add)
+        safe_state = random.sample(safe_state, samples_to_add)
 
         states.extend(unsafe_state)
         states.extend(safe_state)

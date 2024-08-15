@@ -25,11 +25,13 @@ python main.py --domain_name Safexp \
                --controller_grad_clip 0 \
                --validation_without_image --eval_freq 30000 \
                --controller_safe_model \
+               --cm_frame_stack_num 1 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
-               --coef_safety_modelfree 800 \
+               --coef_safety_modelfree 100 \
                --controller_safety_coef 6 \
                --max_timesteps 4000000 \
                --img_horizon 15 \
+               --manager_propose_freq 15 \
                --wm_pretrain \
                --wm_pretrain_epoches 100 \
                --wm_n_initial_exploration_steps 30000 \

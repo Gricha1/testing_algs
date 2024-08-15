@@ -15,5 +15,4 @@ python main.py --visulazied_episode 10 --validate \
                --world_model \
                --controller_safe_model \
                --wandb_postfix "validate" \
-               --load --loaded_exp_num 664 \
-               --cost_oracle
+               --load --loaded_exp_num 728

@@ -595,6 +595,7 @@ def run_hrac(args):
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
 
+        writer.add_scalar(f"data/controller_buffer_size", len(controller_buffer), total_timesteps)
         writer.add_scalar("data/controller_ep_cost", episode_cost, total_timesteps)
         writer.add_scalar("data/controller_ep_rew", ep_controller_reward, total_timesteps)
         writer.add_scalar("data/manager_ep_rew", ep_manager_reward, total_timesteps)
@@ -680,6 +681,8 @@ def run_hrac(args):
 
                 if episode_num % 10 == 0:
                     print("world model loss: {:.3f}".format(world_model_loss))
+
+            writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
             
 
     if args.load:
