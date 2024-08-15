@@ -24,7 +24,10 @@ def create_maze_env(env_name=None, seed=0, maze_id=None):
       maze_id = maze_id
     return AntMazeEnv(maze_id=maze_id, maze_size_scaling=8, seed=seed) 
   elif env_name.endswith('Maze'):
-    maze_id = 'Maze'
+    if maze_id == None:
+      maze_id = 'Maze'
+    else:
+      maze_id = maze_id
     return AntMazeEnv(maze_id=maze_id, maze_size_scaling=8, seed=seed)
   elif env_name.endswith('MazeSparse'):
     maze_id = 'Maze2'
