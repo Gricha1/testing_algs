@@ -241,7 +241,7 @@ class CostModelTrajectoryBuffer(object):
             x.append(np.array(X, copy=False))
             c.append(np.array(C, copy=False))    
         
-            return np.array(x), np.array(c).reshape(-1, 1)
+        return np.array(x), np.array(c).reshape(-1, 1)
 
 class TrajectoryBuffer(object):
 

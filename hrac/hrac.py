@@ -472,29 +472,46 @@ class CostModel(object):
 
     def train_cost_model(self, replay_buffer, 
                          cost_model_iterations=10, 
-                         cost_model_batch_size=128):
+                         cost_model_batch_size=128,
+                         train_on_dataset=False,
+                         dataset=None):
         debug_info = {}
         debug_info["safe_model_loss"] = []
         debug_info["safe_model_mean_true"] = []
         debug_info["safe_model_mean_pred"] = []
         for i in range(cost_model_iterations):
-            if replay_buffer.name == "cost_trajectory_buffer":
-                x, c = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False) # cost for the next_state
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
-            elif replay_buffer.cost_memmory:
-                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(y, to_device=False) # cost for the next_state
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
+            if train_on_dataset:
+                x = random.sample(dataset[0], cost_model_batch_size)
+                x_np = np.array(x, dtype=np.float32)
+                x_tensor = torch.tensor(x_np)
+                state_device = x_tensor.to(device)
+
+                cost = random.sample(dataset[1], cost_model_batch_size)
+                cost_np = np.array(cost, dtype=np.float32)
+                cost_tensor = torch.tensor(cost_np)
+                cost_device = cost_tensor.to(device)
             else:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False)
-                state_device = state.to(device)
-                cost_device = None
+                if replay_buffer.name == "cost_trajectory_buffer":
+                    x, c = replay_buffer.sample(cost_model_batch_size)
+                    state = get_tensor(x, to_device=False) # cost for the next_state
+                    state_device = state.to(device)
+                    cost = get_tensor(c, to_device=False)
+                    cost_device = cost.to(device)
+                elif replay_buffer.cost_memmory:
+                    x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                    state = get_tensor(y, to_device=False) # cost for the next_state
+                    state_device = state.to(device)
+                    cost = get_tensor(c, to_device=False)
+                    cost_device = cost.to(device)
+                else:
+                    x, y, sg, u, r, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                    state = get_tensor(x, to_device=False)
+                    state_device = state.to(device)
+                    cost_device = None
+            # test
+            print("state_device:", state_device.shape)
+            print("cost_device:", cost_device.shape)
+
             safe_model_loss, true, pred = self.train_batch_cost_model(state_device, cost=cost_device)
             debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
             debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())

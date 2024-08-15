@@ -20,5 +20,6 @@ python main.py --domain_name Safexp \
                --coef_safety_modelfree 800 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
-               --pseudo_lidar
+               #--pseudo_lidar \
+               #--cm_train_on_dataset
 
