@@ -372,7 +372,8 @@ def run_hrac(args):
                             image_size=args.image_size, 
                             use_pixels=not args.vector_env, 
                             action_repeat=args.action_repeat,
-                            goal_conditioned=args.goal_conditioned)
+                            goal_conditioned=args.goal_conditioned,
+                            pseudo_lidar=args.pseudo_lidar)
         state_dim = env.observation_space["observation"].shape[0]
         goal_dim = env.observation_space["desired_goal"].shape[0]
         action_dim = env.action_space.shape[0]

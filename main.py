@@ -33,6 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
+    parser.add_argument("--pseudo_lidar", action="store_true", default=False)
 
     # Adjacency Network Parameters
     parser.add_argument("--load_adj_net", default=False, action="store_true")

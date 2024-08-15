@@ -19,5 +19,6 @@ python main.py --domain_name Safexp \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 800 \
                --max_timesteps 4000000 \
-               --wandb_postfix ""
+               --wandb_postfix "" \
+               --pseudo_lidar
 
