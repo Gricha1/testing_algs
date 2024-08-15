@@ -26,4 +26,4 @@ echo "start docker name: $docker_container_name"
 echo "start docker image: $image_name"
 
 cd ..
-docker run -d -it --rm --name $docker_container_name --gpus "device=$device" -v $(pwd):/usr/home/workspace -v /disk/arkol/safeantmaze:/logdir $image_name "bash" 
+docker run -d -it --rm --name $docker_container_name --gpus "device=$device" -v $(pwd):/usr/home/workspace $image_name "bash" 
