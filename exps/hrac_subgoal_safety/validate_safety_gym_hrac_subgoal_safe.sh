@@ -10,5 +10,4 @@ python main.py --visulazied_episode 0 --validate \
                --modelfree_safety \
                --controller_safe_model \
                --wandb_postfix "validate" \
-               --load --loaded_exp_num 737 \
-               --pseudo_lidar
+               --load --loaded_exp_num 748

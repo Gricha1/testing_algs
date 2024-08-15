@@ -508,10 +508,6 @@ class CostModel(object):
                     state = get_tensor(x, to_device=False)
                     state_device = state.to(device)
                     cost_device = None
-            # test
-            print("state_device:", state_device.shape)
-            print("cost_device:", cost_device.shape)
-
             safe_model_loss, true, pred = self.train_batch_cost_model(state_device, cost=cost_device)
             debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
             debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
