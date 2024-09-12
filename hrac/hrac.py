@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic, PPOAgent, ControllerSafeModel
+    ManagerActor, ManagerCritic, ControllerSafeModel
 
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv
 
@@ -48,10 +48,9 @@ class Manager(object):
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False, modelbased_safety=False, img_horizon=10, 
+                 wm_no_xy=False, img_horizon=10, 
                  modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
-                 cumul_modelbased_safety=False,
                  coef_safety_modelbased=1.0,
                  coef_safety_modelfree=1.0,
                  lidar_observation=False):
@@ -89,9 +88,7 @@ class Manager(object):
         self.testing_mean_wm = testing_mean_wm
 
         # Safety
-        self.lidar_observation = lidar_observation
-        self.modelbased_safety = modelbased_safety
-        self.cumul_modelbased_safety = cumul_modelbased_safety        
+        self.lidar_observation = lidar_observation   
         self.img_horizon = img_horizon
         self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
@@ -207,7 +204,7 @@ class Manager(object):
                 safety /= self.img_horizon
         return safety
             
-    def actor_loss(self, state, goal, a_net, r_margin, controller_policy=None, cost_model=None):
+    def actor_loss(self, state, goal, a_net, r_margin, cost_model=None):
         actions = self.actor(state, goal)
         
         eval = -self.critic.Q1(state, goal, actions).mean()
@@ -217,15 +214,7 @@ class Manager(object):
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
-        safety_model_based_loss = 0
         safety_model_free_loss = 0
-        if self.modelbased_safety:
-            safety_model_based_loss = self.state_safety_on_horizon(state, actions, 
-                                                                   controller_policy, 
-                                                                   safety_cost=cost_model.safe_model,
-                                                                   all_steps_safety=self.cumul_modelbased_safety,
-                                                                   train=True)
-            safety_model_based_loss = safety_model_based_loss.mean()
         if self.modelfree_safety:
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
@@ -250,8 +239,7 @@ class Manager(object):
                 manager_absolute_goal = torch.cat((manager_absolute_goal, zeros_to_add), dim=1)
             safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
-        safety_loss = self.coef_safety_modelbased * safety_model_based_loss + \
-                      self.coef_safety_modelfree * safety_model_free_loss 
+        safety_loss = self.coef_safety_modelfree * safety_model_free_loss 
         return eval + norm, goal_loss, safety_loss
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
@@ -307,7 +295,7 @@ class Manager(object):
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
-        if self.modelbased_safety or self.modelfree_safety:
+        if self.modelfree_safety:
             avg_safety_subgoals_loss = 0.
         else:
             avg_safety_subgoals_loss = None
@@ -357,11 +345,10 @@ class Manager(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, 
-                                                                          controller_policy, cost_model)
+            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, cost_model)
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
-            if self.modelbased_safety or self.modelfree_safety:
+            if self.modelfree_safety:
                 actor_loss = actor_loss + safety_subgoals_loss
 
             # Optimize the actor
@@ -390,7 +377,7 @@ class Manager(object):
             avg_crit_loss += critic_loss
             if a_net is not None:
                 avg_goal_loss += goal_loss
-            if self.modelbased_safety or self.modelfree_safety:
+            if self.modelfree_safety:
                 avg_safety_subgoals_loss += safety_subgoals_loss
 
             # Update the frozen target models
@@ -403,7 +390,7 @@ class Manager(object):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
         debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
-        if self.modelbased_safety or self.modelfree_safety:
+        if self.modelfree_safety:
             avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
         return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss, debug_maganer_info
 
@@ -543,13 +530,11 @@ class CostModel(object):
 class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
-                 absolute_goal=False, PPO=False, ppo_lr=None, hidden_dim_ppo=300,
-                 weight_decay_ppo=None, 
+                 absolute_goal=False, 
                  cost_function=None,
                  controller_imagination_safety_loss=False,
                  manager=None, controller_grad_clip=0, controller_safety_coef=0,                 
     ):
-        self.PPO = PPO
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
@@ -568,28 +553,19 @@ class Controller(object):
             assert self.manager
         self.cost_function = cost_function
 
-        if self.PPO:
-            self.agent = PPOAgent(state_dim, goal_dim, action_dim,
-                                  hidden_dim=hidden_dim_ppo, scale=max_action).to(device)
-            if not(weight_decay_ppo is None): 
-                self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5,
-                                                weight_decay=weight_decay_ppo)  
-            else:
-                self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=ppo_lr, eps=1e-5)  
-        else:
-            self.actor = ControllerActor(state_dim, goal_dim, action_dim,
-                                        scale=max_action).to(device)
-            self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
-                                                scale=max_action).to(device)
-            self.actor_target.load_state_dict(self.actor.state_dict())
-            self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
-                lr=actor_lr)
+        self.actor = ControllerActor(state_dim, goal_dim, action_dim,
+                                    scale=max_action).to(device)
+        self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
+                                            scale=max_action).to(device)
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
+            lr=actor_lr)
 
-            self.critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
-            self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
-            self.critic_target.load_state_dict(self.critic.state_dict())
-            self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-                lr=critic_lr, weight_decay=0.0001)
+        self.critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+        self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
+            lr=critic_lr, weight_decay=0.0001)
 
 
     def clean_obs(self, state, dims=2):
@@ -620,20 +596,17 @@ class Controller(object):
         return self.agent.get_action_and_value(state, sg)
 
     def select_action(self, state, sg, evaluation=False):
-        if self.PPO: assert 1 == 0
         state = self.clean_obs(get_tensor(state))
         sg = get_tensor(sg)
         return self.actor(state, sg).cpu().data.numpy().squeeze()
 
     def value_estimate(self, state, sg, action):
-        if self.PPO: assert 1 == 0
         state = self.clean_obs(get_tensor(state))
         sg = get_tensor(sg)
         action = get_tensor(action)
         return self.critic(state, sg, action)
 
     def actor_loss(self, state, sg, init_state, cost_model):
-        if self.PPO: assert 1 == 0
         actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
         if self.controller_imagination_safety_loss:
             safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
@@ -659,170 +632,76 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
 
-    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, 
-              minibatch_size=None, clip_coef=None, clip_vloss=None,
-              norm_adv=None, max_grad_norm=None, vf_coef=None, ent_coef=None, target_kl=None,
-              num_minibatches=None):
+    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
-        debug_batch_data = True
-        if self.PPO:
-            x, _, sg, u, r, d, l, v, _, _ = replay_buffer.sample(batch_size)
-            b_obs = self.clean_obs(torch.FloatTensor(x).to(device))
-            b_goals = torch.FloatTensor(sg).to(device)
-            b_logprobs = torch.FloatTensor(l).to(device)
-            b_actions = torch.FloatTensor(u).to(device)
-            b_advantages = torch.FloatTensor(replay_buffer.advantages).to(device)
-            b_returns = torch.FloatTensor(replay_buffer.returns).to(device)
-            b_values = torch.FloatTensor(v).to(device)
-            b_done = torch.FloatTensor(d).to(device)
-
-            if debug_batch_data:
-                debug_info["batch_return"] = b_returns.mean().cpu()
-                debug_info["batch_values"] = b_values.mean().cpu()
-                debug_info["batch_advantages"] = b_advantages.mean().cpu()
-                debug_info["batch_done"] = b_done.mean().cpu()
-                debug_info["batch_norm_advantages"] = ((b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-8)).mean().cpu()
-
-            b_inds = np.arange(batch_size)
-            clipfracs = []
         for it in range(iterations):              
-            if self.PPO:
-                 # Optimizing the policy and value network
-                np.random.shuffle(b_inds)
-                for start in range(0, batch_size, minibatch_size):
-                    end = start + minibatch_size
-                    mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], b_goals[mb_inds], b_actions[mb_inds])
-                    logratio = newlogprob - b_logprobs[mb_inds]
-                    ratio = logratio.exp()
-                    debug_info["value"] = newvalue.mean().cpu()
-                    debug_info["action_logprob"] = newlogprob.mean().cpu()
-                    debug_info["ratio"] = ratio.mean().cpu()
+            x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+            init_state = get_tensor(x)
+            next_g = get_tensor(self.subgoal_transition(x, sg, y))
+            state = self.clean_obs(get_tensor(x))
+            action = get_tensor(u)
+            sg = get_tensor(sg)
+            done = get_tensor(1 - d)
+            reward = get_tensor(r)
+            next_state = self.clean_obs(get_tensor(y)) 
 
-                    with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfracs += [((ratio - 1.0).abs() > clip_coef).float().mean().item()]
+            
+            noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
+            noise = noise.clamp(-self.noise_clip, self.noise_clip)
+            next_action = (self.actor_target(next_state, next_g) + noise)
+            next_action = torch.min(next_action, self.actor.scale)
+            next_action = torch.max(next_action, -self.actor.scale)
 
-                    mb_advantages = b_advantages[mb_inds]
-                    if norm_adv:
-                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+            target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
+            target_Q = torch.min(target_Q1, target_Q2)
+            target_Q = reward + (done * discount * target_Q)
+            target_Q_no_grad = target_Q.detach()
 
-                    # Policy loss
-                    pg_loss1 = -mb_advantages * ratio
-                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - clip_coef, 1 + clip_coef)
-                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-                    debug_info["pg_loss1"] = pg_loss1.mean().cpu()
-                    debug_info["pg_loss2"] = pg_loss2.mean().cpu()
+            # Get current Q estimate
+            current_Q1, current_Q2 = self.critic(state, sg, action)
 
-                    # Value loss
-                    newvalue = newvalue.view(-1)
-                    if clip_vloss:
-                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                        v_clipped = b_values[mb_inds] + torch.clamp(
-                            newvalue - b_values[mb_inds],
-                            -clip_coef,
-                            clip_coef,
-                        )
-                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                        v_loss = 0.5 * v_loss_max.mean()
-                    else:
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+            # Compute critic loss
+            critic_loss = self.criterion(current_Q1, target_Q_no_grad) +\
+                        self.criterion(current_Q2, target_Q_no_grad)
 
-                    entropy_loss = entropy.mean()
-                    loss = pg_loss - ent_coef * entropy_loss + v_loss * vf_coef
+            # Optimize the critic
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            self.critic_optimizer.step()
 
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(self.agent.parameters(), max_grad_norm)
-                    self.optimizer.step()
+            # Compute actor loss
+            actor_loss = self.actor_loss(state, sg, init_state, cost_model)
 
-                    avg_act_loss += pg_loss
-                    avg_crit_loss += v_loss
+            # Optimize the actor
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            if self.controller_grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
+                                    max_norm=self.controller_grad_clip)
+            self.actor_optimizer.step()
 
-                if target_kl is not None and approx_kl > target_kl:
-                    break
-            else:
+            avg_act_loss += actor_loss
+            avg_crit_loss += critic_loss
+            
+            # Update the target models
+            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
-                init_state = get_tensor(x)
-                next_g = get_tensor(self.subgoal_transition(x, sg, y))
-                state = self.clean_obs(get_tensor(x))
-                action = get_tensor(u)
-                sg = get_tensor(sg)
-                done = get_tensor(1 - d)
-                reward = get_tensor(r)
-                next_state = self.clean_obs(get_tensor(y)) 
-
-                
-                noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
-                noise = noise.clamp(-self.noise_clip, self.noise_clip)
-                next_action = (self.actor_target(next_state, next_g) + noise)
-                next_action = torch.min(next_action, self.actor.scale)
-                next_action = torch.max(next_action, -self.actor.scale)
-
-                target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
-                target_Q = torch.min(target_Q1, target_Q2)
-                target_Q = reward + (done * discount * target_Q)
-                target_Q_no_grad = target_Q.detach()
-
-                # Get current Q estimate
-                current_Q1, current_Q2 = self.critic(state, sg, action)
-
-                # Compute critic loss
-                critic_loss = self.criterion(current_Q1, target_Q_no_grad) +\
-                            self.criterion(current_Q2, target_Q_no_grad)
-
-                # Optimize the critic
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
-                self.critic_optimizer.step()
-
-                # Compute actor loss
-                actor_loss = self.actor_loss(state, sg, init_state, cost_model)
-
-                # Optimize the actor
-                self.actor_optimizer.zero_grad()
-                actor_loss.backward()
-                if self.controller_grad_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
-                                        max_norm=self.controller_grad_clip)
-                self.actor_optimizer.step()
-
-                avg_act_loss += actor_loss
-                avg_crit_loss += critic_loss
-
-            if not self.PPO:
-                # Update the target models
-                for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-
-                for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-            if self.PPO:
-                avg_act_loss = avg_act_loss / num_minibatches
-                avg_crit_loss = avg_crit_loss / num_minibatches
+            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 
     def save(self, dir, env_name, algo, exp_num):
-        if self.PPO:
-            pass
-        else:
-            torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
-            torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
-            torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
-            torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
 
     def load(self, dir, env_name, algo, exp_num):
-        if self.PPO:
-            pass
-        else:
-            self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))
-            self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
-            self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
-            self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
+        self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))
+        self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
+        self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
+        self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))

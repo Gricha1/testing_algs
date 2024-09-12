@@ -13,43 +13,30 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Simple replay buffer
 class ReplayBuffer(object):
-    def __init__(self, maxsize=1e6, ppo_memory=False, cost_memmory=False):
+    def __init__(self, maxsize=1e6, cost_memmory=False):
         self.name = "simple_buffer"
-        self.ppo_memory = ppo_memory
         self.cost_memmory = cost_memmory
-        if ppo_memory:
-            self.storage = [[] for _ in range(10)]
-            self.advantages = None
-            self.returns = None
-        else:    
-            if cost_memmory:
-                self.storage = [[] for _ in range(9)]
-            else:
-                self.storage = [[] for _ in range(8)]
+        if cost_memmory:
+            self.storage = [[] for _ in range(9)]
+        else:
+            self.storage = [[] for _ in range(8)]
         self.maxsize = maxsize
         self.next_idx = 0
 
     def clear(self):
-        if self.ppo_memory:
-            self.storage = [[] for _ in range(10)]
+        if self.cost_memmory:
+            self.storage = [[] for _ in range(9)]    
         else:
-            if self.cost_memmory:
-                self.storage = [[] for _ in range(9)]    
-            else:
-                self.storage = [[] for _ in range(8)]
+            self.storage = [[] for _ in range(8)]
         self.next_idx = 0
 
     # Expects tuples of (x, x', g, u, r, d, x_seq, a_seq)
-    # if PPO Expects tuples of (x, x', g, u, r, d, logprob, value, x_seq, a_seq)
     def add(self, data):
         self.next_idx = int(self.next_idx)
         if self.next_idx >= len(self.storage[0]):
             [array.append(datapoint) for array, datapoint in zip(self.storage, data)]
         else:
-            if self.ppo_memory:
-                assert 1 == 0, "imposible to add more data when PPO buffer size"
-            else:
-                [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
+            [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
 
         self.next_idx = (self.next_idx + 1) % self.maxsize
 
@@ -57,26 +44,18 @@ class ReplayBuffer(object):
         if len(self.storage[0]) <= batch_size:
             ind = np.arange(len(self.storage[0]))
         else:
-            if self.ppo_memory:
-                assert 1 == 0, "batch_size == storage size"
             ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
 
-        if self.ppo_memory:
-            x, y, g, u, r, d, l, v, x_seq, a_seq = [], [], [], [], [], [], [], [], [], []
+        if self.cost_memmory:
+            x, y, g, u, r, c, d, x_seq, a_seq = [], [], [], [], [], [], [], [], []          
         else:
-            if self.cost_memmory:
-                x, y, g, u, r, c, d, x_seq, a_seq = [], [], [], [], [], [], [], [], []          
-            else:
-                x, y, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], []          
+            x, y, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], []          
 
         for i in ind: 
-            if self.ppo_memory:
-                X, Y, G, U, R, D, L, V, obs_seq, acts = (array[i] for array in self.storage)
+            if self.cost_memmory:
+                X, Y, G, U, R, C, D, obs_seq, acts = (array[i] for array in self.storage)
             else:
-                if self.cost_memmory:
-                    X, Y, G, U, R, C, D, obs_seq, acts = (array[i] for array in self.storage)
-                else:
-                    X, Y, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
+                X, Y, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
             x.append(np.array(X, copy=False))
             y.append(np.array(Y, copy=False))
             g.append(np.array(G, copy=False))
@@ -85,50 +64,32 @@ class ReplayBuffer(object):
             if self.cost_memmory:
                 c.append(np.array(C, copy=False))    
             d.append(np.array(D, copy=False))
-            if self.ppo_memory:
-                l.append(np.array(L, copy=False))
-                v.append(np.array(V, copy=False))
 
             # For off-policy goal correction
             x_seq.append(np.array(obs_seq, copy=False))
             a_seq.append(np.array(acts, copy=False))
         
-        if self.ppo_memory:
+        if self.cost_memmory:
+            return np.array(x), np.array(y), np.array(g), \
+                np.array(u), np.array(r).reshape(-1, 1), np.array(c).reshape(-1, 1), \
+                np.array(d).reshape(-1, 1), \
+                x_seq, a_seq
+        else:
             return np.array(x), np.array(y), np.array(g), \
                 np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
-                np.array(l).reshape(-1, 1), np.array(v).reshape(-1, 1), x_seq, a_seq
-        else:
-            if self.cost_memmory:
-                return np.array(x), np.array(y), np.array(g), \
-                    np.array(u), np.array(r).reshape(-1, 1), np.array(c).reshape(-1, 1), \
-                    np.array(d).reshape(-1, 1), \
-                    x_seq, a_seq
-            else:
-                return np.array(x), np.array(y), np.array(g), \
-                    np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
-                    x_seq, a_seq
+                x_seq, a_seq
 
     def save(self, file):
-        if self.ppo_memory:
-            np.savez_compressed(file, idx=np.array([self.next_idx]), x=self.storage[0],
-                                y=self.storage[1], g=self.storage[2], u=self.storage[3],
-                                r=self.storage[4], d=self.storage[5], l=self.storage[6], 
-                                v=self.storage[7], xseq=self.storage[8], aseq=self.storage[9])
-        else:
-            np.savez_compressed(file, idx=np.array([self.next_idx]), x=self.storage[0],
-                                y=self.storage[1], g=self.storage[2], u=self.storage[3],
-                                r=self.storage[4], d=self.storage[5], xseq=self.storage[6],
-                                aseq=self.storage[7])
+        np.savez_compressed(file, idx=np.array([self.next_idx]), x=self.storage[0],
+                            y=self.storage[1], g=self.storage[2], u=self.storage[3],
+                            r=self.storage[4], d=self.storage[5], xseq=self.storage[6],
+                            aseq=self.storage[7])
 
     def load(self, file):
         with np.load(file) as data:
             self.next_idx = int(data['idx'][0])
-            if self.ppo_memory:
-                self.storage = [data['x'], data['y'], data['g'], data['u'], data['r'],
-                                data['d'], data['l'], data['v'], data['xseq'], data['aseq']]
-            else:
-                self.storage = [data['x'], data['y'], data['g'], data['u'], data['r'],
-                                data['d'], data['xseq'], data['aseq']]
+            self.storage = [data['x'], data['y'], data['g'], data['u'], data['r'],
+                            data['d'], data['xseq'], data['aseq']]
             self.storage = [list(l) for l in self.storage]
 
     def __len__(self):
