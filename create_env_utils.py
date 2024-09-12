@@ -8,7 +8,7 @@ from envs.plots import plot_values
 
 
 class CustomVideoRendered:
-    def __init__(self, env, controller_safe_model, 
+    def __init__(self, env, controller_safe_model=False, 
                  world_model_comparsion=True, plot_subgoal=True, 
                  plot_safety_boundary=True):
         # config
@@ -301,8 +301,6 @@ def create_env(args, renderer_args={}):
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
 
-    renderer = CustomVideoRendered(env,  
-                                   controller_safe_model=args.controller_safe_model,
-                                   **renderer_args)
+    renderer = CustomVideoRendered(env, **renderer_args)
 
     return env, state_dim, goal_dim, action_dim, renderer
