@@ -8,6 +8,6 @@ python main.py --visulazied_episode 0 --validate \
                --seed 344 \
                --cm_frame_stack_num 1 \
                --modelfree_safety \
-               --controller_safe_model \
+               --cost_model \
                --wandb_postfix "validate" \
                --load --loaded_exp_num 748

@@ -19,7 +19,7 @@ python main.py --domain_name Safexp \
                --controller_safety_coef 6 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
-               --controller_safe_model \
+               --cost_model \
                --img_horizon 10 \
                --wm_pretrain \
                --wm_pretrain_epoches 100 \

@@ -24,7 +24,7 @@ python main.py --domain_name Safexp \
                --controller_imagination_safety_loss \
                --controller_grad_clip 0 \
                --validation_without_image --eval_freq 30000 \
-               --controller_safe_model \
+               --cost_model \
                --cm_frame_stack_num 1 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 100 \

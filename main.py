@@ -82,9 +82,9 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
     ## Cost Model Parameters
+    parser.add_argument("--cost_model", action='store_true', default=False)
     parser.add_argument("--cm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--cost_oracle", action='store_true', default=False)
-    parser.add_argument("--controller_safe_model", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
     parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
     parser.add_argument("--cm_frame_stack_num", default=1, type=int)
@@ -125,9 +125,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     assert args.img_horizon <= args.manager_propose_freq
-    assert not args.controller_safe_model or \
-        ( (args.controller_safe_model and args.domain_name == "Safexp") or \
-          (args.controller_safe_model and args.domain_name != "Safexp" and args.world_model)
+    assert not args.cost_model or \
+        ( (args.cost_model and args.domain_name == "Safexp") or \
+          (args.cost_model and args.domain_name != "Safexp" and args.world_model)
         )
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
