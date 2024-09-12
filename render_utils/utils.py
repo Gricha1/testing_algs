@@ -5,7 +5,7 @@ from .plots import plot_values
 
 
 class CustomVideoRendered:
-    def __init__(self, env, args, controller_safe_model, 
+    def __init__(self, env, args, controller_safe_model=False, 
                  world_model_comparsion=False, 
                  plot_world_model_state=False,
                  plot_subgoal=False, 
@@ -225,7 +225,6 @@ class CustomVideoRendered:
 def get_renderer(env, args, renderer_args):
     renderer = CustomVideoRendered(env,  
                                    args,
-                                   controller_safe_model=args.controller_safe_model,
                                    **renderer_args)
     
     return renderer
