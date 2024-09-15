@@ -27,6 +27,10 @@ class ActionRepeatWrapper(Wrapper):
         self._max_episode_steps = env.config["num_steps"]//repeat
         self.binary_cost = binary_cost
 
+
+    def max_len(self):
+        return self._max_episode_steps
+
     def step(self, action):
         observation, reward, done, info = self.env.step(action)
         track_info = info.copy()
@@ -194,23 +198,10 @@ class PixelObservationWrapper(ObservationWrapper):
         return observation
     
 class GoalConditionedWrapper(ObservationWrapper):
-    """Augment observations by pixel values."""
-
-# Pixel observation wrapper based on OpenAI Gym implementation.
-# The MIT License
-
-# Copyright (c) 2016 OpenAI (https://openai.com)
-
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-
     def __init__(self,
                  env,
                  pseudo_lidar=False):
         """Initializes a new goal conditioned Wrapper.
-
         Args:
             env: The environment to wrap.
         """
@@ -267,16 +258,72 @@ class GoalConditionedWrapper(ObservationWrapper):
             new_vec_observation = np.concatenate([new_vec_observation, hazards_lidar])
         
         agent_goal_xy = np.array(self._env.env.goal_pos)[:2]
-        # test boundary
-        #assert -1 <= agent_xy[0] <= 1
-        #assert -1 <= agent_xy[1] <= 1
-        #assert -1 <= agent_goal_xy[0] <= 1
-        #assert -1 <= agent_goal_xy[1] <= 1
+
         gc_observation = {"observation": new_vec_observation, 
                           "desired_goal": agent_goal_xy,
                           "achieved_goal": agent_xy}
 
         return gc_observation
+
+
+class GoalConditionedFlatWrapper(ObservationWrapper):
+    def __init__(self,
+                 env,
+                 pseudo_lidar=False):
+        """Initializes a new goal conditioned Wrapper.
+        Args:
+            env: The environment to wrap.
+        """
+
+        super(GoalConditionedFlatWrapper, self).__init__(env)
+
+        wrapped_observation_space = env.observation_space
+        self.pseudo_lidar = pseudo_lidar
+
+        self.observation_space = spaces.Box(
+                                    shape=(34,), 
+                                    low=-np.inf, high=np.inf,  
+                                    dtype=wrapped_observation_space.dtype)
+        self._env = env
+
+    def observation(self, observation):
+        # observation_keys = {('accelerometer', Box(3,)), 
+        #                     ('velocimeter', Box(3,)), 
+        #                     ('gyro', Box(3,)), 
+        #                     ('magnetometer', Box(3,)), 
+        #                     ('goal_lidar', Box(16,)), 
+        #                     ('hazards_lidar', Box(16,))}   
+        agent_xy = np.array(self._env.env.robot_pos)[:2]
+        accelerometer = observation[:3]
+        velocimeter = observation[3:6]
+        gyro = observation[6:9]
+        magnetometer = observation[9:12]
+        # goal_lidar = observation[12:28]
+        hazards_lidar = observation[28:44]
+        new_vec_observation = np.concatenate([agent_xy,
+                                                accelerometer,
+                                                velocimeter,
+                                                gyro,
+                                                magnetometer])
+        if self.pseudo_lidar:
+            hazards_poses = [hazard[:2] for hazard in self.hazards_pos]
+            hazards_flat = []
+            for hazard_pose in hazards_poses:
+                hazards_flat.extend(hazard_pose)
+            assert len(hazards_flat) == 16
+            new_vec_observation = np.concatenate([new_vec_observation, hazards_flat]) # (30,)
+        else:
+            new_vec_observation = np.concatenate([new_vec_observation, hazards_lidar])
+        
+        # add goal
+        agent_goal_xy = np.array(self._env.env.goal_pos)[:2]
+        new_vec_observation = np.concatenate([new_vec_observation, agent_goal_xy]) # (32,)
+
+        # robot marix
+        robot_matrix = self.env.world.robot_mat()
+        new_vec_observation = np.concatenate([new_vec_observation, np.array(robot_matrix[0][:2])]) # (34,)
+
+        return new_vec_observation
 
     
 class SafetyEnvWrapper:
@@ -284,11 +331,6 @@ class SafetyEnvWrapper:
         self.env = env
         self.observation_space = env.observation_space
         self.action_space = env.action_space
-
-        # update safety gym config, delete goal continue
-        #new_safety_gym_config = {"continue_goal": False}
-        #self.env.parse(new_safety_gym_config)
-        #assert not self.env.config["continue_goal"]
         
     def seed(self, seed):
         return self.env.seed(seed)
@@ -331,7 +373,10 @@ class SafetyEnvWrapper:
     
     def step(self, action):
         new_obs, reward, done, info = self.env.step(action)
-        state = new_obs["observation"]
+        if self.goal_conditioned:
+            state = new_obs["observation"]
+        else:
+            state = new_obs
         info["safety_cost"] = self.cost_func(state)
 
         return new_obs, reward, done, info
@@ -350,8 +395,10 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
         if goal_conditioned:
             gc_env = GoalConditionedWrapper(ar_env, pseudo_lidar=pseudo_lidar)
             s_env = SafetyEnvWrapper(gc_env)
-            return s_env 
-        return ar_env
+        else:
+            g_env = GoalConditionedFlatWrapper(ar_env, pseudo_lidar=pseudo_lidar)
+            s_env = SafetyEnvWrapper(g_env)
+        return s_env 
 
 
     # fixednear, fixedfar, vision, track
