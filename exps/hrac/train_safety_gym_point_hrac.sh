@@ -15,5 +15,6 @@ python main.py --domain_name Safexp \
                --validation_without_image --eval_freq 30000 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --max_timesteps 4000000 \
-               --wandb_postfix "" 
+               --wandb_postfix "" \
+               --not_use_wandb
 
