@@ -208,12 +208,22 @@ class GoalConditionedWrapper(ObservationWrapper):
 
         super(GoalConditionedWrapper, self).__init__(env)
 
+        self.robot_name = ""
+        if "point" in self.robot_base:
+            self.robot_name = "point"
+            obs_shape = 30
+        elif "car" in self.robot_base:
+            self.robot_name = "car"
+            obs_shape = 42
+        else:
+            assert 1 == 0, "dont know robot name"
+
         wrapped_observation_space = env.observation_space
         self.pseudo_lidar = pseudo_lidar
 
         self.observation_space = spaces.Dict()
         gc_spaces = {"observation": spaces.Box(
-                                    shape=(30,), 
+                                    shape=(obs_shape,), 
                                     low=-np.inf, high=np.inf,  
                                     dtype=wrapped_observation_space.dtype),
                      "desired_goal": spaces.Box(
@@ -229,31 +239,57 @@ class GoalConditionedWrapper(ObservationWrapper):
         self._env = env
 
     def observation(self, observation):
-        # observation_keys = {('accelerometer', Box(3,)), 
+        # ----
+        # POINT obs shape = 44
+        #{                    ('accelerometer', Box(3,)), 
         #                     ('velocimeter', Box(3,)), 
         #                     ('gyro', Box(3,)), 
         #                     ('magnetometer', Box(3,)), 
         #                     ('goal_lidar', Box(16,)), 
-        #                     ('hazards_lidar', Box(16,))}   
+        #                     ('hazards_lidar', Box(16,))}  
+        # ----
+        # CAR obs shape = 56 
+        # ([('accelerometer', Box(3,)), ('velocimeter', Box(3,)), ('gyro', Box(3,)), ('magnetometer', Box(3,)), 
+        #('ballangvel_rear', Box(3,)), ('ballquat_rear', Box(3, 3)), 
+        #('goal_lidar', Box(16,)), ('hazards_lidar', Box(16,))])
+        # ----
+
         agent_xy = np.array(self._env.env.robot_pos)[:2]
-        accelerometer = observation[:3]
-        velocimeter = observation[3:6]
-        gyro = observation[6:9]
-        magnetometer = observation[9:12]
-        # goal_lidar = observation[12:28]
-        hazards_lidar = observation[28:44]
-        new_vec_observation = np.concatenate([agent_xy,
+        if self.robot_name == "point":
+            accelerometer = observation[:3]
+            velocimeter = observation[3:6]
+            gyro = observation[6:9]
+            magnetometer = observation[9:12]
+            # goal_lidar = observation[12:28]
+            hazards_lidar = observation[28:44]
+            new_vec_observation = np.concatenate([agent_xy,
                                                 accelerometer,
                                                 velocimeter,
                                                 gyro,
                                                 magnetometer])
+        elif self.robot_name == "car":
+            accelerometer = observation[:3]
+            velocimeter = observation[3:6]
+            gyro = observation[6:9]
+            magnetometer = observation[9:12]
+            ballangvel_rear = observation[12:15]
+            ballquat_rear = observation[15:24]
+            # goal_lidar = observation[24:40]
+            hazards_lidar = observation[40:56]
+            new_vec_observation = np.concatenate([agent_xy,
+                                                    accelerometer,
+                                                    velocimeter,
+                                                    gyro,
+                                                    magnetometer,
+                                                    ballangvel_rear,
+                                                    ballquat_rear])
         if self.pseudo_lidar:
             hazards_poses = [hazard[:2] for hazard in self.hazards_pos]
             hazards_flat = []
             for hazard_pose in hazards_poses:
                 hazards_flat.extend(hazard_pose)
             assert len(hazards_flat) == 16
-            new_vec_observation = np.concatenate([new_vec_observation, hazards_flat]) # (30,)
+            new_vec_observation = np.concatenate([new_vec_observation, hazards_flat])
         else:
             new_vec_observation = np.concatenate([new_vec_observation, hazards_lidar])
         
@@ -327,10 +363,11 @@ class GoalConditionedFlatWrapper(ObservationWrapper):
 
     
 class SafetyEnvWrapper:
-    def __init__(self, env):
+    def __init__(self, env, dict_obs):
         self.env = env
         self.observation_space = env.observation_space
         self.action_space = env.action_space
+        self.dict_obs = dict_obs
         
     def seed(self, seed):
         return self.env.seed(seed)
@@ -373,7 +410,7 @@ class SafetyEnvWrapper:
     
     def step(self, action):
         new_obs, reward, done, info = self.env.step(action)
-        if self.goal_conditioned:
+        if self.dict_obs:
             state = new_obs["observation"]
         else:
             state = new_obs
@@ -394,10 +431,10 @@ def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_
     if not use_pixels:
         if goal_conditioned:
             gc_env = GoalConditionedWrapper(ar_env, pseudo_lidar=pseudo_lidar)
-            s_env = SafetyEnvWrapper(gc_env)
+            s_env = SafetyEnvWrapper(gc_env, dict_obs=True)
         else:
             g_env = GoalConditionedFlatWrapper(ar_env, pseudo_lidar=pseudo_lidar)
-            s_env = SafetyEnvWrapper(g_env)
+            s_env = SafetyEnvWrapper(g_env, dict_obs=False)
         return s_env 
 
 
