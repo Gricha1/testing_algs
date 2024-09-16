@@ -127,6 +127,7 @@ class Logger:
             self.vizualize_validation = vizualize_validation
             log_dir=tensorboard_log_dir
             output_dir = os.path.join(log_dir)
+            """
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
             output_dir += "/" + tensorboard_env_name
@@ -136,6 +137,10 @@ class Logger:
                 output_dir = "_".join(output_dir.split("_")[:-1])
                 output_dir = output_dir + "_" + str(run_number + 1)
             output_dir += "_" + tensorboard_descript + "_model_" + str(exp_num)
+            """
+            output_dir = output_dir = os.path.join(log_dir) + "/" + exp_num
+            print("******* LOGGING *********")
+            print("tensorboard log dir:", output_dir)
             self.writer = SummaryWriter(log_dir=output_dir)
             self.tensorboard_dict = {}
         if self.use_wandb:

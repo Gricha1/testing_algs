@@ -20,12 +20,17 @@ from utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
 from safety_gym_envs.env_utils import SafetyGymEnv
 from envs.create_env_utils import create_env
-from aux import dist_xy, get_reward_cost, get_goal_flag, ego_xy, obs_lidar_pseudo, make_observation, generate_lidar
+from aux import dist_xy, get_reward_cost, get_goal_flag, ego_xy, generate_lidar
 from model import EnsembleDynamicsModel
 from predict_env import PredictEnv
 from replay_memory import ReplayMemory
 from tqdm import tqdm
 from stable_baselines3.common.logger import Video
+
+from safety_gym_wrapper.env import make_safety
+from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
+from safety_gym_wrapper.render_utils.utils import get_renderer
+
 
 class PPOBuffer:
     """
@@ -258,6 +263,9 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
     #-----------------This dimension size is specific for our use-case in our modified Safety Gym envs-----------------------
     if args.env_name == "SafeAntMaze":
         obs_dim = (state_dim + goal_dim, )
+        act_dim = action_dim
+    elif args.domain_name == "Safexp":
+        obs_dim = (state_dim,)
         act_dim = action_dim
     else:
         obs_dim = (26,)
@@ -510,7 +518,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
         megaiter = 0
         max_training_steps = 0
 
-        debug = True
+        debug = False
 
         if args.env_name == "SafeAntMaze":
             obs = env.reset(eval_idx=val_episode)
@@ -535,9 +543,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
             t += 1
             if args.env_name == "SafeAntMaze":
                 obs_vec = o
+            elif args.domain_name == "Safexp":
+                obs_vec = o
             else:
                 #generate hazard lidar
-                obs_vec = generate_lidar(o, hazards_pos)
+                obs_vec = generate_lidar(o, hazards_pos, env)
                 obs_vec = np.array(obs_vec)
             
             ot = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
@@ -604,8 +614,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
             terminal = d or timeout
 
             if terminal:
-                _, _, goal_flag = env.get_reward_cost(next_o[:2], 
-                                                      goal_pos)
+                if args.env_name == "SafeAntMaze":
+                    _, _, goal_flag = env.get_reward_cost(next_o[:2], 
+                                                        goal_pos)
+                else:
+                    goal_flag = d
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
                              PEPRet=pep_ret, PEPCost=pep_cost, 
                              TrainSucRate=float(goal_flag))
@@ -645,6 +658,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
     validation_episode = 1
     validate_each_epoch = 5
     validate_world_model = True
+    robot_pose_start_idx, robot_pose_end_idx = env.additional_config["robot_pose_start_idx"], \
+                                                env.additional_config["robot_pose_end_idx"]
+    goal_pose_start_idx, goal_pose_end_idx = env.additional_config["goal_pose_start_idx"], \
+                                                env.additional_config["goal_pose_end_idx"]    
 
     # Start Training
     for epoch in range(outer_loop_epochs):
@@ -653,11 +670,16 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
             goal_pos = obs["desired_goal"]
             o_without_goal = obs["observation"]  
             o = np.concatenate((o_without_goal, goal_pos))
+        elif args.domain_name == "Safexp":
+            o = env.reset()
+            hazards_pos = env.hazards_pos
+            goal_pos = o[goal_pose_start_idx:goal_pose_end_idx]
+            ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
         else:
             o, static = env.reset()
             goal_pos = static['goal']
             hazards_pos = static['hazards']
-            ld = dist_xy(o[40:], goal_pos)
+            ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
         train_episode = 0
         screens = []
         ep_ret = 0
@@ -665,7 +687,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
         ep_cost = 0
         pep_cost = 0
         ep_len = 0
-        mix_real = int(1500/num_procs())
+        mix_real = int(args.mix_real/num_procs())
         max_ep_len2 = img_rollout_H
         print("interacting with real environment")
         ## Collect Trajectories From Env
@@ -674,8 +696,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
             ### Generate hazard lidar
             if args.env_name == "SafeAntMaze":
                 obs_vec = o
+            elif args.domain_name == "Safexp":
+                obs_vec = o
             else:
-                obs_vec = generate_lidar(o, hazards_pos)
+                obs_vec = generate_lidar(o, hazards_pos, env)
                 obs_vec = np.array(obs_vec)
 
             ot = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
@@ -701,6 +725,10 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                 if not d:
                     env_pool.push(o_without_goal, a, r, info['safety_cost'], 
                                   next_o_without_goal, d)
+            elif args.domain_name == "Safexp":
+                if not d and not "goal_met" in info:
+                    env_pool.push(o, a, r, info['cost'], 
+                                  next_o, d)
             else:
                 if not d and not info['goal_met']:
                     env_pool.push(o, a, r, info['cost'], 
@@ -746,8 +774,11 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                     buf.finish_path(v, vc)
 
             if terminal:
-                _, _, goal_flag = env.get_reward_cost(next_o[:2], 
-                                                      goal_pos)
+                if args.env_name == "SafeAntMaze":
+                    _, _, goal_flag = env.get_reward_cost(next_o[:2], 
+                                                        goal_pos)
+                else:
+                    goal_flag = d
                 logger.store(EpRet=ep_ret, EpLen=ep_len, EpCost=ep_cost, 
                              PEPRet=pep_ret, PEPCost=pep_cost,
                              TrainSucRate=float(goal_flag))
@@ -757,11 +788,16 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                     goal_pos = obs["desired_goal"]
                     o_without_goal = obs["observation"]
                     o = np.concatenate((o_without_goal, goal_pos))        
+                elif args.domain_name == "Safexp":
+                    o = env.reset()
+                    hazards_pos = env.hazards_pos
+                    goal_pos = o[goal_pose_start_idx:goal_pose_end_idx]
+                    ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
                 else:
                     o, static = env.reset()
                     goal_pos = static['goal']
                     hazards_pos = static['hazards']
-                    ld = dist_xy(o[40:], goal_pos)
+                    ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
                 ep_ret, ep_len =  0, 0
                 pep_ret, pep_cost = 0, 0
                 ep_cost = 0
@@ -795,12 +831,17 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                 obs = env.reset()
                 goal_pos = obs["desired_goal"]
                 o_without_goal = obs["observation"] 
-                o = np.concatenate((o_without_goal, goal_pos))               
+                o = np.concatenate((o_without_goal, goal_pos))    
+            elif args.domain_name == "Safexp":
+                o = env.reset()
+                hazards_pos = env.hazards_pos
+                goal_pos = o[goal_pose_start_idx:goal_pose_end_idx]
+                ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)          
             else:
                 o, static = env.reset()
                 goal_pos = static['goal']
                 hazards_pos = static['hazards']
-                ld = dist_xy(o[40:], goal_pos)
+                ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
             dep_ret = 0
             dep_cost = 0
             dep_len = 0
@@ -817,9 +858,12 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                 if args.env_name == "SafeAntMaze":
                     obs_vec = o
                     robot_pos = o[:2]
+                elif args.domain_name == "Safexp":
+                    obs_vec = o
+                    robot_pos = o[robot_pose_start_idx:robot_pose_end_idx]
                 else:
-                    obs_vec = generate_lidar(o, hazards_pos)
-                    robot_pos = o[40:]
+                    obs_vec = generate_lidar(o, hazards_pos, env)
+                    robot_pos = o[robot_pose_start_idx:robot_pose_end_idx]
                     obs_vec = np.array(obs_vec)
 
                 otensor = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
@@ -886,12 +930,17 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                         obs = env.reset()
                         goal_pos = obs["desired_goal"]
                         o_without_goal = obs["observation"]
-                        o = np.concatenate((o_without_goal, goal_pos))                   
+                        o = np.concatenate((o_without_goal, goal_pos))      
+                    elif args.domain_name == "Safexp":
+                        o = env.reset()
+                        hazards_pos = env.hazards_pos
+                        goal_pos = o[goal_pose_start_idx:goal_pose_end_idx]
+                        ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)            
                     else:
                         o, static = env.reset()
                         goal_pos = static['goal']
                         hazards_pos = static['hazards']
-                        ld = dist_xy(o[40:], goal_pos)
+                        ld = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_pos)
                     dep_ret, dep_len, dep_cost = 0, 0, 0
 
             if (epoch % save_freq == 0) or (epoch == outer_loop_epochs - 1):
@@ -919,15 +968,18 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                         goal_posv = staticv['goal']
                         hazards_posv = staticv['hazards']
                         # test probably bug with o instead of ov
-                        ldv = dist_xy(o[40:], goal_posv)
+                        ldv = dist_xy(o[robot_pose_start_idx:robot_pose_end_idx], goal_posv)
                     # test 75 probably isnt correct
                     for step_iter in range(max_ep_len2 - 5):
                         if args.env_name == "SafeAntMaze":
                             obs_vecv = ov
                             robot_posv = ov[:2]
+                        elif args.domain_name == "Safexp":
+                            obs_vec = ov
+                            robot_pos = ov[robot_pose_start_idx:robot_pose_end_idx]
                         else:
-                            obs_vecv = generate_lidar(ov, hazards_posv)
-                            robot_posv = ov[40:]
+                            obs_vecv = generate_lidar(ov, hazards_posv, env)
+                            robot_posv = ov[robot_pose_start_idx:robot_pose_end_idx]
                             obs_vecv = np.array(obs_vecv)
                         ovt = torch.as_tensor(obs_vecv, device=cpudevice, dtype=torch.float32)
                         av, _, _, _ = ac.step(ovt)
@@ -964,7 +1016,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                                 ov, staticv = env.reset()
                                 goal_posv = staticv['goal']
                                 hazards_posv = staticv['hazards']
-                                ldv = dist_xy(ov[40:], goal_posv)
+                                ldv = dist_xy(ov[robot_pose_start_idx:robot_pose_end_idx], goal_posv)
                     if valid_rets[va] > last_valid_rets[va]:
                         winner += 1
                 print(valid_rets, last_valid_rets)
@@ -1049,6 +1101,14 @@ if __name__ == '__main__':
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
 
+    parser.add_argument("--domain_name", default="initSafexp", type=str) # initSafexp, Safexp, SafeMaze
+    parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
+    parser.add_argument("--image_size", type=int, default=2)
+    parser.add_argument("--vector_env", default=False, action="store_true")
+    parser.add_argument("--action_repeat", type=int, default=2)
+    parser.add_argument("--goal_conditioned", action="store_true", default=False)
+    parser.add_argument("--pseudo_lidar", action="store_true", default=False)
+
     # environment
     parser.add_argument('--env_name', type=str, default='Safexp-PointGoal2-v0')
     parser.add_argument("--random_start_pose", action="store_true", default=False)
@@ -1063,6 +1123,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=1)
     
     # world model
+    parser.add_argument('--mix_real', default=1500, type=int)
     parser.add_argument('--ppo_batch_size', default=30_000, type=int)
     parser.add_argument("--load_wm_from_pth", action="store_true", default=False)
     parser.add_argument("--add_state_normalization", action="store_true", default=False)
@@ -1115,23 +1176,63 @@ if __name__ == '__main__':
         use_dist_reward=False,
         stack_obs=False,
     )
-    if "Point" in args.env_name or "Car" in args.env_name:
-        if "Point" in args.env_name:
-            robot = 'Point'
-            eplen = 750
-            num_steps = 4.5e5
-            DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-        elif "Car" in args.env_name:
-            robot = 'Car'
-            eplen = 750
-            DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-            num_steps = 4.5e5
-        env_config=DEFAULT_ENV_CONFIG_POINT
-        env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
-        state_dim, action_dim = env.observation_size, env.action_size
-        goal_dim = None
-        renderer = None
-        max_ep_len = eplen
+
+    if args.domain_name == "Safexp":
+        assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
+        env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
+                            image_size=args.image_size, 
+                            use_pixels=not args.vector_env, 
+                            action_repeat=args.action_repeat,
+                            goal_conditioned=args.goal_conditioned,
+                            pseudo_lidar=args.pseudo_lidar)
+        state_dim = env.observation_space.shape[0]
+        goal_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        env.state_dim = state_dim
+        renderer_args = {"plot_subgoal": False, 
+                         "world_model_comparsion": False,
+                         "plot_safety_boundary": False,
+                         "plot_world_model_state": False,
+                         "controller_safe_model": False,
+                         }
+        renderer = get_renderer(env, args, renderer_args)
+        env.seed(args.seed)
+        env.additional_config = {}
+        env.additional_config["robot_pose_start_idx"] = 0
+        env.additional_config["robot_pose_end_idx"] = 2
+        env.additional_config["goal_pose_start_idx"] = 30
+        env.additional_config["goal_pose_end_idx"] = 32
+        env.additional_config["robot_m_start_idx"] = 32
+        env.additional_config["robot_m__end_idx"] = 34
+        env.additional_config["kinematic_idx"] = 12
+        max_ep_len = env.env.max_len()
+
+    elif args.domain_name == "initSafexp":
+        if "Point" in args.env_name or "Car" in args.env_name:
+            if "Point" in args.env_name:
+                robot = 'Point'
+                eplen = 750
+                num_steps = 4.5e5
+                DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
+            elif "Car" in args.env_name:
+                robot = 'Car'
+                eplen = 750
+                DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
+                num_steps = 4.5e5
+            env_config=DEFAULT_ENV_CONFIG_POINT
+            env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
+            state_dim, action_dim = env.observation_size, env.action_size
+            goal_dim = None
+            renderer = None
+            max_ep_len = eplen
+            env.additional_config = {}
+            env.additional_config["robot_pose_start_idx"] = 40
+            env.additional_config["robot_pose_end_idx"] = 42
+            env.additional_config["goal_pose_start_idx"] = None
+            env.additional_config["goal_pose_end_idx"] = None
+            env.additional_config["robot_m_start_idx"] = 38
+            env.additional_config["robot_m__end_idx"] = 40
+            env.additional_config["kinematic_idx"] = 8
 
     elif args.env_name == "SafeAntMaze":
         num_steps = 1.8e6
@@ -1181,11 +1282,11 @@ if __name__ == '__main__':
     logger_kwargs["config"] = args
     logger_kwargs["use_wandb"] = not args.not_use_wandb
     logger_kwargs["tensorboard_log_dir"] = args.log_dir
-    logger_kwargs["tensorboard_env_name"] = args.env_name
-    logger_kwargs["tensorboard_descript"] = args.tensorboard_descript
+    logger_kwargs["tensorboard_env_name"] = ""
+    logger_kwargs["tensorboard_descript"] = ""
     logger_kwargs["vizualize_validation"] = args.vizualize_validation
     # test
-    logger_kwargs["exp_num"] = 0
+    logger_kwargs["exp_num"] = args.exp_name
 
     #-----------------------------------------------------------------------------
 

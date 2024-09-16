@@ -121,24 +121,26 @@ def obs_lidar_pseudo(robot_matrix, robot_pos, positions):
             obs[bin_minus] = max(obs[bin_minus], (1 - alias) * sensor)
     return obs
 
-def make_observation(state, lidar):
+def make_observation(state, lidar, env):
     state = list(state)
     lidar = list(lidar)
-    x = state[:8]
-    obs = x+lidar+state[40:]
+    x = state[:env.additional_config["kinematic_idx"]]
+    if env.additional_config["goal_pose_end_idx"] is None:
+        obs = x+lidar+state[env.additional_config["robot_pose_start_idx"]:env.additional_config["robot_pose_end_idx"]]
+    else:
+        obs = x+lidar
     return obs
 
-def generate_lidar(o, hazards_pos):
-    robot_matrix_x_y = o[38:40]
+def generate_lidar(o, hazards_pos, env):
+    robot_matrix_x_y = o[env.additional_config["robot_m_start_idx"]:env.additional_config["robot_m__end_idx"]]
     x = robot_matrix_x_y[0]
     y = robot_matrix_x_y[1]
-
     first_row = [x, y, 0]
     second_row = [-y, x, 0]
     third_row = [0, 0, 1]
     robot_matrix = [first_row, second_row, third_row]
-    robot_pos = o[40:]
+    robot_pos = o[env.additional_config["robot_pose_start_idx"]:env.additional_config["robot_pose_end_idx"]]
     #--------------------------------------------------------------------------------------
     lidar_vec = obs_lidar_pseudo(robot_matrix, robot_pos, hazards_pos)
-    obs_vec = make_observation(o, lidar_vec)
+    obs_vec = make_observation(o, lidar_vec, env)
     return obs_vec
