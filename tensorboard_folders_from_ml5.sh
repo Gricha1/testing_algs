@@ -3,7 +3,7 @@ cd logs/hrac
 # download tensorboard from ml5:
 
 ## HRAC SAFE
-folder_ml5_name=SafeGym_1__model_183
+folder_ml5_name=SafeGym_1__model_185
 scp -P 9191 -r ggorbov@gater.frccsc.ru:/home/ggorbov/hrac_safety/testing_algs/logs/hrac/$folder_ml5_name ml5_$folder_ml5_name
 
 

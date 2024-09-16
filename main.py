@@ -87,6 +87,7 @@ if __name__ == "__main__":
     parser.add_argument("--cost_oracle", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
     parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
+    parser.add_argument("--cm_lr", default=1e-3, type=float)
     parser.add_argument("--cm_frame_stack_num", default=1, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
 

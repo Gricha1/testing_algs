@@ -587,7 +587,7 @@ def run_hrac(args):
                                         lidar_observation=True if args.domain_name == "Safexp" else False, 
                                         frame_stack_num=args.cm_frame_stack_num,
                                         safe_model_loss_coef=args.safe_model_loss_coef, 
-                                        lr=args.ctrl_crit_lr)
+                                        lr=args.cm_lr)
         if args.domain_name == "Safexp":
             if not args.cost_oracle:
                 cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
