@@ -13,6 +13,7 @@ if __name__ == "__main__":
     parser.add_argument("--test_train_dataset", action="store_true", default=False)
     
     # environment
+    ## safety ant maze
     parser.add_argument("--random_start_pose", action="store_true", default=False)
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)
@@ -26,13 +27,14 @@ if __name__ == "__main__":
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
-    
+    ## safety gym
     parser.add_argument("--image_size", type=int, default=2)
     parser.add_argument("--vector_env", default=False, action="store_true")
     parser.add_argument("--action_repeat", type=int, default=2)
     parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
+    parser.add_argument("--pseudo_lidar", action="store_true", default=False)
 
     # Adjacency Network Parameters
     parser.add_argument("--load_adj_net", default=False, action="store_true")
@@ -74,51 +76,35 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_crit_lr", default=1e-3, type=float)
     parser.add_argument("--ctrl_discount", default=0.95, type=float)
 
-    # PPO controller Parameters
-    parser.add_argument("--PPO", action='store_true', default=False)
-    parser.add_argument("--ppo_ctrl_batch_size", default=4096, type=int)
-    parser.add_argument("--ppo_ctrl_buffer_size", default=4096, type=int)
-    parser.add_argument("--ppo_gae_lambda", default=0.95, type=float)
-    parser.add_argument("--ppo_gamma", default=0.95, type=float)
-    parser.add_argument("--ppo_num_minibatches", default=32, type=int)
-    parser.add_argument("--ppo_clip_coef", default=0.2, type=float)
-    parser.add_argument("--ppo_clip_vloss", default=True, type=bool)
-    parser.add_argument("--ppo_norm_adv", default=True, type=bool)
-    parser.add_argument("--ppo_max_grad_norm", default=0.5, type=float)
-    parser.add_argument("--ppo_vf_coef", default=0.5, type=float)
-    parser.add_argument("--ppo_ent_coef", default=0.2, type=float)
-    parser.add_argument("--ppo_target_kl", default=None, type=float)
-    parser.add_argument("--ppo_update_epochs", default=10, type=int)
-    parser.add_argument("--ppo_lr", default=1e-4, type=float)
-    parser.add_argument("--ppo_hidden_dim", default=300, type=int)
-    parser.add_argument("--ppo_weight_decay", default=None, type=float)
-
     # Safety Subgoal Parameters
-    parser.add_argument("--modelbased_safety", action='store_true', default=False)
     parser.add_argument("--modelfree_safety", action='store_true', default=False)
-    parser.add_argument("--cumul_modelbased_safety", action='store_true', default=False)
     parser.add_argument("--img_horizon", default=20, type=int)    
     parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
-    # Cost Model Parameters
+    ## Cost Model Parameters
+    parser.add_argument("--cost_model", action='store_true', default=False)
+    parser.add_argument("--cm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--cost_oracle", action='store_true', default=False)
-    parser.add_argument("--controller_safe_model", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
     parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
+    parser.add_argument("--cm_lr", default=1e-3, type=float)
     parser.add_argument("--cm_frame_stack_num", default=1, type=int)
+    parser.add_argument("--safe_model_loss_coef", default=1., type=float)
 
     # Safety Controller Parameters
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
-    parser.add_argument("--safe_model_loss_coef", default=1., type=float)
-    # WorldModel Parameters
-    parser.add_argument("--wm_batch_size", default=256, type=int) # 20 episodes
-    parser.add_argument("--wm_train_freq", default=20, type=int) # 20 episodes
+    ## WorldModel Parameters
+    parser.add_argument("--cm_train_on_dataset", action='store_true', default=False) # to avoid wm explosion in beggining
+    parser.add_argument("--wm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
+    parser.add_argument("--wm_pretrain_epoches", default=20, type=int) # to avoid wm explosion in beggining
+    parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
+    parser.add_argument("--wm_batch_size", default=256, type=int)
+    parser.add_argument("--wm_train_freq", default=20, type=int)
     parser.add_argument("--cost_memmory", action='store_true', default=False)
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)
-    parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--num_networks", default=8, type=int)
     parser.add_argument("--num_elites", default=6, type=int)
     parser.add_argument("--pred_hidden_size", default=200, type=int)
@@ -151,20 +137,11 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    assert not args.modelbased_safety or (args.world_model and args.modelbased_safety), \
-            " to train safety you need world model"
-    assert not args.cumul_modelbased_safety or (args.modelbased_safety and args.cumul_modelbased_safety)
     assert args.img_horizon <= args.manager_propose_freq
-    assert not args.controller_safe_model or \
-        ( (args.controller_safe_model and args.domain_name == "Safexp") or \
-          (args.controller_safe_model and args.domain_name != "Safexp" and args.world_model)
+    assert not args.cost_model or \
+        ( (args.cost_model and args.domain_name == "Safexp") or \
+          (args.cost_model and args.domain_name != "Safexp" and args.world_model)
         )
-
-    # PPO
-    args.ppo_minibatch_size = int(args.ppo_ctrl_batch_size // args.ppo_num_minibatches)
-    if args.PPO:
-        args.ctrl_noise_sigma = None
-        assert args.ppo_ctrl_batch_size == args.ppo_ctrl_buffer_size
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
         args.man_rew_scale = 1.0
