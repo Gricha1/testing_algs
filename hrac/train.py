@@ -722,7 +722,17 @@ def run_hrac(args):
                     train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
                                         batch_size=args.wm_batch_size, episode_num=episode_num,
                                         total_timesteps=total_timesteps)
-
+                if args.cm_pretrain:
+                    if args.domain_name == "Safexp":
+                        buffer = cost_model_buffer
+                    else:
+                        buffer = world_model_buffer
+                    train_cost_model(buffer,
+                                        cost_model_iterations=env.max_len() if args.domain_name == "Safexp" else 600,
+                                        cost_model_batch_size=args.cost_model_batch_size,
+                                        total_timesteps=total_timesteps,
+                                        train_on_dataset=args.cm_train_on_dataset,
+                                        dataset=env.safe_dataset if env_name == "SafeGym" else None)
         ## Logging Parameters
         total_timesteps = 0
         timesteps_since_eval = 0
