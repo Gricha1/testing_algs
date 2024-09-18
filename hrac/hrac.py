@@ -637,8 +637,17 @@ class Controller(object):
                  absolute_goal=False, 
                  cost_function=None,
                  controller_imagination_safety_loss=False,
-                 manager=None, controller_grad_clip=0, controller_safety_coef=0,                 
-    ):
+                 manager=None, controller_grad_clip=0, controller_safety_coef=0, 
+                 use_lagrange=False,
+                 pid_kp=1e-6,
+                 pid_ki=1e-7,
+                 pid_kd=1e-7,
+                 pid_d_delay=10,
+                 pid_delta_p_ema_alpha=0.95,
+                 pid_delta_d_ema_alpha=0.95,
+                 penalty_max=100.,
+                 lagrangian_multiplier_init=0.0,
+                 cost_limit=25.,):
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
@@ -670,7 +679,32 @@ class Controller(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
+        
+        # Lagrange
+        self.use_lagrange = use_lagrange
+        if self.use_lagrange:
+            self.cost_criterion = nn.SmoothL1Loss()
+            self.cost_critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+            self.cost_critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
 
+            self.cost_critic_target.load_state_dict(self.cost_critic.state_dict())
+            self.cost_critic_optimizer = torch.optim.Adam(self.cost_critic.parameters(),
+                lr=critic_lr, weight_decay=0.0001)
+            
+            self._pid_kp = pid_kp
+            self._pid_ki = pid_ki
+            self._pid_kd = pid_kd
+            self._pid_d_delay = pid_d_delay
+            self._pid_delta_p_ema_alpha = pid_delta_p_ema_alpha
+            self._pid_delta_d_ema_alpha = pid_delta_d_ema_alpha
+            self._penalty_max = penalty_max
+            self._pid_i = lagrangian_multiplier_init
+            self._cost_ds = deque(maxlen=self._pid_d_delay)
+            self._cost_ds.append(0.0)
+            self._delta_p = 0.0
+            self._cost_d = 0.0
+            self._cost_limit = cost_limit
+            self._cost_penalty = 0.0
 
     def clean_obs(self, state, dims=2):
         if self.no_xy:
@@ -711,15 +745,19 @@ class Controller(object):
         return self.critic(state, sg, action)
 
     def actor_loss(self, state, sg, init_state, cost_model):
-        actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
+        actions = self.actor(state, sg)
+        eval_loss = -self.critic.Q1(state, sg, actions).mean()
+        safety_loss = 0
         if self.controller_imagination_safety_loss:
             safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
                                                                 controller_policy=self, 
                                                                 safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=False,
-                                                                train=True)
-            actor_loss += self.controller_safety_coef * safety_loss.mean()
-        return actor_loss
+                                                                train=True).mean()
+        cost_loss = 0
+        if self.use_lagrange:
+            cost_loss = self.cost_critic.Q1(state, sg, actions).mean() 
+        return eval_loss, safety_loss, cost_loss
 
     def subgoal_transition(self, state, subgoal, next_state):
         if self.absolute_goal:
@@ -738,10 +776,14 @@ class Controller(object):
 
     def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005):
         avg_act_loss, avg_crit_loss = 0., 0.
+        avg_eval_loss, avg_cost_loss, avg_cost_critic_loss = 0., 0., 0.
         debug_info = {}
         for it in range(iterations):              
-
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+            if self.use_lagrange:
+                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(batch_size)
+                cost = get_tensor(c)
+            else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
             next_g = get_tensor(self.subgoal_transition(x, sg, y))
             state = self.clean_obs(get_tensor(x))
@@ -775,9 +817,34 @@ class Controller(object):
             critic_loss.backward()
             self.critic_optimizer.step()
 
-            # Compute actor loss
-            actor_loss = self.actor_loss(state, sg, init_state, cost_model)
+            cost_critic_loss = 0
+            if self.use_lagrange:
+                # Cost critic
+                target_C1, target_C2 = self.cost_critic_target(next_state, next_g, next_action)
+                # TODO: check max 
+                target_C = torch.max(target_C1, target_C2)
+                target_C = cost + (done * discount * target_C)
+                target_C_no_grad = target_C.detach()
 
+                # Get current C estimate
+                current_C1, current_C2 = self.cost_critic(state, sg, action)
+
+                # Compute critic loss
+                cost_critic_loss = self.cost_criterion(current_C1, target_C_no_grad) +\
+                            self.cost_criterion(current_C2, target_C_no_grad)
+
+                # Optimize the critic
+                self.cost_critic_optimizer.zero_grad()
+                cost_critic_loss.backward()
+                self.cost_critic_optimizer.step()
+
+            # Compute actor loss
+            eval_loss, safety_loss, cost_loss = self.actor_loss(state, sg, init_state, cost_model)
+            if self.use_lagrange:
+                actor_loss = (eval_loss + self._cost_penalty * cost_loss) / (1 + self._cost_penalty)
+            else:
+                actor_loss = eval_loss
+            actor_loss += self.controller_safety_coef * safety_loss
             # Optimize the actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -788,21 +855,47 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
+            avg_eval_loss += eval_loss
+            avg_cost_critic_loss += cost_critic_loss
+            avg_cost_loss += cost_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
+            if self.use_lagrange:
+                for param, target_param in zip(self.cost_critic.parameters(),
+                                           self.cost_critic_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-        return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
+        return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info, \
+                avg_eval_loss / iterations, avg_cost_critic_loss / iterations, avg_cost_loss / iterations
+    
+    def pid_update(self, ep_cost_avg):
+        delta = float(ep_cost_avg - self._cost_limit)
+        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
+        a_p = self._pid_delta_p_ema_alpha
+        self._delta_p *= a_p
+        self._delta_p += (1 - a_p) * delta
+        a_d = self._pid_delta_d_ema_alpha
+        self._cost_d *= a_d
+        self._cost_d += (1 - a_d) * float(ep_cost_avg)
+        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
+        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+        self._cost_penalty = max(0.0, pid_o)
+        self._cost_ds.append(self._cost_d)
 
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
+        if self.use_lagrange:
+            torch.save(self.cost_critic.state_dict(), "{}/{}/{}_{}_ControllerCostCritic.pth".format(dir, exp_num, env_name, algo))
+            torch.save(self.cost_critic_target.state_dict(), "{}/{}/{}_{}_ControllerCostCriticTarget.pth".format(dir, exp_num, env_name, algo))
 
     def load(self, dir, env_name, algo, exp_num):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))

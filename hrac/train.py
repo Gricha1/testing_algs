@@ -519,6 +519,16 @@ def run_hrac(args):
         controller_grad_clip=args.controller_grad_clip,
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
+        use_lagrange=args.ctrl_use_lagrange,
+        pid_kp=args.ctrl_pid_kp,
+        pid_ki=args.ctrl_pid_ki,
+        pid_kd=args.ctrl_pid_kd,
+        pid_d_delay=args.ctrl_pid_d_delay,
+        pid_delta_p_ema_alpha=args.ctrl_pid_delta_p_ema_alpha,
+        pid_delta_d_ema_alpha=args.ctrl_pid_delta_d_ema_alpha,
+        penalty_max=args.ctrl_penalty_max,
+        lagrangian_multiplier_init=args.ctrl_lagrangian_multiplier_init,
+        cost_limit=args.ctrl_cost_limit,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -533,14 +543,14 @@ def run_hrac(args):
         ctrl_noise = utils.NormalNoise(sigma=args.ctrl_noise_sigma)
 
     manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size, cost_memmory=args.use_lagrange)
-    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size)
+    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, cost_memmory=args.ctrl_use_lagrange)
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
                          ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
                          ep_manager_reward, total_timesteps):
         print("train controller")
-        ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(
+        ctrl_act_loss, ctrl_crit_loss, debug_info_controller, ctrl_eval, ctrl_cost_crit_loss, ctrl_cost_loss = controller_policy.train(
             controller_buffer, 
             cost_model=cost_model,
             iterations=episode_timesteps,
@@ -552,6 +562,11 @@ def run_hrac(args):
             print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
         writer.add_scalar("data/controller_actor_loss", ctrl_act_loss, total_timesteps)
         writer.add_scalar("data/controller_critic_loss", ctrl_crit_loss, total_timesteps)
+        if args.ctrl_use_lagrange:
+            writer.add_scalar("data/controller_eval_loss", ctrl_eval, total_timesteps)
+            writer.add_scalar("data/controller_cost_critic_loss", ctrl_cost_crit_loss, total_timesteps)
+            writer.add_scalar("data/controller_cost_loss", ctrl_cost_loss, total_timesteps)
+            writer.add_scalar("data/controller_lagrange_mult", controller_policy._cost_penalty, total_timesteps)
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
 
@@ -941,6 +956,8 @@ def run_hrac(args):
                 controller_episode_cost += 0
                 if args.use_lagrange:
                     manager_policy.pid_update(episode_cost)
+                if args.ctrl_use_lagrange:
+                    controller_policy.pid_update(episode_cost)
 
             if args.inner_dones:
                 ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
@@ -960,8 +977,12 @@ def run_hrac(args):
                     world_model_buffer.add(
                         (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
             
-            controller_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+            if args.ctrl_use_lagrange:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, cost, float(ctrl_done), [], []))
+            else:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
 
             state = next_state
             goal = next_goal

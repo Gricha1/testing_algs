@@ -121,7 +121,18 @@ if __name__ == "__main__":
     parser.add_argument("--pid_delta_d_ema_alpha", default=0.95, type=float)
     parser.add_argument("--penalty_max", default=1e-6, type=float)
     parser.add_argument("--lagrangian_multiplier_init", default=0., type=float)
-    parser.add_argument("--cost_limit", default=25., type=float)
+    parser.add_argument("--cost_limit", default=40., type=float)
+
+    parser.add_argument("--ctrl_use_lagrange", action='store_true', default=False)
+    parser.add_argument("--ctrl_pid_kp", default=1e-6, type=float)
+    parser.add_argument("--ctrl_pid_ki", default=1e-7, type=float)
+    parser.add_argument("--ctrl_pid_kd", default=1e-7, type=float)
+    parser.add_argument("--ctrl_pid_d_delay", default=10, type=int)
+    parser.add_argument("--ctrl_pid_delta_p_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--ctrl_pid_delta_d_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--ctrl_penalty_max", default=1e-6, type=float)
+    parser.add_argument("--ctrl_lagrangian_multiplier_init", default=0., type=float)
+    parser.add_argument("--ctrl_cost_limit", default=40., type=float)
 
     # Noise Parameters
     parser.add_argument("--noise_type", default="normal", type=str)
