@@ -208,6 +208,7 @@ class GoalConditionedWrapper(ObservationWrapper):
 
         super(GoalConditionedWrapper, self).__init__(env)
 
+        self._env = env
         self.robot_name = ""
         if "point" in self.robot_base:
             self.robot_name = "point"
@@ -215,6 +216,15 @@ class GoalConditionedWrapper(ObservationWrapper):
         elif "car" in self.robot_base:
             self.robot_name = "car"
             obs_shape = 42
+        elif "doggo" in self.robot_base:
+            self.robot_name = "doggo"
+            obs_dict = self._env.env.obs_space_dict
+            obs_shape = 2 # x, y
+            for key_ in obs_dict:
+                if key_ != "goal_lidar":
+                    assert len(obs_dict[key_].shape) == 1
+                    key_len = obs_dict[key_].shape[0]
+                    obs_shape += key_len
         else:
             assert 1 == 0, "dont know robot name"
 
@@ -236,7 +246,6 @@ class GoalConditionedWrapper(ObservationWrapper):
                                     dtype=wrapped_observation_space.dtype)}
         
         self.observation_space.spaces.update(gc_spaces)
-        self._env = env
 
     def observation(self, observation):
         # ----
@@ -283,6 +292,24 @@ class GoalConditionedWrapper(ObservationWrapper):
                                                     magnetometer,
                                                     ballangvel_rear,
                                                     ballquat_rear])
+        elif self.robot_name == "doggo":                   
+            obs_dict = self._env.env.obs_space_dict
+            last_idx = 0
+            new_vec_observation = agent_xy
+            for key_ in obs_dict:
+                if key_ == "goal_lidar" or key_ == "hazards_lidar":
+                    assert len(obs_dict[key_].shape) == 1
+                    key_len = obs_dict[key_].shape[0]
+                    if key_ == "hazards_lidar":
+                        hazards_lidar = observation[last_idx: (last_idx + key_len)]    
+                    last_idx += key_len
+                else:
+                    assert len(obs_dict[key_].shape) == 1
+                    key_len = obs_dict[key_].shape[0]
+                    obs_part = observation[last_idx: (last_idx + key_len)]
+                    new_vec_observation = np.concatenate([new_vec_observation, obs_part])
+                    last_idx += key_len
+                
         if self.pseudo_lidar:
             hazards_poses = [hazard[:2] for hazard in self.hazards_pos]
             hazards_flat = []
