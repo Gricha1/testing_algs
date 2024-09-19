@@ -6,7 +6,7 @@ fi
 
 cd ../..
 python main.py --domain_name Safexp \
-               --task_name PointGoal1 \
+               --task_name PointGoal2 \
                --env_name SafeGym \
                --goal_conditioned \
                --vector_env \
