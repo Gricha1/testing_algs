@@ -40,7 +40,7 @@ RUN cd /usr/home/workspace/safety-gym \
 
 # install torch with cuda support
 RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113 \
-    && pip install install tensorflow \
+    && pip install tensorflow \
     && pip install wandb moviepy opencv-python
 
 # additional pip deps
@@ -54,7 +54,7 @@ RUN apt-get install libopenmpi-dev
 ADD requirements.txt /tmp/
 RUN pip install -r /tmp/requirements.txt
 RUN pip install lightgbm
-RUN pip install pip install scikit-learn
+RUN pip install scikit-learn
 
 WORKDIR /usr/home/workspace
 
