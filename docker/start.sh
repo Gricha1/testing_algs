@@ -13,7 +13,7 @@ fi
 if [ -z "$3" ]; then
     additional_name=
 else
-    additional_name=$2
+    additional_name=$3
 fi
 
 cd ..
