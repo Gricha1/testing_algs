@@ -147,6 +147,9 @@ def run(logger, config, args):
             logger.log_tabular('EpCost', average_only=True)
             logger.log_tabular('TotalEnvInteracts', total_len)
             logger.log_tabular('Time', time.time()-start_time)
+            logger.log_tabular('LossDyna', epoch)
+            logger.log_tabular('CostPredUnSafeAcc', epoch)
+            logger.log_tabular('CostPredSafeAcc', epoch)
             logger.dump_tabular()
             total_epi += 1
         # training the model
