@@ -22,7 +22,7 @@ python main.py --domain_name Safexp \
                --cm_frame_stack_num 1 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --coef_safety_modelfree 0.05 \
-               --controller_safety_coef 0.001 \
+               --controller_safety_coef 0.05 \
                --max_timesteps 4000000 \
                --img_horizon 15 \
                --manager_propose_freq 20 \

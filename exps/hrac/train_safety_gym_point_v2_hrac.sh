@@ -15,7 +15,7 @@ python main.py --domain_name Safexp \
                --manager_propose_freq 20 \
                --img_horizon 15 \
                --train_manager_freq 10 \
-               --goal_loss_coeff 10 \
+               --goal_loss_coeff 20 \
                --validation_without_image --eval_freq 30000 \
                --man_rew_scale 0.1 \
                --max_timesteps 4000000 \
