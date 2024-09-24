@@ -4,18 +4,13 @@ else
     seed=$1
 fi
 
-if [ -z "$2" ]; then
-    level=1
-else
-    level=$2
-fi
-
 
 
 cd ../..
 python main.py --domain_name Safexp \
-               --task_name PointGoal$level \
+               --task_name PointGoal1 \
                --env_name SafeGym \
+               --action_repeat 1 \
                --goal_conditioned \
                --vector_env \
                --seed $seed \
@@ -27,8 +22,8 @@ python main.py --domain_name Safexp \
                --cost_model \
                --cm_frame_stack_num 1 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
-               --coef_safety_modelfree 0.01 \
-               --controller_safety_coef 10.0 \
+               --coef_safety_modelfree 0.05 \
+               --controller_safety_coef 0.05 \
                --max_timesteps 4000000 \
                --img_horizon 15 \
                --manager_propose_freq 20 \
