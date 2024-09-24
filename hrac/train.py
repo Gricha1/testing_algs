@@ -811,6 +811,7 @@ def run_hrac(args):
                             if not(man_safety_loss is None):
                                 print("Manager safety loss: {:.3f}".format(man_safety_loss))
 
+                    print("TB dir:", output_dir)
                     print("*************")
                     print()
 
