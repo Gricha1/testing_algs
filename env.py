@@ -26,8 +26,7 @@ class ActionRepeatWrapper(Wrapper):
         self.action_repeat = repeat
         self._max_episode_steps = env.config["num_steps"]//repeat
         self.binary_cost = binary_cost
-
-
+    
     def max_len(self):
         return self._max_episode_steps
 
@@ -39,15 +38,25 @@ class ActionRepeatWrapper(Wrapper):
         goal_met = False
         if "goal_met" in info:
             goal_met = True
+        # fix cost bug with action repeat and done
+        agent_action_repeat_xy = [self.env.robot_pos]
+        if done or self.action_repeat==1:
+            # fix cost bug with action repeat
+            info["agent_action_repeat_xy"] = agent_action_repeat_xy
+            return observation, reward, done, info
+        done1 = False
         for i in range(self.action_repeat-1):
-            if done or self.action_repeat==1:
-                return observation, reward, done, info
+            if done1:
+                # fix cost bug with action repeat and done
+                track_info["agent_action_repeat_xy"] = agent_action_repeat_xy
+                return observation1, track_reward, done1, track_info
             observation1, reward1, done1, info1 = self.env.step(action)
             # fix bug with goal met on goal continue
             if "goal_met" in info1:
                 goal_met = True
             track_info["cost"] += info1["cost"]
             track_reward += reward1
+            agent_action_repeat_xy.append(self.env.robot_pos)
 
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
@@ -55,6 +64,8 @@ class ActionRepeatWrapper(Wrapper):
         # fix bug with goal met on goal continue
         if goal_met:
             track_info["goal_met"] = True
+        # fix cost bug with action repeat
+        track_info["agent_action_repeat_xy"] = agent_action_repeat_xy
         return observation1, track_reward, done1, track_info
     
 
@@ -418,7 +429,6 @@ class SafetyEnvWrapper:
         if len(state.shape) == 1:
             current_hazards_tensor = np.array(current_hazards)
             distances = np.sqrt(np.sum((state[:2] - current_hazards_tensor) ** 2, axis=1))
-            #distances = torch.sqrt(torch.sum((state[:2] - current_hazards_tensor) ** 2, axis=1))
             cost = 1 if np.sum(distances < self.hazards_size) > 0 else 0
         else:
             batch_size = state.shape[0]
@@ -437,11 +447,12 @@ class SafetyEnvWrapper:
     
     def step(self, action):
         new_obs, reward, done, info = self.env.step(action)
-        if self.dict_obs:
-            state = new_obs["observation"]
-        else:
-            state = new_obs
-        info["safety_cost"] = self.cost_func(state)
+
+        # get cost
+        info["safety_cost"] = 0
+        agent_action_repeat_xy = info["agent_action_repeat_xy"]
+        for xy in agent_action_repeat_xy:
+            info["safety_cost"] += self.cost_func(xy)
 
         return new_obs, reward, done, info
 
