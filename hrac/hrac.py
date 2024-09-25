@@ -329,7 +329,7 @@ class Manager(object):
 
     def train(self, controller_policy, replay_buffer, cost_model, 
               iterations, batch_size=100, discount=0.99,
-              tau=0.005, a_net=None, r_margin=None):
+              tau=0.005, a_net=None, r_margin=None, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         avg_eval_loss, avg_cost_loss, avg_cost_critic_loss = 0., 0., 0.
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
@@ -466,6 +466,9 @@ class Manager(object):
             for param, target_param in zip(self.actor.parameters(),
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+            if self.use_lagrange and ep_cost is not None:
+                self.pid_update(ep_cost)
 
         debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
         if self.modelfree_safety:
@@ -773,7 +776,7 @@ class Controller(object):
                    states[:, :, :self.goal_dim]
         return subgoals
 
-    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005):
+    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         avg_eval_loss, avg_cost_loss, avg_cost_critic_loss = 0., 0., 0.
         debug_info = {}
@@ -869,6 +872,9 @@ class Controller(object):
 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+            if self.use_lagrange and ep_cost is not None:
+                self.pid_update(ep_cost)
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info, \
                 avg_eval_loss / iterations, avg_cost_critic_loss / iterations, avg_cost_loss / iterations

@@ -2,6 +2,7 @@ import os
 import time
 import copy
 from math import ceil
+from collections import deque
 
 import torch
 import numpy as np
@@ -556,7 +557,11 @@ def run_hrac(args):
             iterations=episode_timesteps,
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
-            tau=args.ctrl_soft_sync_rate)
+            tau=args.ctrl_soft_sync_rate,
+            ep_cost=np.mean(pid_costs) if episode_num > 10 else None
+        )
+        if controller_policy.use_lagrange and episode_num > 10:
+            print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
             print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
             print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
@@ -567,6 +572,9 @@ def run_hrac(args):
             writer.add_scalar("data/controller_cost_critic_loss", ctrl_cost_crit_loss, total_timesteps)
             writer.add_scalar("data/controller_cost_loss", ctrl_cost_loss, total_timesteps)
             writer.add_scalar("data/controller_lagrange_mult", controller_policy._cost_penalty, total_timesteps)
+            writer.add_scalar("pid/ctrl_pid_i", controller_policy._pid_i, total_timesteps)
+            writer.add_scalar("pid/ctrl_cost_d", controller_policy._cost_d, total_timesteps)
+            writer.add_scalar("pid/ctrl_delta_p", controller_policy._delta_p, total_timesteps)
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
 
@@ -767,6 +775,8 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
+        pid_costs = deque(maxlen=10)
+        total_cost = 0
 
         ## Main training ...
         print("start training...")
@@ -818,16 +828,23 @@ def run_hrac(args):
                                                                  batch_size=args.man_batch_size, 
                                                                  discount=args.man_discount, 
                                                                  tau=args.man_soft_sync_rate,
-                                                                 a_net=a_net, r_margin=r_margin)
+                                                                 a_net=a_net, r_margin=r_margin,
+                                                                 ep_cost=np.mean(pid_costs) if episode_num > 10 else None)
+                        if manager_policy.use_lagrange and episode_num > 10:
+                            print(f'Train manager with pid. Use avg cost {np.mean(pid_costs)}')
                         
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
                         writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
+                        writer.add_scalar("pid/avg_cost", np.mean(pid_costs), total_timesteps)
                         if args.use_lagrange:
                             writer.add_scalar("data/manager_eval_loss", man_eval_loss, total_timesteps)
                             writer.add_scalar("data/manager_cost_critic_loss", man_cost_crit_loss, total_timesteps)
                             writer.add_scalar("data/manager_cost_loss", man_cost_loss, total_timesteps)
                             writer.add_scalar("data/lagrange_mult", manager_policy._cost_penalty, total_timesteps)
+                            writer.add_scalar("pid/pid_i", manager_policy._pid_i, total_timesteps)
+                            writer.add_scalar("pid/cost_d", manager_policy._cost_d, total_timesteps)
+                            writer.add_scalar("pid/delta_p", manager_policy._delta_p, total_timesteps)
 
                         for key_ in debug_maganer_info:
                             if type(debug_maganer_info[key_]) == list:
@@ -859,6 +876,7 @@ def run_hrac(args):
                         writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
                         writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
                         writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
+                        writer.add_scalar("eval/cost_rate", total_cost / total_timesteps, total_timesteps)
                         for key_ in validation_date:
                             if type(validation_date[key_]) == list:
                                 validation_date[key_] = np.mean(validation_date[key_])
@@ -943,6 +961,7 @@ def run_hrac(args):
 
             next_tup, manager_reward, done, info = env.step(action_copy)
             cost = info["safety_cost"]
+            total_cost += cost
 
             manager_transition[4] += manager_reward * args.man_rew_scale
             if args.use_lagrange:
@@ -964,10 +983,6 @@ def run_hrac(args):
             if "Safe" in args.env_name:
                 episode_cost += cost
                 controller_episode_cost += 0
-                if args.use_lagrange:
-                    manager_policy.pid_update(episode_cost)
-                if args.ctrl_use_lagrange:
-                    controller_policy.pid_update(episode_cost)
 
             if args.inner_dones:
                 ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
@@ -1002,6 +1017,8 @@ def run_hrac(args):
             timesteps_since_eval += 1
             timesteps_since_manager += 1
             timesteps_since_subgoal += 1
+            if done:
+                pid_costs.append(episode_cost)
 
             ## logging world model performance
             if args.world_model and episode_num > 1:
