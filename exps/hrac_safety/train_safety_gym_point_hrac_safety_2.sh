@@ -22,11 +22,12 @@ python main.py --domain_name Safexp \
                --cost_model \
                --cm_frame_stack_num 1 \
                --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
-               --coef_safety_modelfree 0.05 \
-               --controller_safety_coef 0.05 \
+               --coef_safety_modelfree 0.001 \
+               --controller_safety_coef 0.001 \
                --max_timesteps 4000000 \
-               --img_horizon 15 \
-               --manager_propose_freq 20 \
+               --img_horizon 10 \
+               --manager_propose_freq 10 \
+               --train_manager_freq 5 \
                --wm_pretrain \
                --wm_pretrain_epoches 100 \
                --wm_n_initial_exploration_steps 30000 \
