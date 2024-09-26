@@ -56,7 +56,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             if env_name == "SafeAntMaze":
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafeGym":
-                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                if args.cost_model:
+                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
@@ -375,11 +376,12 @@ def run_hrac(args):
         action_dim = env.action_space.shape[0]
         env.state_dim = state_dim
         # test, cost unique = [0, 1, 2]
-        print("get safedataset safetygym!!!")
-        start_time = time.time()
-        env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
-        end_time = time.time()
-        print("time for safe dataset:", end_time-start_time)
+        if args.cost_model:
+            print("get safedataset safetygym!!!")
+            start_time = time.time()
+            env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
+            end_time = time.time()
+            print("time for safe dataset:", end_time-start_time)
         renderer_args = {"plot_subgoal": True, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": False,

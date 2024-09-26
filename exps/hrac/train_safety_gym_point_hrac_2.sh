@@ -10,6 +10,7 @@ python main.py --domain_name Safexp \
                --env_name SafeGym \
                --goal_conditioned \
                --vector_env \
+               --action_repeat 2 \
                --seed $seed \
                --cost_memmory \
                --r_margin_pos 0.5 \
@@ -18,6 +19,8 @@ python main.py --domain_name Safexp \
                --img_horizon 10 \
                --train_manager_freq 5 \
                --goal_loss_coeff 20 \
+               --subgoal_lower_x 1.0 \
+               --subgoal_lower_y 1.0 \
                --validation_without_image --eval_freq 30000 \
                --man_rew_scale 0.1 \
                --max_timesteps 4000000 \
