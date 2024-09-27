@@ -92,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
 
     # Safety Controller Parameters
+    parser.add_argument("--controller_cumul_img_safety", action='store_true', default=False)
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
     ## WorldModel Parameters

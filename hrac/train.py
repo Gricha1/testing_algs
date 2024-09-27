@@ -511,6 +511,7 @@ def run_hrac(args):
         controller_grad_clip=args.controller_grad_clip,
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
+        controller_cumul_img_safety=args.controller_cumul_img_safety,
     )
 
     calculate_controller_reward = get_reward_function(
