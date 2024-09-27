@@ -67,6 +67,7 @@ if __name__ == "__main__":
     parser.add_argument("--man_discount", default=0.99, type=float)
 
     # TD3 Controller Parameters
+    parser.add_argument("--train_only_td3", action='store_true', default=False)
     parser.add_argument("--controller_grad_clip", default=0, type=float)
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
     parser.add_argument("--ctrl_batch_size", default=128, type=int)
