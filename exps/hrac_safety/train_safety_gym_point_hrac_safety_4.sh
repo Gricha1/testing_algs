@@ -27,8 +27,8 @@ python main.py --domain_name Safexp \
                --goal_loss_coeff 20.0 \
                --r_margin_pos 0.5 \
                --r_margin_pos 0.7 \
-               --coef_safety_modelfree 0.01 \
-               --controller_safety_coef 0.01 \
+               --coef_safety_modelfree 1.0 \
+               --controller_safety_coef 0.001 \
                --max_timesteps 4000000 \
                --img_horizon 10 \
                --manager_propose_freq 10 \

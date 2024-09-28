@@ -15,14 +15,12 @@ python main.py --domain_name Safexp \
                --cost_memmory \
                --r_margin_pos 0.5 \
                --r_margin_neg 0.7 \
+               --man_rew_scale 10.0 \
                --manager_propose_freq 10 \
                --img_horizon 10 \
                --train_manager_freq 5 \
-               --goal_loss_coeff 20 \
-               --subgoal_lower_x 2.5 \
-               --subgoal_lower_y 2.5 \
+               --goal_loss_coeff 0.01 \
                --validation_without_image --eval_freq 30000 \
-               --man_rew_scale 0.1 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --not_use_wandb
