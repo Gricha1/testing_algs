@@ -601,13 +601,16 @@ def run_hrac(args):
                              cost_model_batch_size=128,
                              total_timesteps=0,
                              train_on_dataset=False,
-                             dataset=None):
+                             dataset=None,
+                             episode_num=0):
             print("train cost model")
             debug_info = cost_model.train_cost_model(replay_buffer, 
                                                      cost_model_iterations=cost_model_iterations,
                                                      cost_model_batch_size=cost_model_batch_size,
                                                      train_on_dataset=train_on_dataset,
                                                      dataset=dataset)
+            if episode_num % 10 == 0:
+                print("cost model loss: {:.3f}".format(np.mean(debug_info["safe_model_loss"])))
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
@@ -731,11 +734,12 @@ def run_hrac(args):
                     else:
                         buffer = world_model_buffer
                     train_cost_model(buffer,
-                                        cost_model_iterations=env.max_len() if args.domain_name == "Safexp" else 600,
+                                        cost_model_iterations=env.max_len if args.domain_name == "Safexp" else 600,
                                         cost_model_batch_size=args.cost_model_batch_size,
                                         total_timesteps=total_timesteps,
                                         train_on_dataset=args.cm_train_on_dataset,
-                                        dataset=env.safe_dataset if env_name == "SafeGym" else None)
+                                        dataset=env.safe_dataset if env_name == "SafeGym" else None,
+                                        episode_num=episode_num)
         ## Logging Parameters
         total_timesteps = 0
         timesteps_since_eval = 0
