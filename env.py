@@ -413,6 +413,10 @@ class SafetyEnvWrapper:
     @property
     def goal_size(self):
         return self.env.goal_size
+    
+    @property
+    def max_len(self):
+        return self.env.max_len()
 
     @property
     def hazards_size(self):
