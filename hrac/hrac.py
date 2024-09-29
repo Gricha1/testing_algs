@@ -639,7 +639,8 @@ class Controller(object):
                  absolute_goal=False, 
                  cost_function=None,
                  controller_imagination_safety_loss=False,
-                 manager=None, controller_grad_clip=0, controller_safety_coef=0, 
+                 manager=None, controller_grad_clip=0, controller_safety_coef=0,
+                 controller_cumul_img_safety=False,
                  use_lagrange=False,
                  pid_kp=1e-6,
                  pid_ki=1e-7,
@@ -658,7 +659,8 @@ class Controller(object):
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
         self.absolute_goal = absolute_goal
-        self.criterion = nn.SmoothL1Loss()            
+        self.criterion = nn.SmoothL1Loss()  
+        self.controller_cumul_img_safety = controller_cumul_img_safety
 
         self.manager = manager
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
@@ -754,7 +756,7 @@ class Controller(object):
             safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
                                                                 controller_policy=self, 
                                                                 safety_cost=cost_model.safe_model,
-                                                                all_steps_safety=False,
+                                                                all_steps_safety=self.controller_cumul_img_safety,
                                                                 train=True).mean()
         cost_loss = 0
         if self.use_lagrange:

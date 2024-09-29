@@ -57,7 +57,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             if env_name == "SafeAntMaze":
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafeGym":
-                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                if args.cost_model:
+                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
                 x = safe_dataset[0]
                 true = safe_dataset[1]
@@ -376,11 +377,12 @@ def run_hrac(args):
         action_dim = env.action_space.shape[0]
         env.state_dim = state_dim
         # test, cost unique = [0, 1, 2]
-        print("get safedataset safetygym!!!")
-        start_time = time.time()
-        env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
-        end_time = time.time()
-        print("time for safe dataset:", end_time-start_time)
+        if args.cost_model:
+            print("get safedataset safetygym!!!")
+            start_time = time.time()
+            env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
+            end_time = time.time()
+            print("time for safe dataset:", end_time-start_time)
         renderer_args = {"plot_subgoal": True, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": False,
@@ -520,6 +522,7 @@ def run_hrac(args):
         controller_grad_clip=args.controller_grad_clip,
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
+        controller_cumul_img_safety=args.controller_cumul_img_safety,
         use_lagrange=args.ctrl_use_lagrange,
         pid_kp=args.ctrl_pid_kp,
         pid_ki=args.ctrl_pid_ki,
@@ -631,13 +634,16 @@ def run_hrac(args):
                              cost_model_batch_size=128,
                              total_timesteps=0,
                              train_on_dataset=False,
-                             dataset=None):
+                             dataset=None,
+                             episode_num=0):
             print("train cost model")
             debug_info = cost_model.train_cost_model(replay_buffer, 
                                                      cost_model_iterations=cost_model_iterations,
                                                      cost_model_batch_size=cost_model_batch_size,
                                                      train_on_dataset=train_on_dataset,
                                                      dataset=dataset)
+            if episode_num % 10 == 0:
+                print("cost model loss: {:.3f}".format(np.mean(debug_info["safe_model_loss"])))
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
@@ -761,11 +767,12 @@ def run_hrac(args):
                     else:
                         buffer = world_model_buffer
                     train_cost_model(buffer,
-                                        cost_model_iterations=env.max_len() if args.domain_name == "Safexp" else 600,
+                                        cost_model_iterations=env.max_len if args.domain_name == "Safexp" else 600,
                                         cost_model_batch_size=args.cost_model_batch_size,
                                         total_timesteps=total_timesteps,
                                         train_on_dataset=args.cm_train_on_dataset,
-                                        dataset=env.safe_dataset if env_name == "SafeGym" else None)
+                                        dataset=env.safe_dataset if env_name == "SafeGym" else None,
+                                        episode_num=episode_num)
         ## Logging Parameters
         total_timesteps = 0
         timesteps_since_eval = 0
@@ -860,6 +867,7 @@ def run_hrac(args):
                             if not(man_safety_loss is None):
                                 print("Manager safety loss: {:.3f}".format(man_safety_loss))
 
+                    print("TB dir:", output_dir)
                     print("*************")
                     print()
 
