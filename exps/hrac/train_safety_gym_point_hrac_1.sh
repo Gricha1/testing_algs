@@ -19,7 +19,7 @@ python main.py --domain_name Safexp \
                --manager_propose_freq 10 \
                --img_horizon 10 \
                --train_manager_freq 5 \
-               --goal_loss_coeff 0.01 \
+               --goal_loss_coeff 0.1 \
                --validation_without_image --eval_freq 30000 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \

@@ -22,13 +22,13 @@ python main.py --domain_name Safexp \
                --cost_model \
                --cm_frame_stack_num 1 \
                --cm_pretrain \
-               --cost_model_batch_size 256 \
+               --cost_model_batch_size 512 \
                --man_rew_scale 100.0 \
                --goal_loss_coeff 20.0 \
                --r_margin_pos 0.5 \
                --r_margin_pos 0.7 \
-               --coef_safety_modelfree 1.0 \
-               --controller_safety_coef 0.001 \
+               --coef_safety_modelfree 0.5 \
+               --controller_safety_coef 0.1 \
                --max_timesteps 4000000 \
                --img_horizon 10 \
                --manager_propose_freq 10 \
