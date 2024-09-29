@@ -433,8 +433,8 @@ def run_hrac(args):
             name=wandb_run_name,
             config=args
         )
-    if not os.path.exists("./results"):
-        os.makedirs("./results")
+    if not os.path.exists("/logdir/results"):
+        os.makedirs("/logdir/results")
     if args.save_models:
         exp_num = 0
         while os.path.exists(f"/logdir/models/{exp_num}"):
@@ -1085,5 +1085,5 @@ def run_hrac(args):
         writer.close()
 
         output_df = pd.DataFrame(output_data)
-        output_df.to_csv(os.path.join("./results", file_name+".csv"), float_format="%.4f", index=False)
+        output_df.to_csv(os.path.join("/logdir/results", file_name+".csv"), float_format="%.4f", index=False)
         print("Training finished.")
