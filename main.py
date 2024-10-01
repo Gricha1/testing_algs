@@ -95,6 +95,8 @@ if __name__ == "__main__":
     parser.add_argument("--controller_cumul_img_safety", action='store_true', default=False)
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
+    parser.add_argument("--use_safe_threshold", action='store_true', default=False)
+    parser.add_argument("--cost_budget", default=25, type=float)
     ## WorldModel Parameters
     parser.add_argument("--cm_train_on_dataset", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--wm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
@@ -126,7 +128,9 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    assert args.img_horizon <= args.manager_propose_freq
+    if args.use_safe_threshold:
+        assert args.controller_cumul_img_safety
+    assert args.controller_imagination_safety_loss and args.img_horizon <= args.manager_propose_freq
     assert not args.cost_model or \
         ( (args.cost_model and args.domain_name == "Safexp") or \
           (args.cost_model and args.domain_name != "Safexp" and args.world_model)

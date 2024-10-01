@@ -512,6 +512,9 @@ def run_hrac(args):
         manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
         controller_cumul_img_safety=args.controller_cumul_img_safety,
+        use_safe_threshold = args.use_safe_threshold,
+        safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon) \
+                         if args.use_safe_threshold else None
     )
 
     calculate_controller_reward = get_reward_function(

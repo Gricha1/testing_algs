@@ -533,7 +533,9 @@ class Controller(object):
                  cost_function=None,
                  controller_imagination_safety_loss=False,
                  manager=None, controller_grad_clip=0, controller_safety_coef=0, 
-                 controller_cumul_img_safety=False
+                 controller_cumul_img_safety=False,
+                 use_safe_threshold=False,
+                 safe_threshold=None
     ):
         self.state_dim = state_dim
         self.goal_dim = goal_dim
@@ -553,6 +555,8 @@ class Controller(object):
         if self.controller_imagination_safety_loss:
             assert self.manager
         self.cost_function = cost_function
+        self.use_safe_threshold = use_safe_threshold
+        self.safe_threshold = torch.tensor(safe_threshold)
 
         self.actor = ControllerActor(state_dim, goal_dim, action_dim,
                                     scale=max_action).to(device)
@@ -615,6 +619,8 @@ class Controller(object):
                                                                 safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=self.controller_cumul_img_safety,
                                                                 train=True)
+            if self.use_safe_threshold:
+                safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
             actor_loss += self.controller_safety_coef * safety_loss.mean()
         return actor_loss
 
