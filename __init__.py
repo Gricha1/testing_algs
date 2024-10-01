@@ -5,18 +5,10 @@ from gym import spaces
 
 import envs.create_maze_env
 
-SHIFT_X, SHIFT_Y = -8, -8
-
 class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-    @property
-    def render_x(self):
-        return self._x + SHIFT_X
-    @property
-    def render_y(self):
-        return self._y + SHIFT_Y
     @property
     def x(self):
         return self._x
@@ -135,7 +127,9 @@ class EnvWithGoal(object):
         self.early_stop = False if env_name in ['AntMaze', 'AntPush', 'AntFall', "AntMazeMultiMap"] else True
         self.early_stop_flag = False
         self.maze_id = maze_id
-        assert (not env_name == 'AntMaze') or (env_name == 'AntMaze' and (maze_id == "Maze" or maze_id == "MazeSafe_map_1"))
+        assert (not env_name == 'AntMaze') or (env_name == 'AntMaze' and (maze_id == "Maze" or \
+                                                maze_id == "MazeSafe_map_1" or \
+                                                maze_id == "MazeSafe_map_2"))
         assert (not env_name == 'MazeSparse') or (env_name == 'MazeSparse' and maze_id == "Maze2")
         assert (not env_name == 'Push') or (env_name == 'Push' and maze_id == "Push")
         assert (not env_name == 'Fall') or (env_name == 'Fall' and maze_id == "Fall")
@@ -232,6 +226,10 @@ class SafeMazeAnt:
         self.env = env
         self.safety_bounds = self.get_safety_bounds()
         self.render_info = {}
+        if self.env.maze_id == "MazeSafe_map_1":
+            SHIFT_X, SHIFT_Y = -8, -8
+        elif self.env.maze_id == "MazeSafe_map_2":
+            SHIFT_X, SHIFT_Y = -12, -12
         self.render_info["shift_x"] = SHIFT_X
         self.render_info["shift_y"] = SHIFT_Y
         self.train_random_start_pose = False
@@ -284,12 +282,18 @@ class SafeMazeAnt:
 
     def reset(self, xy=None, goal_xy=None, eval_idx=None):
         if self.random_start_pose:
-            if self.env.maze_id == "MazeSafe_map_1":
+            if self.env.maze_id == "MazeSafe_map_1" or self.env.maze_id == "MazeSafe_map_2":
+                if self.env.maze_id == "MazeSafe_map_1":
+                    low_val = 0
+                    high_val = 16
+                elif self.env.maze_id == "MazeSafe_map_2":
+                    low_val = 0
+                    high_val = 32
                 safe_start_point_found = False
                 n_points = 1000
                 while not safe_start_point_found:
-                    x = np.random.uniform(0, 16, n_points)
-                    y = np.random.uniform(0, 16, n_points)
+                    x = np.random.uniform(low_val, high_val, n_points)
+                    y = np.random.uniform(low_val, high_val, n_points)
                     points = np.column_stack((x, y))
                     cost_idx = self.cost_func(points)
                     safety_states = (1 - cost_idx) == True
@@ -317,23 +321,32 @@ class SafeMazeAnt:
     
 
     def cost_func(self, state):
-        if len(state.shape) == 1:
-            robot_x, robot_y = state[:2]
-            cost = 0
-            if robot_x <= self.safety_bounds[3-1].x or robot_x >= self.safety_bounds[2-1].x:
-                cost = 1
-            elif robot_y <= self.safety_bounds[3-1].y or robot_y >= self.safety_bounds[1-1].y:
-                cost = 1
-            elif robot_y <= self.safety_bounds[7-1].y and robot_y >= self.safety_bounds[4-1].y:
-                if robot_x <= self.safety_bounds[5-1].x:
+        if self.env.maze_id == "MazeSafe_map_1" or self.env.maze_id == "MazeSafe_map_2":
+            if len(state.shape) == 1:
+                robot_x, robot_y = state[:2]
+                cost = 0
+                if robot_x <= self.safety_bounds[3-1].x or robot_x >= self.safety_bounds[2-1].x:
                     cost = 1
+                elif robot_y <= self.safety_bounds[3-1].y or robot_y >= self.safety_bounds[1-1].y:
+                    cost = 1
+                elif robot_y <= self.safety_bounds[7-1].y and robot_y >= self.safety_bounds[4-1].y:
+                    if robot_x <= self.safety_bounds[5-1].x:
+                        cost = 1
+                elif self.env.maze_id == "MazeSafe_map_2":
+                    if robot_y <= self.safety_bounds[11-1].y and robot_y >= self.safety_bounds[8-1].y:
+                        if robot_x <= self.safety_bounds[10-1].x:
+                            cost = 1
+            else:
+                robot_x = state[:, 0]
+                robot_y = state[:, 1]
+                cost = (robot_x <= self.safety_bounds[3-1].x) + (robot_x >= self.safety_bounds[2-1].x)
+                cost = cost + (robot_y <= self.safety_bounds[3-1].y) + (robot_y >= self.safety_bounds[1-1].y)
+                cost = cost + (robot_y <= self.safety_bounds[7-1].y) * (robot_y >= self.safety_bounds[4-1].y) * (robot_x <= self.safety_bounds[5-1].x)
+                if self.env.maze_id == "MazeSafe_map_2":
+                    cost = cost + (robot_y <= self.safety_bounds[11-1].y) * (robot_y >= self.safety_bounds[8-1].y) * (robot_x <= self.safety_bounds[10-1].x)
+                cost = (cost >= 1)
         else:
-            robot_x = state[:, 0]
-            robot_y = state[:, 1]
-            cost = (robot_x <= self.safety_bounds[3-1].x) + (robot_x >= self.safety_bounds[2-1].x)
-            cost = cost + (robot_y <= self.safety_bounds[3-1].y) + (robot_y >= self.safety_bounds[1-1].y)
-            cost = cost + (robot_y <= self.safety_bounds[7-1].y) * (robot_y >= self.safety_bounds[4-1].y) * (robot_x <= self.safety_bounds[5-1].x)
-            cost = (cost >= 1)
+            assert 1 == 0
             
         return cost
 
@@ -345,26 +358,50 @@ class SafeMazeAnt:
         #   [(start_x_2, start_y_2), (goal_x_2, goal_y_2)],
         #    ...         
         # ]
+        def get_patern_dataset(left_down_x, left_down_y, right_up_x, right_up_y):
+            data = []
+            # 1
+            xy = (left_down_x, left_down_y)
+            goal_xy = (left_down_x, right_up_y)
+            dataset.append([xy, goal_xy])
+            # 2
+            xy = (left_down_x, right_up_y)
+            goal_xy = (left_down_x, left_down_y)
+            dataset.append([xy, goal_xy])
+            # 3
+            xy = (left_down_x, left_down_y)
+            goal_xy = (right_up_x, right_up_y)
+            dataset.append([xy, goal_xy])
+            # 4
+            xy = (right_up_x, right_up_y)
+            goal_xy = (left_down_x, left_down_y)
+            dataset.append([xy, goal_xy])
+            # 5
+            xy = (left_down_x, right_up_y)
+            goal_xy = (right_up_x, left_down_y)
+            dataset.append([xy, goal_xy])
+            # 6
+            xy = (right_up_x, left_down_y)
+            goal_xy = (left_down_x, right_up_y)
+            dataset.append([xy, goal_xy])
+
+            return data
+
         dataset = []
         if self.env.maze_id == "MazeSafe_map_1":
-            xy = (0, 0)
-            goal_xy = (0, 16)
-            dataset.append([xy, goal_xy])
-            xy = (0, 16)
-            goal_xy = (0, 0)
-            dataset.append([xy, goal_xy])
-            xy = (0, 0)
-            goal_xy = (16, 16)
-            dataset.append([xy, goal_xy])
-            xy = (16, 16)
-            goal_xy = (0, 0)
-            dataset.append([xy, goal_xy])
-            xy = (0, 16)
-            goal_xy = (16, 0)
-            dataset.append([xy, goal_xy])
-            xy = (16, 0)
-            goal_xy = (0, 16)
-            dataset.append([xy, goal_xy])
+            left_down_x, left_down_y, right_up_x, right_up_y = 0, 0, 16, 16
+            dataset.extend(get_patern_dataset(left_down_x, left_down_y, right_up_x, right_up_y))
+        elif self.env.maze_id == "MazeSafe_map_2":
+            # 1 hight - 2 hight
+            left_down_x, left_down_y, right_up_x, right_up_y = 0, 0, 16, 16
+            dataset.extend(get_patern_dataset(left_down_x, left_down_y, right_up_x, right_up_y))
+            # 1 hight - 3 hight
+            left_down_x, left_down_y, right_up_x, right_up_y = 0, 0, 32, 32
+            dataset.extend(get_patern_dataset(left_down_x, left_down_y, right_up_x, right_up_y))
+            # 2 hight - 3 hight
+            left_down_x, left_down_y, right_up_x, right_up_y = 16, 16, 32, 32
+            dataset.extend(get_patern_dataset(left_down_x, left_down_y, right_up_x, right_up_y))
+
         return dataset
 
     def get_reward_cost(self, robot_pos, goal_pos, dist_xy=None):
@@ -382,50 +419,7 @@ class SafeMazeAnt:
     
     
     def get_safety_bounds(self, get_safe_unsafe_dataset=False):
-        """
-        8-------------------1=9
-        |                    |
-        |                    |
-        7-----------6        |
-                    |        |
-                    |        |
-                    |        |
-        4-----------5        |
-        |                    |
-        |                    |
-        3--------------------2
-        """
-        safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
-        safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
-        safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
-        safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
-        safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
-        safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
-        safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
-        safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
-        safety_point_1 = safety_point_9
-        safety_boundary = [safety_point_1,
-                           safety_point_2, safety_point_3, 
-                           safety_point_4, safety_point_5, 
-                           safety_point_6, safety_point_7,
-                           safety_point_8, safety_point_9]
-        
-        # dataset = (
-        #             [(x11, x12), (x21, x22), ... ], 
-        #             [y1, y2, ... ]
-        #           )
-        xs = []
-        ys = []
-        # usafe states
-        xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
-        xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
-        xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
-        xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
-        xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
-        xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
-        xs.append((safety_point_2.x + 1, safety_point_2.y - 1))
-        xs.append((safety_point_3.x - 1, safety_point_3.y - 1))
-        xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+
         def extrapolate_points(l):
             extrapolated_points = []
             for i in range(len(l) - 1):
@@ -437,21 +431,154 @@ class SafeMazeAnt:
                 for j in range(1, 5):
                     extrapolated_points.append((x1 + j * dx, y1 + j * dy))
             return extrapolated_points
-        xs = extrapolate_points(xs)
-        for i in range(len(xs)):
-            ys.append(1)
-        num_unsafe_states = len(xs)
-        # safe states
-        xs_safe = []
-        xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
-        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
-        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
-        xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
-        xs_safe = extrapolate_points(xs_safe)
-        xs.extend(xs_safe)
-        for i in range(len(xs_safe)):
-            ys.append(0)
-        dataset = [xs, ys]
+
+        # dataset = (
+            #             [(x11, x12), (x21, x22), ... ], 
+            #             [y1, y2, ... ]
+            #           )
+        if self.env.maze_id == "MazeSafe_map_1":
+            """
+            8-------------------1=9
+            |                    |
+            |                    |
+            7-----------6        |
+                        |        |
+                        |        |
+                        |        |
+            4-----------5        |
+            |                    |
+            |                    |
+            3--------------------2
+            """
+            safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
+            safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
+            safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
+            safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
+            safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
+            safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+            safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
+            safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
+            safety_point_1 = safety_point_9
+            
+            xs = []
+            ys = []
+            # usafe states
+            xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+            xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
+            xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
+            xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
+            xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
+            xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
+            xs.append((safety_point_2.x + 1, safety_point_2.y - 1))
+            xs.append((safety_point_3.x - 1, safety_point_3.y - 1))
+            xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+            xs = extrapolate_points(xs)
+            for i in range(len(xs)):
+                ys.append(1)
+            num_unsafe_states = len(xs)
+
+            # safe states
+            xs_safe = []
+            xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe = extrapolate_points(xs_safe)
+            xs.extend(xs_safe)
+            for i in range(len(xs_safe)):
+                ys.append(0)
+            dataset = [xs, ys]
+
+            safety_boundary = [safety_point_1,
+                            safety_point_2, safety_point_3, 
+                            safety_point_4, safety_point_5, 
+                            safety_point_6, safety_point_7,
+                            safety_point_8, safety_point_9]
+
+        elif self.env.maze_id == "MazeSafe_map_2":
+            """
+            12-----------------1=13
+            |                    |
+            |                    |
+            11------------10     |
+                           |     |
+                           |     |
+                           |     |
+            8--------------9     |
+            |                    |
+            |                    |
+            7-----------6        |
+                        |        |
+                        |        |
+                        |        |
+            4-----------5        |
+            |                    |
+            |                    |
+            3--------------------2
+            """
+            safety_point_13 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 34)
+            safety_point_12 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 34)
+            safety_point_11 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 30)
+            safety_point_10 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 30)
+            safety_point_9 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 18)
+            safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
+            safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
+            safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
+            safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
+            safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+            safety_point_3 = Point(0.03229626534308827 - 2, -0.06590457330324587 - 2)
+            safety_point_2 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 - 2)
+            safety_point_1 = safety_point_13
+
+            xs = []
+            ys = []
+            # usafe states
+            xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+            xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
+            xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
+            xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
+
+            xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
+            xs.append((safety_point_9.x - 1, safety_point_9.y + 1))
+            xs.append((safety_point_10.x - 1, safety_point_10.y - 1))
+            xs.append((safety_point_11.x - 1, safety_point_11.y - 1))
+
+            xs.append((safety_point_12.x - 1, safety_point_12.y + 1))
+            xs.append((safety_point_13.x + 1, safety_point_13.y + 1))
+
+            xs.append((safety_point_2.x + 1, safety_point_2.y - 1))
+            xs.append((safety_point_3.x - 1, safety_point_3.y - 1))
+            xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+            xs = extrapolate_points(xs)
+            for i in range(len(xs)):
+                ys.append(1)
+            num_unsafe_states = len(xs)
+
+            # safe states
+            # test
+            xs_safe = []
+            xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe = extrapolate_points(xs_safe)
+            xs.extend(xs_safe)
+            for i in range(len(xs_safe)):
+                ys.append(0)
+            dataset = [xs, ys]
+
+            safety_boundary = [safety_point_1,
+                            safety_point_2, safety_point_3, 
+                            safety_point_4, safety_point_5, 
+                            safety_point_6, safety_point_7,
+                            safety_point_8, safety_point_9,
+                            safety_point_10, safety_point_11,
+                            safety_point_12, safety_point_13]
+
+
+        else:
+            assert 1 == 0
+
         
         if get_safe_unsafe_dataset:
             assert len(dataset[0]) == len(dataset[1])

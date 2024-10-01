@@ -56,7 +56,7 @@ class CustomVideoRendered:
         if self.plot_subgoal:
             assert "subgoal_pos" in current_step_info
 
-        if env_name == "SafeAntMaze":
+        if "SafeAntMaze" in env_name:
             safety_boundary, safe_dataset = self.env.get_safety_bounds(get_safe_unsafe_dataset=True)
             debug_info["safety_boundary"] = safety_boundary
             debug_info["safe_dataset"] = safe_dataset
@@ -138,8 +138,8 @@ class CustomVideoRendered:
             safety_boundary = debug_info["safety_boundary"]
             if self.controller_safe_model:
                 safe_dataset = debug_info["safe_dataset"]
-            xs = [point.render_x for point in safety_boundary]
-            ys = [point.render_y for point in safety_boundary]
+            xs = [point.x + shift_x for point in safety_boundary]
+            ys = [point.y + shift_y for point in safety_boundary]
             self.render_info["ax_states"].plot(xs, ys, 'b')
             if self.world_model_comparsion or self.controller_safe_model:
                 xs = [point.x for point in safety_boundary]
@@ -236,11 +236,13 @@ def create_env(args, renderer_args={}):
     if args.env_name == "AntGather":
         env = GatherEnv(create_gather_env(args.env_name, args.seed), args.env_name)
         env.seed(args.seed)   
-    elif args.env_name in ["SafeAntMaze", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
+    elif args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
         if args.env_name == "AntMaze":
             maze_id = "Maze"
-        if args.env_name == "SafeAntMaze":
+        if args.env_name == "SafeAntMazeC":
             maze_id = "MazeSafe_map_1"
+        elif args.env_name == "SafeAntMazeW":
+            maze_id = "MazeSafe_map_2"
         elif args.env_name == "AntMazeSparse":
             maze_id = "Maze2"
         elif args.env_name == "AntPush":
@@ -249,7 +251,7 @@ def create_env(args, renderer_args={}):
             maze_id = "Fall"
         else:
             assert 1 == 0
-        if args.env_name == "SafeAntMaze":
+        if args.env_name == "SafeAntMazeC" or args.env_name == "SafeAntMazeW":
             env = SafeMazeAnt(EnvWithGoal(create_maze_env("AntMaze", args.seed, maze_id=maze_id), "AntMaze", maze_id=maze_id))
             if args.random_start_pose:
                 env.set_train_start_pose_to_random()
@@ -294,7 +296,7 @@ def create_env(args, renderer_args={}):
 
     action_dim = env.action_space.shape[0]
     state_dim = state.shape[0]
-    if args.env_name in ["SafeAntMaze", "AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
+    if args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
         goal_dim = goal.shape[0]
     else:
         goal_dim = 0
