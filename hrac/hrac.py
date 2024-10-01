@@ -556,7 +556,8 @@ class Controller(object):
             assert self.manager
         self.cost_function = cost_function
         self.use_safe_threshold = use_safe_threshold
-        self.safe_threshold = torch.tensor(safe_threshold)
+        if use_safe_threshold:
+            self.safe_threshold = torch.tensor(safe_threshold)
 
         self.actor = ControllerActor(state_dim, goal_dim, action_dim,
                                     scale=max_action).to(device)

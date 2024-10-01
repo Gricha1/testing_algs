@@ -53,7 +53,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
             avg_episode_real_subgoal_safety = 0
-            if env_name == "SafeAntMaze":
+            if "SafeAntMaze" in env_name:
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafeGym":
                 if args.cost_model:
@@ -62,7 +62,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
-                if env_name == "SafeAntMaze":
+                if "SafeAntMaze" in env_name:
                     x_with_zeros = np.concatenate((x_np, 
                                                 np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
                                                 axis=1)
@@ -84,7 +84,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
-            elif env_name == "SafeAntMaze":
+            elif "SafeAntMaze" in env_name:
                 obs = env.reset(eval_idx=eval_ep)
             elif env_name == "SafeGym":
                 # test
@@ -156,7 +156,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if step_count == 1:
                         renderer.setup_renderer()
                     debug_info = {}
-                    if env_name == "SafeAntMaze":
+                    if "SafeAntMaze" in env_name:
                         debug_info["safety_boundary"] = safety_boundary
                         debug_info["safe_dataset"] = safe_dataset
                         if args.world_model:
@@ -166,7 +166,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["acc_controller_reward"] = episode_controller_rew
                     debug_info["t"] = step_count
                     debug_info["goals_achieved"] = episode_goals_achieved
-                    debug_info["dist_to_goal"] = env.env.dist_goal()
+                    if args.domain_name == "Safexp":
+                        debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
                         x = a_net((torch.from_numpy(state[:2]).type('torch.FloatTensor')).to("cuda"))
@@ -990,10 +991,10 @@ def run_hrac(args):
 
                 if "Safe" in args.env_name:
                     if manager_policy.absolute_goal:
-                        if env_name == "SafeAntMaze":
+                        if "SafeAntMaze" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        if env_name == "SafeAntMaze":
+                        if "SafeAntMaze" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                     episode_subgoals_count += 1
 

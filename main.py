@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--save_models", default=True, type=bool)
-    parser.add_argument("--env_name", default="SafeAntMaze", type=str)
+    parser.add_argument("--env_name", default="SafeAntMazeC", type=str)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
     parser.add_argument("--log_dir", default="./logs", type=str)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
 
     if args.use_safe_threshold:
         assert args.controller_cumul_img_safety
-    assert args.controller_imagination_safety_loss and args.img_horizon <= args.manager_propose_freq
+    assert not args.controller_imagination_safety_loss or (args.controller_imagination_safety_loss and args.img_horizon <= args.manager_propose_freq)
     assert not args.cost_model or \
         ( (args.cost_model and args.domain_name == "Safexp") or \
           (args.cost_model and args.domain_name != "Safexp" and args.world_model)
