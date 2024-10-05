@@ -619,7 +619,7 @@ class Controller(object):
                                                                 controller_policy=self, 
                                                                 safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=self.controller_cumul_img_safety,
-                                                                train=True)
+                                                                train=not self.use_safe_threshold)
             if self.use_safe_threshold:
                 safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
             actor_loss += self.controller_safety_coef * safety_loss.mean()
