@@ -1034,6 +1034,8 @@ def run_hrac(args):
             if controller_policy.use_lagrange and done:
                 pid_costs.append(episode_cost/args.img_horizon)
 
+            if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
+                controller_policy.controller_safety_coef = args.controller_curriculum_safety_coef
 
             ## logging world model performance
             if not args.train_only_td3 and args.world_model and episode_num > 1:
