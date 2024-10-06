@@ -2,6 +2,7 @@ import os
 import time
 import copy
 from math import ceil
+from collections import deque
 
 import torch
 import numpy as np
@@ -513,7 +514,17 @@ def run_hrac(args):
         )
     else:
         manager_policy = None
-    
+
+    lagrangian_data = {}
+    if args.controller_use_lagrange:
+        lagrangian_data["pid_kp"] = args.ctrl_pid_kp
+        lagrangian_data["pid_ki"] = args.ctrl_pid_ki
+        lagrangian_data["pid_kd"] = args.ctrl_pid_kd
+        lagrangian_data["pid_d_delay"] = args.ctrl_pid_d_delay
+        lagrangian_data["pid_delta_p_ema_alpha"] = args.ctrl_pid_delta_p_ema_alpha
+        lagrangian_data["pid_delta_d_ema_alpha"] = args.ctrl_pid_delta_d_ema_alpha
+        lagrangian_data["lagrangian_multiplier_init"] = args.ctrl_lagrangian_multiplier_init
+
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -533,7 +544,9 @@ def run_hrac(args):
         controller_cumul_img_safety=args.controller_cumul_img_safety,
         use_safe_threshold = args.use_safe_threshold,
         safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon) \
-                         if args.use_safe_threshold else None
+                         if args.use_safe_threshold or args.controller_cumul_img_safety else None,
+        use_lagrange=args.controller_use_lagrange,
+        lagrangian_data=lagrangian_data
     )
 
     calculate_controller_reward = get_reward_function(
@@ -554,7 +567,7 @@ def run_hrac(args):
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
                          ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
-                         ep_manager_reward, total_timesteps):
+                         ep_manager_reward, total_timesteps, pid_costs=None):
         print("train controller")
         ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(
             controller_buffer, 
@@ -562,7 +575,10 @@ def run_hrac(args):
             iterations=episode_timesteps,
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
-            tau=args.ctrl_soft_sync_rate)
+            tau=args.ctrl_soft_sync_rate,
+            ep_cost=np.mean(pid_costs) if episode_num > 10 else None)
+        if controller_policy.use_lagrange and episode_num > 10:
+            print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
             print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
             print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
@@ -776,6 +792,8 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
+        if controller_policy.use_lagrange:
+            pid_costs = deque(maxlen=10)
 
         ## Main training ...
         print("start training...")
@@ -816,7 +834,8 @@ def run_hrac(args):
                                     episode_timesteps, 
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
                                     episode_safety_subgoal_rate_, 
-                                    ep_manager_reward, total_timesteps)
+                                    ep_manager_reward, total_timesteps,
+                                    pid_costs=pid_costs if controller_policy.use_lagrange else None)
 
                     ## Train manager
                     if not args.train_only_td3 and timesteps_since_manager >= args.train_manager_freq:
@@ -1012,6 +1031,9 @@ def run_hrac(args):
             if not args.train_only_td3:
                 timesteps_since_manager += 1
                 timesteps_since_subgoal += 1
+            if controller_policy.use_lagrange and done:
+                pid_costs.append(episode_cost/args.img_horizon)
+
 
             ## logging world model performance
             if not args.train_only_td3 and args.world_model and episode_num > 1:

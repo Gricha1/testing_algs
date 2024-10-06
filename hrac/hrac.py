@@ -1,4 +1,5 @@
 import random
+from collections import deque
 
 import torch
 import torch.nn as nn
@@ -535,7 +536,10 @@ class Controller(object):
                  manager=None, controller_grad_clip=0, controller_safety_coef=0, 
                  controller_cumul_img_safety=False,
                  use_safe_threshold=False,
-                 safe_threshold=None
+                 safe_threshold=None,
+                 use_lagrange=False,
+                 lagrangian_data={}
+
     ):
         self.state_dim = state_dim
         self.goal_dim = goal_dim
@@ -556,8 +560,22 @@ class Controller(object):
             assert self.manager
         self.cost_function = cost_function
         self.use_safe_threshold = use_safe_threshold
-        if use_safe_threshold:
+        self.use_lagrange = use_lagrange
+        if use_safe_threshold or use_lagrange:
             self.safe_threshold = torch.tensor(safe_threshold)
+        if self.use_lagrange:
+            self._pid_kp = lagrangian_data["pid_kp"]
+            self._pid_ki = lagrangian_data["pid_ki"]
+            self._pid_kd = lagrangian_data["pid_kd"]
+            self._pid_d_delay = lagrangian_data["pid_d_delay"]
+            self._pid_delta_p_ema_alpha = lagrangian_data["pid_delta_p_ema_alpha"]
+            self._pid_delta_d_ema_alpha = lagrangian_data["pid_delta_d_ema_alpha"]
+            self._pid_i = lagrangian_data["lagrangian_multiplier_init"]
+            self._cost_ds = deque(maxlen=self._pid_d_delay)
+            self._cost_ds.append(0.0)
+            self._delta_p = 0.0
+            self._cost_d = 0.0
+            self._cost_penalty = 0.0
 
         self.actor = ControllerActor(state_dim, goal_dim, action_dim,
                                     scale=max_action).to(device)
@@ -619,10 +637,15 @@ class Controller(object):
                                                                 controller_policy=self, 
                                                                 safety_cost=cost_model.safe_model,
                                                                 all_steps_safety=self.controller_cumul_img_safety,
-                                                                train=not self.use_safe_threshold)
+                                                                train=not self.use_safe_threshold and not self.use_lagrange)
             if self.use_safe_threshold:
                 safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
-            actor_loss += self.controller_safety_coef * safety_loss.mean()
+            elif self.use_lagrange:
+                actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
+            if not self.use_lagrange:
+                actor_loss += self.controller_safety_coef * safety_loss.mean()
+
+            
         return actor_loss
 
     def subgoal_transition(self, state, subgoal, next_state):
@@ -639,12 +662,25 @@ class Controller(object):
         subgoals = (subgoal + states[:, 0, :self.goal_dim])[:, None] - \
                    states[:, :, :self.goal_dim]
         return subgoals
+    
+    def pid_update(self, ep_cost_avg):
+        delta = float(ep_cost_avg - self.safe_threshold)
+        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
+        a_p = self._pid_delta_p_ema_alpha
+        self._delta_p *= a_p
+        self._delta_p += (1 - a_p) * delta
+        a_d = self._pid_delta_d_ema_alpha
+        self._cost_d *= a_d
+        self._cost_d += (1 - a_d) * float(ep_cost_avg)
+        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
+        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+        self._cost_penalty = max(0.0, pid_o)
+        self._cost_ds.append(self._cost_d)
 
-    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005):
+    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
         for it in range(iterations):              
-
             x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
             next_g = get_tensor(self.subgoal_transition(x, sg, y))
@@ -699,6 +735,10 @@ class Controller(object):
 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+
+            if self.use_lagrange and ep_cost is not None:
+                self.pid_update(ep_cost)
+
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
 

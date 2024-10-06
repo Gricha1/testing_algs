@@ -98,6 +98,14 @@ if __name__ == "__main__":
     parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
     parser.add_argument("--use_safe_threshold", action='store_true', default=False)
     parser.add_argument("--cost_budget", default=25, type=float)
+    parser.add_argument("--controller_use_lagrange", action='store_true', default=False)
+    parser.add_argument("--ctrl_pid_kp", default=1e-6, type=float)
+    parser.add_argument("--ctrl_pid_ki", default=1e-7, type=float)
+    parser.add_argument("--ctrl_pid_kd", default=1e-7, type=float)
+    parser.add_argument("--ctrl_pid_d_delay", default=10, type=int)
+    parser.add_argument("--ctrl_pid_delta_p_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--ctrl_pid_delta_d_ema_alpha", default=0.95, type=float)
+    parser.add_argument("--ctrl_lagrangian_multiplier_init", default=0., type=float)
     ## WorldModel Parameters
     parser.add_argument("--cm_train_on_dataset", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--wm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
@@ -129,7 +137,11 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
+
+    if args.controller_use_lagrange:
+        assert args.controller_cumul_img_safety
     if args.use_safe_threshold:
+        assert not args.controller_use_lagrange
         assert args.controller_cumul_img_safety
     assert not args.controller_imagination_safety_loss or (args.controller_imagination_safety_loss and args.img_horizon <= args.manager_propose_freq)
     assert not args.cost_model or \
