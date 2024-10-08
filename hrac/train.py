@@ -342,7 +342,12 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 adj_mat[state_dict[s1], state_dict[s2]] = 1
                 adj_mat[state_dict[s2], state_dict[s1]] = 1
     print("Explored states: {}".format(n_states))
-    flags = np.ones((30, 30))
+    if args.domain_name == "Safexp" or args.env_name == "SafeAntMazeC":
+        flags = np.ones((30, 30))
+    elif args.env_name == "SafeAntMazeW":
+        flags = np.ones((30, 60))
+    else:
+        assert 1 == 0, "flag matrix[i][j] where 0<=i<=max_x, 0<=y<=max_y"
     for s in state_list:
         flags[int(s[0]), int(s[1])] = 0
     print(flags)
@@ -576,7 +581,7 @@ def run_hrac(args):
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
             tau=args.ctrl_soft_sync_rate,
-            ep_cost=np.mean(pid_costs) if episode_num > 10 else None)
+            ep_cost=np.mean(pid_costs) if args.controller_use_lagrange and episode_num > 10 else None)
         if controller_policy.use_lagrange and episode_num > 10:
             print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
@@ -923,6 +928,7 @@ def run_hrac(args):
                         manager_buffer.add(manager_transition)
 
                 obs = env.reset()
+
                 goal = obs["desired_goal"]
                 state = obs["observation"]
                 traj_buffer.create_new_trajectory()
