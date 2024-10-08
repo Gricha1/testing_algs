@@ -1,0 +1,1 @@
+python train_safe.py --use_wandb --domain_name Safexp --task_name PointButton1 --seed 0 --cuda
