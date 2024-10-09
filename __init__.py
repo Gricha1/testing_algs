@@ -1,6 +1,8 @@
-import numpy as np
+import random
 import argparse
 from collections import deque
+
+import numpy as np
 from gym import spaces
 
 import envs.create_maze_env
@@ -304,12 +306,15 @@ class SafeMazeAnt:
             return self.env.reset(start_point=xy, goal_xy=goal_xy)
         else:
             # test
+            eval_dataset = self.get_eval_dataset()
             if not(eval_idx is None):
-                eval_dataset = self.get_eval_dataset()
                 if len(eval_dataset) == 0:
                     print("!!!!!! eval dataset size 0 !!!!!!!!!")
                 else:
                     xy, goal_xy = eval_dataset[eval_idx%len(eval_dataset)]
+            else:
+                eval_idx = random.randint(0, len(eval_dataset)-1)
+                xy, goal_xy = eval_dataset[eval_idx]
             return self.env.reset(start_point=xy, goal_xy=goal_xy)
 
     def step(self, action):
