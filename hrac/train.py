@@ -328,9 +328,14 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
-            for j in range(1, min(args.manager_propose_freq, len(traj) - i)):
-                s1 = tuple(np.round(traj[i][:controller_goal_dim]).astype(np.int32))
-                s2 = tuple(np.round(traj[i+j][:controller_goal_dim]).astype(np.int32))
+            for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
+                s_i = traj[i][:controller_goal_dim]
+                s_i_j = traj[i+j][:controller_goal_dim]
+                if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+                    s_i = (s_i + 1.5) * 10.0 # from -1.5, 1.5 to 0, 30
+                    s_i_j = (s_i_j + 1.5) * 10.0 # from -1.5, 1.5 to 0, 30
+                s1 = tuple(np.round(s_i).astype(np.int32))
+                s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
                     state_list.append(s1)
                     state_dict[s1] = n_states
@@ -342,15 +347,6 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 adj_mat[state_dict[s1], state_dict[s2]] = 1
                 adj_mat[state_dict[s2], state_dict[s1]] = 1
     print("Explored states: {}".format(n_states))
-    if args.domain_name == "Safexp" or args.env_name == "SafeAntMazeC":
-        flags = np.ones((30, 30))
-    elif args.env_name == "SafeAntMazeW":
-        flags = np.ones((30, 60))
-    else:
-        assert 1 == 0, "flag matrix[i][j] where 0<=i<=max_x, 0<=y<=max_y"
-    for s in state_list:
-        flags[int(s[0]), int(s[1])] = 0
-    print(flags)
     print("Training adjacency network...")
     loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
                         optimizer_r, args.r_margin_pos, args.r_margin_neg,
@@ -603,7 +599,10 @@ def run_hrac(args):
     n_states = 0
     state_list = []
     state_dict = {}
-    adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
+    if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+        adj_mat = np.diag(np.ones(5000, dtype=np.uint8))
+    else:
+        adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
     traj_buffer = utils.TrajectoryBuffer(capacity=args.traj_buffer_size)
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:

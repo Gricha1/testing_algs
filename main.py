@@ -36,7 +36,8 @@ if __name__ == "__main__":
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
     parser.add_argument("--pseudo_lidar", action="store_true", default=False)
 
-    # Adjacency Network Parameters
+    # Adjacency Network Parameters    
+    parser.add_argument("--a_net_new_discretization_safety_gym", default=False, action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
     parser.add_argument("--adj_loss_coef", default=1., type=float)
     parser.add_argument("--gid", default=0, type=int)
