@@ -11,7 +11,6 @@ import wandb
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from stable_baselines3.common.logger import Video
 
 from safety_gym_wrapper.env import make_safety
 from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
@@ -332,8 +331,8 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 s_i = traj[i][:controller_goal_dim]
                 s_i_j = traj[i+j][:controller_goal_dim]
                 if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-                    s_i = (s_i + 1.5) * 10.0 # from -1.5, 1.5 to 0, 30
-                    s_i_j = (s_i_j + 1.5) * 10.0 # from -1.5, 1.5 to 0, 30
+                    s_i = (s_i + 1.5) * 5.0 # from -1.5, 1.5 to 0, 30
+                    s_i_j = (s_i_j + 1.5) * 5.0 # from -1.5, 1.5 to 0, 30
                 s1 = tuple(np.round(s_i).astype(np.int32))
                 s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
@@ -600,7 +599,7 @@ def run_hrac(args):
     state_list = []
     state_dict = {}
     if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-        adj_mat = np.diag(np.ones(5000, dtype=np.uint8))
+        adj_mat = np.diag(np.ones(3000, dtype=np.uint8))
     else:
         adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
     traj_buffer = utils.TrajectoryBuffer(capacity=args.traj_buffer_size)
