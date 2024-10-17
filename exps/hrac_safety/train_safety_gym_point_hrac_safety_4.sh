@@ -29,6 +29,7 @@ python main.py --domain_name Safexp \
                --r_margin_pos 0.7 \
                --coef_safety_modelfree 10.0 \
                --controller_safety_coef 0.001 \
+               --controller_cumul_img_safety \
                --controller_curriculumn \
                --controller_curriculum_start_step 700000 \
                --controller_curriculum_safety_coef 0.01 \
