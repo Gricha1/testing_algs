@@ -26,8 +26,8 @@ class CustomVideoRendered:
         self.env = env
         self.world_model_comparsion = world_model_comparsion
         self.controller_safe_model = controller_safe_model
-        self.render_info["env_min_x"], self.render_info["env_max_x"] = -5, 5
-        self.render_info["env_min_y"], self.render_info["env_max_y"] = -5, 5
+        self.render_info["env_min_x"], self.render_info["env_max_x"] = -7, 7
+        self.render_info["env_min_y"], self.render_info["env_max_y"] = -7, 7
         self.render_info["grid_resolution_x"] = 40
         self.render_info["grid_resolution_y"] = 40
         self.render_info["state_dim"] = env.state_dim
@@ -186,6 +186,7 @@ class CustomVideoRendered:
                 acc_reward = debug_info["acc_reward"]
                 acc_cost = debug_info["acc_cost"]
                 t = debug_info["t"]
+                self.render_info["ax_states"].text(env_max_x - 9.5, env_max_y - 1, f"t:{t}")
                 # option
                 if "acc_controller_reward" in debug_info:
                     acc_controller_reward = debug_info["acc_controller_reward"]
