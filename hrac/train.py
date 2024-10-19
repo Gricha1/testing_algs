@@ -33,7 +33,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 
 
 def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model,
-                    calculate_controller_reward, ctrl_rew_scale,
+                    predict_env, calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
                     renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
     print("Starting evaluation number {}...".format(eval_idx))
@@ -126,11 +126,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
                                 subgoal_torch = torch.tensor(subgoal, dtype=torch.float32).to(device).unsqueeze(0)
-                                episode_imagine_subgoal_safety += manager_policy.state_safety_on_horizon(
+                                episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
                                                         state_torch, subgoal_torch, 
                                                         controller_policy, 
-                                                        safety_cost=cost_model.safe_model,
-                                                        all_steps_safety=True
+                                                        cost_model=cost_model,
+                                                        all_steps_safety=True,
+                                                        predict_env=predict_env
                                                         )
                     episode_subgoals_count += 1
 
@@ -197,8 +198,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     else:
                         current_step_info["robot_radius"] = 1.5
                     # get imagination of current state
-                    if not(manager_policy.predict_env is None):
-                        imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
+                    if not(predict_env is None):
+                        imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
                         prev_imagined_state = imagined_state
                         current_step_info["imagined_robot_pos"] = imagined_state[:2]
                     # add apples and bombs if GatherEnv
@@ -502,9 +503,7 @@ def run_hrac(args):
             correction=not args.no_correction,
             scale=man_scale,
             goal_loss_coeff=args.goal_loss_coeff,
-            absolute_goal=args.absolute_goal,
-            wm_no_xy=no_xy,
-            img_horizon=args.img_horizon,        
+            absolute_goal=args.absolute_goal,        
             modelfree_safety=args.modelfree_safety,
             coef_safety_modelbased=args.coef_safety_modelbased,
             coef_safety_modelfree=args.coef_safety_modelfree,
@@ -539,9 +538,9 @@ def run_hrac(args):
         cost_function=None if args.domain_name == "Safexp" or args.cost_memmory else env.cost_func,
         controller_imagination_safety_loss=args.controller_imagination_safety_loss,
         controller_grad_clip=args.controller_grad_clip,
-        manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
         controller_cumul_img_safety=args.controller_cumul_img_safety,
+        img_horizon=args.img_horizon,
         use_safe_threshold = args.use_safe_threshold,
         safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon) \
                          if args.use_safe_threshold or args.controller_cumul_img_safety else None,
@@ -572,6 +571,7 @@ def run_hrac(args):
         ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(
             controller_buffer, 
             cost_model=cost_model,
+            predict_env=predict_env,
             iterations=episode_timesteps,
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
@@ -667,18 +667,14 @@ def run_hrac(args):
             env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
                                               reward_size, cost_size, pred_hidden_size,
                                               learning_rate=learning_rate, use_decay=use_decay)
-            predict_env = PredictEnv(env_model, env_name, model_type)
-        manager_policy.set_predict_env(predict_env)
+            predict_env = PredictEnv(env_model, env_name, model_type, args.testing_mean_wm)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=args.cost_memmory)
             
         def train_world_model(replay_buffer, acc_wm_imagination_episode_metric, batch_size=256, 
                               episode_num=0, total_timesteps=0):
             with TensorWrapper():
                 print("train world model")
-                if not args.train_only_td3:
-                    world_model_loss = manager_policy.train_world_model(replay_buffer, batch_size=batch_size)
-                else:
-                    assert 1 == 0
+                world_model_loss = predict_env.train_world_model(replay_buffer, batch_size=batch_size)
                 
                 writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
                 if episode_num > 1:
@@ -688,7 +684,8 @@ def run_hrac(args):
                     print("world model loss: {:.3f}".format(world_model_loss))
 
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
-            
+    else:
+        predict_env = None   
 
     if args.load:
         try:
@@ -697,6 +694,8 @@ def run_hrac(args):
             if args.cost_model:
                 if not args.cost_oracle:
                     cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            if args.world_model:
+                predict_env.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
@@ -710,7 +709,7 @@ def run_hrac(args):
     if args.validate:
         # Start validation ...
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
             a_net=a_net, args=args)
@@ -882,7 +881,7 @@ def run_hrac(args):
                         timesteps_since_eval = 0
                         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date =\
                             evaluate_policy(env, args.env_name, manager_policy, controller_policy, cost_model,
-                                calculate_controller_reward, args.ctrl_rew_scale, 
+                                predict_env, calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
                                 renderer=renderer, writer=writer, total_timesteps=total_timesteps,
                                 a_net=a_net, args=args)
@@ -912,6 +911,8 @@ def run_hrac(args):
                             if args.cost_model:
                                 if not args.cost_oracle:
                                     cost_model.save("./models", args.env_name, args.algo, exp_num)
+                            if args.world_model:
+                                predict_env.save("./models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
@@ -1043,7 +1044,7 @@ def run_hrac(args):
 
             ## logging world model performance
             if not args.train_only_td3 and args.world_model and episode_num > 1:
-                imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
+                imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
                 prev_imagined_state = imagined_state
                 cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state[:2] - state[:2]) ** 2))
                 wm_imagination_episode_metric += cur_wm_imagination_episode_metric
@@ -1081,7 +1082,7 @@ def run_hrac(args):
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,
             a_net=a_net, args=args)
@@ -1100,6 +1101,8 @@ def run_hrac(args):
             if args.cost_model:
                 if not args.cost_oracle:
                     cost_model.save("./models", args.env_name, args.algo, exp_num)
+            if args.world_model:
+                predict_env.save("./models", args.env_name, args.algo, exp_num)
 
         writer.close()
 

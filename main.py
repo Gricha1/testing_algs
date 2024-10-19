@@ -141,6 +141,10 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
+    if args.modelfree_safety:
+        assert args.cost_model
+    if args.controller_imagination_safety_loss:
+        assert args.world_model and args.cost_model
 
     if args.controller_use_lagrange:
         assert args.controller_cumul_img_safety

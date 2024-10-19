@@ -48,8 +48,7 @@ class Manager(object):
     def __init__(self, state_dim, goal_dim, action_dim, actor_lr,
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
-                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False, img_horizon=10, 
+                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False, 
                  modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
                  coef_safety_modelbased=1.0,
@@ -83,51 +82,12 @@ class Manager(object):
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
 
-        # WorldModel
-        self.predict_env = None
-        self.no_xy = wm_no_xy
-        self.testing_mean_wm = testing_mean_wm
-
         # Safety
         self.lidar_observation = lidar_observation   
-        self.img_horizon = img_horizon
         self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
         self.coef_safety_modelbased = coef_safety_modelbased
         self.coef_safety_modelfree = coef_safety_modelfree
-
-    def set_predict_env(self, predict_env):
-        self.predict_env = predict_env
-
-    def imagine_state(self, prev_imagined_state, prev_action, current_state, current_step, imagined_state_freq):
-        with torch.no_grad():
-            if prev_imagined_state is None or current_step % imagined_state_freq == 0:
-                imagined_state = current_state
-            else:
-                imagined_state = self.predict_env.step(prev_imagined_state, 
-                                                       prev_action, 
-                                                       deterministic=True, 
-                                                       testing_mean_pred=self.testing_mean_wm)
-        return imagined_state
-
-    def train_world_model(self, replay_buffer, batch_size=256):
-        if replay_buffer.cost_memmory:
-            x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        else:
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        state = get_tensor(x, to_device=False)
-        state_device = state.to(device)
-        action = get_tensor(u, to_device=False)
-        next_state = get_tensor(y, to_device=False)
-
-        delta_state = next_state - state
-        inputs = np.concatenate((state, action), axis=-1)
-
-        labels = delta_state.numpy()
-        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=batch_size, holdout_ratio=0.2)
-        del state, action, next_state
-        
-        return loss
 
     def set_eval(self):
         self.actor.set_eval()
@@ -148,62 +108,6 @@ class Manager(object):
 
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
-    
-    def state_safety_on_horizon(self, state, actions, 
-                                controller_policy, 
-                                safety_cost, 
-                                all_steps_safety=False, 
-                                train=False):
-
-        assert not(self.predict_env is None), "world model must be initialized"
-        manager_proposed_goal = actions.clone()
-        next_img_state = state.clone()
-
-        h = 0
-        if all_steps_safety:
-            safeties = []    
-            horizon = self.img_horizon
-        else:
-            horizon = random.randint(1, self.img_horizon)
-        while h < horizon:
-            img_state = next_img_state
-            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
-            next_img_state = self.predict_env.step(img_state, ctrl_actions, 
-                                                    deterministic=True, 
-                                                    torch_deviced=True,
-                                                    testing_mean_pred=self.testing_mean_wm)
-            if all_steps_safety:
-                if self.lidar_observation:
-                    agent_pose = next_img_state[:, :2]
-                    obstacle_data = next_img_state[:, -16:]
-                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
-                    manager_absolute_goal = agent_pose
-                    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                    safety = safety_cost(manager_absolute_goal)
-                else:
-                    safety = safety_cost(next_img_state)
-                safeties.append(safety)
-            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
-                                                                         manager_proposed_goal, 
-                                                                         next_img_state)
-            h += 1
-        if not all_steps_safety:
-            if self.lidar_observation:
-                agent_pose = next_img_state[:, :2]
-                obstacle_data = next_img_state[:, -16:]
-                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
-                manager_absolute_goal = agent_pose
-                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                safety = safety_cost(manager_absolute_goal)
-            else:
-                safety = safety_cost(next_img_state)
-        else:
-            safety = 0
-            for el in safeties:
-                safety += el
-            if train:
-                safety /= self.img_horizon
-        return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, cost_model=None):
         actions = self.actor(state, goal)
@@ -405,38 +309,12 @@ class Manager(object):
         torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo))
-        if not(self.predict_env is None):
-            # save as pkl
-            torch.save(self.predict_env.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-            # save as state dict + scaler
-            torch.save(self.predict_env.model.ensemble_model.state_dict(), "{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo))
-            # save: scalar mu, scalar std, model elite idxs 
-            mu = self.predict_env.model.scaler.mu
-            std = self.predict_env.model.scaler.std
-            elite_model_idxes = np.array(self.predict_env.model.elite_model_idxes)
-            np.save("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo), mu)
-            np.save("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo), std)
-            np.save("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo), elite_model_idxes)
         
     def load(self, dir, env_name, algo, exp_num, load_wm_as_pkl=True):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo)))
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
         self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
-        if not(self.predict_env is None):
-            temp_env_name = 'safepg2'
-            temp_model_type='pytorch'
-            if load_wm_as_pkl:
-                env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-                predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
-                self.set_predict_env(predict_env)
-            else:
-                self.predict_env.model.ensemble_model.load_state_dict(torch.load("{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo)))
-                mu = np.load("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo))
-                std = np.load("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo))
-                self.predict_env.model.scaler.set_mu_std(mu, std)
-                elite_model_idxes = np.load("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo))
-                self.predict_env.model.set_elite_model_idxes(elite_model_idxes)
                 
 class CostModel(object):
     def __init__(self, state_dim, goal_dim, lidar_observation, 
@@ -533,8 +411,9 @@ class Controller(object):
                  absolute_goal=False, 
                  cost_function=None,
                  controller_imagination_safety_loss=False,
-                 manager=None, controller_grad_clip=0, controller_safety_coef=0, 
+                 controller_grad_clip=0, controller_safety_coef=0, 
                  controller_cumul_img_safety=False,
+                 img_horizon=10,
                  use_safe_threshold=False,
                  safe_threshold=None,
                  use_lagrange=False,
@@ -552,12 +431,10 @@ class Controller(object):
         self.criterion = nn.SmoothL1Loss()  
         self.controller_cumul_img_safety = controller_cumul_img_safety
 
-        self.manager = manager
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
+        self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
-        if self.controller_imagination_safety_loss:
-            assert self.manager
         self.cost_function = cost_function
         self.use_safe_threshold = use_safe_threshold
         self.use_lagrange = use_lagrange
@@ -629,15 +506,74 @@ class Controller(object):
         sg = get_tensor(sg)
         action = get_tensor(action)
         return self.critic(state, sg, action)
+    
+    def state_safety_on_horizon(self, state, actions, 
+                            controller_policy, 
+                            cost_model, 
+                            all_steps_safety=False, 
+                            train=False,
+                            predict_env=None):
 
-    def actor_loss(self, state, sg, init_state, cost_model):
+        assert not(predict_env is None), "world model must be initialized"
+        manager_proposed_goal = actions.clone()
+        next_img_state = state.clone()
+
+        safety_cost = cost_model.safe_model
+
+        h = 0
+        if all_steps_safety:
+            safeties = []    
+            horizon = self.img_horizon
+        else:
+            horizon = random.randint(1, self.img_horizon)
+        while h < horizon:
+            img_state = next_img_state
+            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
+            next_img_state = predict_env.step(img_state, ctrl_actions, 
+                                                    deterministic=True, 
+                                                    torch_deviced=True)
+            if all_steps_safety:
+                if cost_model.lidar_observation:
+                    agent_pose = next_img_state[:, :2]
+                    obstacle_data = next_img_state[:, -16:]
+                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                    manager_absolute_goal = agent_pose
+                    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                    safety = safety_cost(manager_absolute_goal)
+                else:
+                    safety = safety_cost(next_img_state)
+                safeties.append(safety)
+            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
+                                                                         manager_proposed_goal, 
+                                                                         next_img_state)
+            h += 1
+        if not all_steps_safety:
+            if cost_model.lidar_observation:
+                agent_pose = next_img_state[:, :2]
+                obstacle_data = next_img_state[:, -16:]
+                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                manager_absolute_goal = agent_pose
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                safety = safety_cost(manager_absolute_goal)
+            else:
+                safety = safety_cost(next_img_state)
+        else:
+            safety = 0
+            for el in safeties:
+                safety += el
+            if train:
+                safety /= self.img_horizon
+        return safety
+
+    def actor_loss(self, state, sg, init_state, cost_model, predict_env):
         actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
         if self.controller_imagination_safety_loss:
-            safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
-                                                                controller_policy=self, 
-                                                                safety_cost=cost_model.safe_model,
-                                                                all_steps_safety=self.controller_cumul_img_safety,
-                                                                train=not self.use_safe_threshold and not self.use_lagrange)
+            safety_loss = self.state_safety_on_horizon(init_state, sg, 
+                                                        controller_policy=self, 
+                                                        cost_model=cost_model,
+                                                        all_steps_safety=self.controller_cumul_img_safety,
+                                                        train=not self.use_safe_threshold and not self.use_lagrange,
+                                                        predict_env=predict_env)
             if self.use_safe_threshold:
                 safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
             elif self.use_lagrange:
@@ -677,10 +613,10 @@ class Controller(object):
         self._cost_penalty = max(0.0, pid_o)
         self._cost_ds.append(self._cost_d)
 
-    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
+    def train(self, replay_buffer, cost_model, predict_env, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_info = {}
-        for it in range(iterations):              
+        for _ in range(iterations):              
             x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
             next_g = get_tensor(self.subgoal_transition(x, sg, y))
@@ -716,7 +652,7 @@ class Controller(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss = self.actor_loss(state, sg, init_state, cost_model)
+            actor_loss = self.actor_loss(state, sg, init_state, cost_model, predict_env)
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()

@@ -358,13 +358,58 @@ class Swish(nn.Module):
     def forward(self, x):
         x = x * F.sigmoid(x)
         return x
+
+def var(tensor, to_device=True):
+    if to_device:
+        return tensor.to(device)
+    else:
+        return tensor
+    
+def get_tensor(z, to_device=True):
+    if z is None:
+        return None
+    if z[0].dtype == np.dtype("O"):
+        return None
+    if len(z.shape) == 1:
+        return var(torch.FloatTensor(z.copy()), to_device).unsqueeze(0)
+    else:
+        return var(torch.FloatTensor(z.copy()), to_device)
     
 
 class PredictEnv:
-    def __init__(self, model, env_name, model_type):
+    def __init__(self, model, env_name, model_type, testing_mean_wm):
         self.model = model
         self.env_name = env_name
         self.model_type = model_type
+        self.testing_mean_wm = testing_mean_wm
+
+    def train_world_model(self, replay_buffer, batch_size=256):
+        if replay_buffer.cost_memmory:
+            x, y, _, u, _, c, _, _, _ = replay_buffer.sample(len(replay_buffer))
+        else:
+            x, y, _, u, _, _, _, _ = replay_buffer.sample(len(replay_buffer))
+        state = get_tensor(x, to_device=False)
+        action = get_tensor(u, to_device=False)
+        next_state = get_tensor(y, to_device=False)
+
+        delta_state = next_state - state
+        inputs = np.concatenate((state, action), axis=-1)
+
+        labels = delta_state.numpy()
+        _, loss = self.model.train(inputs, labels, batch_size=batch_size, holdout_ratio=0.2)
+        del state, action, next_state
+        
+        return loss
+
+    def imagine_state(self, prev_imagined_state, prev_action, current_state, current_step, imagined_state_freq):
+        with torch.no_grad():
+            if prev_imagined_state is None or current_step % imagined_state_freq == 0:
+                imagined_state = current_state
+            else:
+                imagined_state = self.step(prev_imagined_state, 
+                                            prev_action, 
+                                            deterministic=True)
+        return imagined_state
 
     def _termination_fn(self, env_name, obs, act, next_obs):
         # TODO
@@ -427,7 +472,9 @@ class PredictEnv:
 
         return log_prob, stds
 
-    def step(self, obs, act, single=False, deterministic=False, torch_deviced=False, testing_mean_pred=False):
+    def step(self, obs, act, single=False, deterministic=False, torch_deviced=False):
+        testing_mean_pred = self.testing_mean_wm
+
         if len(obs.shape) == 1:
             obs = obs[None]
             act = act[None]
@@ -553,3 +600,35 @@ class PredictEnv:
 
         #info = {'mean': return_means, 'std': return_stds, 'log_prob': log_prob, 'dev': dev}
         return  next_obs
+    
+
+
+    def save(self, dir, env_name, algo, exp_num):
+        # save as pkl
+        torch.save(self.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
+        # save as state dict + scaler
+        torch.save(self.model.ensemble_model.state_dict(), "{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo))
+        # save: scalar mu, scalar std, model elite idxs 
+        mu = self.model.scaler.mu
+        std = self.model.scaler.std
+        elite_model_idxes = np.array(self.model.elite_model_idxes)
+        np.save("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo), mu)
+        np.save("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo), std)
+        np.save("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo), elite_model_idxes)
+
+
+    def load(self, dir, env_name, algo, exp_num, load_wm_as_pkl=True):
+        temp_env_name = 'safepg2'
+        temp_model_type='pytorch'
+        if load_wm_as_pkl:
+            env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
+            #predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
+            #self = predict_env
+            self.model = env_model
+        else:
+            self.model.ensemble_model.load_state_dict(torch.load("{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo)))
+            mu = np.load("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo))
+            std = np.load("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo))
+            self.model.scaler.set_mu_std(mu, std)
+            elite_model_idxes = np.load("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo))
+            self.model.set_elite_model_idxes(elite_model_idxes)
