@@ -273,10 +273,10 @@ class OUNoise(object):
 
 def train_adj_net(a_net, states, adj_mat, optimizer, margin_pos, margin_neg,
                   n_epochs=100, batch_size=64, device='cpu', verbose=False,
-                  args=None):
+                  args=None, xy_min=0, xy_max=0):
     if verbose:
         print('Generating training data...')
-    dataset = MetricDataset(states, adj_mat, args=args)
+    dataset = MetricDataset(states, adj_mat, args=args, xy_min=xy_min, xy_max=xy_max)
     if verbose:
         print('Totally {} training pairs.'.format(len(dataset)))
     dataloader = Data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=False)
@@ -327,7 +327,7 @@ class ContrastiveLoss(nn.Module):
 
 class MetricDataset(Data.Dataset):
 
-    def __init__(self, states, adj_mat, args=None):
+    def __init__(self, states, adj_mat, args=None, xy_min=0, xy_max=0):
         super().__init__()
         n_samples = adj_mat.shape[0]
         self.x = []
@@ -338,8 +338,8 @@ class MetricDataset(Data.Dataset):
                 s_i = np.array(states[i])
                 s_j = np.array(states[j])
                 if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-                    s_i = s_i.astype(float) / 5.0 - 1.5 # from -1.5, 1.5 to 0, 30
-                    s_j = s_j.astype(float) / 5.0 - 1.5 # from -1.5, 1.5 to 0, 30
+                    s_i = s_i.astype(float) / 5.0 - xy_min # from -1.5, 1.5 to 0, 30
+                    s_j = s_j.astype(float) / 5.0 - xy_max # from -1.5, 1.5 to 0, 30
                 self.x.append(s_i)
                 self.y.append(s_j)
                 self.label.append(adj_mat[i, j])
