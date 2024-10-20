@@ -338,8 +338,8 @@ class MetricDataset(Data.Dataset):
                 s_i = np.array(states[i])
                 s_j = np.array(states[j])
                 if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-                    s_i = s_i.astype(float) / 5.0 - xy_min # from -1.5, 1.5 to 0, 30
-                    s_j = s_j.astype(float) / 5.0 - xy_max # from -1.5, 1.5 to 0, 30
+                    s_i = s_i.astype(float) / args.a_net_discretization_koef - xy_min # from -1.5, 1.5 to 0, 30
+                    s_j = s_j.astype(float) / args.a_net_discretization_koef - xy_max # from -1.5, 1.5 to 0, 30
                 self.x.append(s_i)
                 self.y.append(s_j)
                 self.label.append(adj_mat[i, j])

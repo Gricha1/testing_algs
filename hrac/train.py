@@ -340,8 +340,8 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                         xy_max = 5
                     else:
                         assert 1 == 0
-                    s_i = (s_i + xy_min) * 5.0 # from -1.5, 1.5 to 0, 30
-                    s_i_j = (s_i_j + xy_max) * 5.0 # from -1.5, 1.5 to 0, 30
+                    s_i = (s_i + xy_min) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                    s_i_j = (s_i_j + xy_max) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
                 else:
                     xy_min, xy_max = 0, 0
                 s1 = tuple(np.round(s_i).astype(np.int32))

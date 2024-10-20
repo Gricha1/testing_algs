@@ -23,6 +23,7 @@ python main.py --domain_name Safexp \
                --controller_imagination_safety_loss \
                --controller_safety_coef 0.01 \
                --controller_cumul_img_safety \
+               --controller_use_lagrange \
                --img_horizon 10 \
                --validation_without_image --eval_freq 30000 \
                --max_timesteps 4000000 \
