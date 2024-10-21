@@ -13,7 +13,9 @@ python main.py --domain_name Safexp \
                --action_repeat 2 \
                --seed $seed \
                --a_net_new_discretization_safety_gym \
+               --a_net_discretization_koef 3.0 \
                --cost_memmory \
+               --man_rew_scale 0.1 \
                --goal_loss_coeff 20 \
                --validation_without_image --eval_freq 30000 \
                --max_timesteps 4000000 \

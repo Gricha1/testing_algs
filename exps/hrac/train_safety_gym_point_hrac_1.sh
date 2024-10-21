@@ -13,6 +13,7 @@ python main.py --domain_name Safexp \
                --action_repeat 2 \
                --seed $seed \
                --a_net_new_discretization_safety_gym \
+               --a_net_discretization_koef 3.0 \
                --cost_memmory \
                --r_margin_pos 0.5 \
                --r_margin_neg 0.7 \

@@ -15,6 +15,7 @@ python main.py --domain_name Safexp \
                --vector_env \
                --seed $seed \
                --a_net_new_discretization_safety_gym \
+               --a_net_discretization_koef 3.0 \
                --man_rew_scale 100.0 \
                --goal_loss_coeff 20.0 \
                --r_margin_pos 0.5 \

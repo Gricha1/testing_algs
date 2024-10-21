@@ -22,7 +22,6 @@ python main.py --domain_name Safexp \
                --cost_model_batch_size 512 \
                --controller_imagination_safety_loss \
                --controller_safety_coef 0.01 \
-               --controller_cumul_img_safety \
                --img_horizon 10 \
                --validation_without_image --eval_freq 30000 \
                --max_timesteps 4000000 \
