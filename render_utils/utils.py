@@ -126,11 +126,23 @@ class CustomVideoRendered:
 
         # world model comparsion
         if self.world_model_comparsion or (self.controller_safe_model and self.plot_cost_model_heatmap):
-            xA, yA = zip(*self.robot_poses)
-            self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
+            #xA, yA = zip(*self.robot_poses)
+            #self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
+            x = current_step_info["robot_pos"][0]
+            y = current_step_info["robot_pos"][1]
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="r", alpha=1, fill=False)
+            self.render_info["ax_world_model_robot_trajectories"].add_patch(circle_robot) 
+            if env_name == "SafeGym":
+                for hazard in current_step_info["hazards"]:
+                    x = hazard[0]
+                    y = hazard[1]
+                    circle_robot = plt.Circle((x, y), radius=current_step_info["hazards_radius"], color="b", alpha=1, fill=False)
+                    self.render_info["ax_world_model_robot_trajectories"].add_patch(circle_robot) 
             if self.world_model_comparsion:
                 xB, yB = zip(*self.world_model_poses)
                 self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
+                xA, yA = zip(*self.robot_poses)
+                self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
 
         if self.plot_cost_model_heatmap and self.controller_safe_model:
             assert "agent_full_obs" in current_step_info
