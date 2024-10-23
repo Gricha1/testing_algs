@@ -20,7 +20,7 @@ python main.py --domain_name Safexp \
                --cost_model \
                --cm_pretrain \
                --cost_model_batch_size 512 \
-               --cm_frame_stack_num 8 \
+               --cm_frame_stack_num 32 \
                --controller_imagination_safety_loss \
                --controller_safety_coef 0.01 \
                --controller_cumul_img_safety \

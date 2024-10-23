@@ -3,6 +3,7 @@ import time
 import copy
 from math import ceil
 from collections import deque
+import random
 
 import torch
 import numpy as np
@@ -22,7 +23,7 @@ import hrac.hrac as hrac
 from hrac.models import ANet
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
 
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -75,11 +76,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     pred = cost_model.safe_model(x_tensor, hazard_poses)
                 else:
                     pred = cost_model.safe_model(x_tensor)
+                prev_probs = pred.squeeze().tolist()
+                val_safe_model_roc = roc_auc_score(true, prev_probs)
                 pred = (pred > 0.5).int().squeeze().tolist()
                 val_safe_model_f1 = f1_score(true, pred)
                 validation_date["safe_model_true_mean"] = np.mean(true)
                 validation_date["safe_model_pred_mean"] = np.mean(pred)
                 validation_date["safe_model_f1"] = val_safe_model_f1
+                validation_date["safe_model_roc"] = val_safe_model_roc
 
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
@@ -405,17 +409,25 @@ def run_hrac(args):
         action_dim = env.action_space.shape[0]
         env.state_dim = state_dim
         # test, cost unique = [0, 1, 2]
+        # ------------ get dataset from env to estimate cost model, this data wont be used for training
         if args.cost_model:
-            print("get safedataset safetygym!!!")
-            start_time = time.time()
-            env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
-            end_time = time.time()
-            print("time for safe dataset:", end_time-start_time)
-        renderer_args = {"plot_subgoal": True, 
+            cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
+            #cost_dataset_seeds = [213]
+            safe_dataset = []
+            for seed_ in cost_dataset_seeds:
+                env.seed(seed_)
+                print("get safedataset safetygym!!!", f"seed={seed_}")
+                start_time = time.time()
+                safe_dataset.extend(get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num))
+                end_time = time.time()
+                print("time for safe dataset:", end_time-start_time)
+            env.safe_dataset = safe_dataset
+        renderer_args = {"plot_subgoal": False if args.train_only_td3 else True, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": False,
                          "plot_world_model_state": args.world_model,
                          "controller_safe_model": args.cost_model,
+                         "plot_cost_model_heatmap": True if args.train_only_td3 else False,
                          }
         renderer = get_renderer(env, args, renderer_args)
         env.seed(args.seed)
