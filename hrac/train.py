@@ -337,17 +337,17 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 s_i_j = traj[i+j][:controller_goal_dim]
                 if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
                     if "1" in args.task_name:
-                        xy_min = 1.5
-                        xy_max = 1.5
+                        xy_min_max = 2
                     elif "2" in args.task_name:
-                        xy_min = 5
-                        xy_max = 5
+                        xy_min_max = 5
                     else:
                         assert 1 == 0
-                    s_i = (s_i + xy_min) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
-                    s_i_j = (s_i_j + xy_max) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
-                else:
-                    xy_min, xy_max = 0, 0
+                    if args.clip_a_net_xy:
+                        s_i = np.clip(s_i, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                        s_i_j = np.clip(s_i_j, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                    else:
+                        s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                        s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
                 s1 = tuple(np.round(s_i).astype(np.int32))
                 s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
@@ -365,8 +365,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
                         optimizer_r, args.r_margin_pos, args.r_margin_neg,
                         n_epochs=args.r_training_epochs, batch_size=args.r_batch_size,
-                        device=device, verbose=False, args=args,
-                        xy_min=xy_min, xy_max=xy_max)
+                        device=device, verbose=False, args=args)
 
     if args.save_models:
         r_filename = os.path.join(f"./models/{exp_num}", "{}_{}_a_network.pth".format(args.env_name, args.algo))
@@ -411,8 +410,10 @@ def run_hrac(args):
         # test, cost unique = [0, 1, 2]
         # ------------ get dataset from env to estimate cost model, this data wont be used for training
         if args.cost_model:
-            cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
-            #cost_dataset_seeds = [213]
+            if args.validate:
+                cost_dataset_seeds = [213]
+            else:
+                cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
             safe_dataset = []
             for seed_ in cost_dataset_seeds:
                 env.seed(seed_)

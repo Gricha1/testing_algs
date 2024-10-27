@@ -14,6 +14,7 @@ python main.py --domain_name Safexp \
                --seed $seed \
                --a_net_new_discretization_safety_gym \
                --a_net_discretization_koef 3.0 \
+               --clip_a_net_xy \
                --cost_memmory \
                --man_rew_scale 0.1 \
                --goal_loss_coeff 20 \
