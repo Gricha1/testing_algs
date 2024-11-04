@@ -1,5 +1,6 @@
 import random
 from collections import deque
+from collections import deque
 
 import torch
 import torch.nn as nn
@@ -48,8 +49,7 @@ class Manager(object):
     def __init__(self, state_dim, goal_dim, action_dim, actor_lr,
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
-                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False,
-                 wm_no_xy=False, img_horizon=10, 
+                 noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False, 
                  modelfree_safety=False, testing_mean_wm=False,
                  subgoal_grad_clip=0,
                  coef_safety_modelbased=1.0,
@@ -93,14 +93,8 @@ class Manager(object):
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
 
-        # WorldModel
-        self.predict_env = None
-        self.no_xy = wm_no_xy
-        self.testing_mean_wm = testing_mean_wm
-
         # Safety
         self.lidar_observation = lidar_observation   
-        self.img_horizon = img_horizon
         self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
         self.coef_safety_modelbased = coef_safety_modelbased
@@ -132,39 +126,6 @@ class Manager(object):
             self._cost_limit = cost_limit
             self._cost_penalty = 0.0
 
-    def set_predict_env(self, predict_env):
-        self.predict_env = predict_env
-
-    def imagine_state(self, prev_imagined_state, prev_action, current_state, current_step, imagined_state_freq):
-        with torch.no_grad():
-            if prev_imagined_state is None or current_step % imagined_state_freq == 0:
-                imagined_state = current_state
-            else:
-                imagined_state = self.predict_env.step(prev_imagined_state, 
-                                                       prev_action, 
-                                                       deterministic=True, 
-                                                       testing_mean_pred=self.testing_mean_wm)
-        return imagined_state
-
-    def train_world_model(self, replay_buffer, batch_size=256):
-        if replay_buffer.cost_memmory:
-            x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        else:
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(len(replay_buffer))
-        state = get_tensor(x, to_device=False)
-        state_device = state.to(device)
-        action = get_tensor(u, to_device=False)
-        next_state = get_tensor(y, to_device=False)
-
-        delta_state = next_state - state
-        inputs = np.concatenate((state, action), axis=-1)
-
-        labels = delta_state.numpy()
-        epoch, loss = self.predict_env.model.train(inputs, labels, batch_size=batch_size, holdout_ratio=0.2)
-        del state, action, next_state
-        
-        return loss
-
     def set_eval(self):
         self.actor.set_eval()
         self.actor_target.set_eval()
@@ -184,62 +145,6 @@ class Manager(object):
 
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
-    
-    def state_safety_on_horizon(self, state, actions, 
-                                controller_policy, 
-                                safety_cost, 
-                                all_steps_safety=False, 
-                                train=False):
-
-        assert not(self.predict_env is None), "world model must be initialized"
-        manager_proposed_goal = actions.clone()
-        next_img_state = state.clone()
-
-        h = 0
-        if all_steps_safety:
-            safeties = []    
-            horizon = self.img_horizon
-        else:
-            horizon = random.randint(1, self.img_horizon)
-        while h < horizon:
-            img_state = next_img_state
-            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
-            next_img_state = self.predict_env.step(img_state, ctrl_actions, 
-                                                    deterministic=True, 
-                                                    torch_deviced=True,
-                                                    testing_mean_pred=self.testing_mean_wm)
-            if all_steps_safety:
-                if self.lidar_observation:
-                    agent_pose = next_img_state[:, :2]
-                    obstacle_data = next_img_state[:, -16:]
-                    part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
-                    manager_absolute_goal = agent_pose
-                    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                    safety = safety_cost(manager_absolute_goal)
-                else:
-                    safety = safety_cost(next_img_state)
-                safeties.append(safety)
-            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
-                                                                         manager_proposed_goal, 
-                                                                         next_img_state)
-            h += 1
-        if not all_steps_safety:
-            if self.lidar_observation:
-                agent_pose = next_img_state[:, :2]
-                obstacle_data = next_img_state[:, -16:]
-                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
-                manager_absolute_goal = agent_pose
-                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                safety = safety_cost(manager_absolute_goal)
-            else:
-                safety = safety_cost(next_img_state)
-        else:
-            safety = 0
-            for el in safeties:
-                safety += el
-            if train:
-                safety /= self.img_horizon
-        return safety
             
     def actor_loss(self, state, goal, a_net, r_margin, cost_model=None):
         actions = self.actor(state, goal)
@@ -511,38 +416,12 @@ class Manager(object):
         if self.use_lagrange:
             torch.save(self.cost_critic.state_dict(), "{}/{}/{}_{}_ManagerCostCritic.pth".format(dir, exp_num, env_name, algo))
             torch.save(self.cost_critic_target.state_dict(), "{}/{}/{}_{}_ManagerCostCriticTarget.pth".format(dir, exp_num, env_name, algo))
-        if not(self.predict_env is None):
-            # save as pkl
-            torch.save(self.predict_env.model, "{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-            # save as state dict + scaler
-            torch.save(self.predict_env.model.ensemble_model.state_dict(), "{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo))
-            # save: scalar mu, scalar std, model elite idxs 
-            mu = self.predict_env.model.scaler.mu
-            std = self.predict_env.model.scaler.std
-            elite_model_idxes = np.array(self.predict_env.model.elite_model_idxes)
-            np.save("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo), mu)
-            np.save("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo), std)
-            np.save("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo), elite_model_idxes)
         
     def load(self, dir, env_name, algo, exp_num, load_wm_as_pkl=True):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActor.pth".format(dir, exp_num, env_name, algo)))
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
         self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
-        if not(self.predict_env is None):
-            temp_env_name = 'safepg2'
-            temp_model_type='pytorch'
-            if load_wm_as_pkl:
-                env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-                predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
-                self.set_predict_env(predict_env)
-            else:
-                self.predict_env.model.ensemble_model.load_state_dict(torch.load("{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo)))
-                mu = np.load("{}/{}/{}_{}_wm_scaler_mu.npy".format(dir, exp_num, env_name, algo))
-                std = np.load("{}/{}/{}_{}_wm_scaler_std.npy".format(dir, exp_num, env_name, algo))
-                self.predict_env.model.scaler.set_mu_std(mu, std)
-                elite_model_idxes = np.load("{}/{}/{}_{}_wm_elite_model_idxes.npy".format(dir, exp_num, env_name, algo))
-                self.predict_env.model.set_elite_model_idxes(elite_model_idxes)
                 
 class CostModel(object):
     def __init__(self, state_dim, goal_dim, lidar_observation, 
@@ -639,18 +518,15 @@ class Controller(object):
                  absolute_goal=False, 
                  cost_function=None,
                  controller_imagination_safety_loss=False,
-                 manager=None, controller_grad_clip=0, controller_safety_coef=0,
+                 controller_grad_clip=0, controller_safety_coef=0, 
                  controller_cumul_img_safety=False,
+                 img_horizon=10,
+                 use_safe_threshold=False,
+                 safe_threshold=None,
                  use_lagrange=False,
-                 pid_kp=1e-6,
-                 pid_ki=1e-7,
-                 pid_kd=1e-7,
-                 pid_d_delay=10,
-                 pid_delta_p_ema_alpha=0.95,
-                 pid_delta_d_ema_alpha=0.95,
-                 penalty_max=100.,
-                 lagrangian_multiplier_init=0.0,
-                 cost_limit=25.,):
+                 lagrangian_data={}
+
+    ):
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
@@ -662,13 +538,29 @@ class Controller(object):
         self.criterion = nn.SmoothL1Loss()  
         self.controller_cumul_img_safety = controller_cumul_img_safety
 
-        self.manager = manager
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
+        self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
-        if self.controller_imagination_safety_loss:
-            assert self.manager
         self.cost_function = cost_function
+        self.use_safe_threshold = use_safe_threshold
+        self.use_lagrange = use_lagrange
+        if use_safe_threshold or use_lagrange:
+            self.safe_threshold = torch.tensor(safe_threshold)
+        if self.use_lagrange:
+            self._pid_kp = lagrangian_data["pid_kp"]
+            self._pid_ki = lagrangian_data["pid_ki"]
+            self._pid_kd = lagrangian_data["pid_kd"]
+            self._pid_d_delay = lagrangian_data["pid_d_delay"]
+            self._pid_delta_p_ema_alpha = lagrangian_data["pid_delta_p_ema_alpha"]
+            self._pid_delta_d_ema_alpha = lagrangian_data["pid_delta_d_ema_alpha"]
+            self._pid_i = lagrangian_data["lagrangian_multiplier_init"]
+            self._cost_ds = deque(maxlen=self._pid_d_delay)
+            self._cost_ds.append(0.0)
+            self._delta_p = 0.0
+            self._cost_d = 0.0
+            self._cost_penalty = 0.0
+            self.safe_threshold = lagrangian_data["cost_limit"]
 
         self.actor = ControllerActor(state_dim, goal_dim, action_dim,
                                     scale=max_action).to(device)
@@ -694,21 +586,6 @@ class Controller(object):
             self.cost_critic_target.load_state_dict(self.cost_critic.state_dict())
             self.cost_critic_optimizer = torch.optim.Adam(self.cost_critic.parameters(),
                 lr=critic_lr, weight_decay=0.0001)
-            
-            self._pid_kp = pid_kp
-            self._pid_ki = pid_ki
-            self._pid_kd = pid_kd
-            self._pid_d_delay = pid_d_delay
-            self._pid_delta_p_ema_alpha = pid_delta_p_ema_alpha
-            self._pid_delta_d_ema_alpha = pid_delta_d_ema_alpha
-            self._penalty_max = penalty_max
-            self._pid_i = lagrangian_multiplier_init
-            self._cost_ds = deque(maxlen=self._pid_d_delay)
-            self._cost_ds.append(0.0)
-            self._delta_p = 0.0
-            self._cost_d = 0.0
-            self._cost_limit = cost_limit
-            self._cost_penalty = 0.0
 
     def clean_obs(self, state, dims=2):
         if self.no_xy:
@@ -747,21 +624,105 @@ class Controller(object):
         sg = get_tensor(sg)
         action = get_tensor(action)
         return self.critic(state, sg, action)
+    
+    def state_safety_on_horizon(self, state, actions, 
+                            controller_policy, 
+                            cost_model, 
+                            all_steps_safety=False, 
+                            train=False,
+                            predict_env=None):
 
-    def actor_loss(self, state, sg, init_state, cost_model):
+        assert not(predict_env is None), "world model must be initialized"
+        manager_proposed_goal = actions.clone()
+        next_img_state = state.clone()
+
+        safety_cost = cost_model.safe_model
+
+        h = 0
+        if all_steps_safety:
+            safeties = []    
+            horizon = self.img_horizon
+        else:
+            horizon = random.randint(1, self.img_horizon)
+        img_states = []
+        while h < horizon:
+            img_state = next_img_state
+            img_states.append(img_state)
+            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
+            next_img_state = predict_env.step(img_state, ctrl_actions, 
+                                                    deterministic=True, 
+                                                    torch_deviced=True)
+            if all_steps_safety:
+                if cost_model.lidar_observation:
+                    if cost_model.frame_stack_num > 1:
+                        part_of_state = []
+                        agent_poses = [img_state_[:, :2] for img_state_ in img_states[h-cost_model.frame_stack_num+1:h+1]]
+                        obstacle_datas = [img_state_[:, -16:] for img_state_ in img_states[h-cost_model.frame_stack_num+1:h+1]]
+                        # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
+                        while len(agent_poses) < cost_model.frame_stack_num:
+                            batch_size = agent_poses[0].shape[0]
+                            agent_pose = torch.zeros(batch_size, 2).to(device)
+                            obstacle_data = torch.zeros(batch_size, 16).to(device)
+                            agent_poses.append(agent_pose)
+                            obstacle_datas.append(obstacle_data)
+                        part_of_state = [torch.cat((agent_pose, obstacle_data), dim=1) for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas)]
+                        part_of_state = torch.cat(part_of_state, dim=1)
+                        agent_pose = next_img_state[:, :2]
+                        manager_absolute_goal = torch.cat((agent_pose, part_of_state), dim=1)
+                    else:
+                        agent_pose = next_img_state[:, :2]
+                        obstacle_data = next_img_state[:, -16:]
+                        part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                        manager_absolute_goal = agent_pose
+                        manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                    safety = safety_cost(manager_absolute_goal)
+                else:
+                    safety = safety_cost(next_img_state)
+                safeties.append(safety)
+            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
+                                                                         manager_proposed_goal, 
+                                                                         next_img_state)
+            h += 1
+        if not all_steps_safety:
+            if cost_model.lidar_observation:
+                agent_pose = next_img_state[:, :2]
+                obstacle_data = next_img_state[:, -16:]
+                part_of_state = torch.cat((agent_pose, obstacle_data), dim=1)
+                manager_absolute_goal = agent_pose
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                safety = safety_cost(manager_absolute_goal)
+            else:
+                safety = safety_cost(next_img_state)
+        else:
+            safety = 0
+            for el in safeties:
+                safety += el
+            if train:
+                safety /= self.img_horizon
+        return safety
+
+    def actor_loss(self, state, sg, init_state, cost_model, predict_env):
         actions = self.actor(state, sg)
-        eval_loss = -self.critic.Q1(state, sg, actions).mean()
-        safety_loss = 0
+        actor_loss = -self.critic.Q1(state, sg, actions).mean()
+
         if self.controller_imagination_safety_loss:
-            safety_loss = self.manager.state_safety_on_horizon(init_state, sg, 
-                                                                controller_policy=self, 
-                                                                safety_cost=cost_model.safe_model,
-                                                                all_steps_safety=self.controller_cumul_img_safety,
-                                                                train=True).mean()
-        cost_loss = 0
-        if self.use_lagrange:
-            cost_loss = self.cost_critic.Q1(state, sg, actions).mean() 
-        return eval_loss, safety_loss, cost_loss
+            safety_loss = self.state_safety_on_horizon(init_state, sg, 
+                                                        controller_policy=self, 
+                                                        cost_model=cost_model,
+                                                        all_steps_safety=self.controller_cumul_img_safety,
+                                                        train=not self.use_safe_threshold and not self.use_lagrange,
+                                                        predict_env=predict_env)
+            if self.use_safe_threshold:
+                safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
+            elif self.use_lagrange:
+                actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
+            if not self.use_lagrange:
+                actor_loss += self.controller_safety_coef * safety_loss.mean()
+        elif self.use_lagrange:
+            safety_loss = self.cost_critic.Q1(state, sg, actions).mean()
+            actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
+
+        return actor_loss
 
     def subgoal_transition(self, state, subgoal, next_state):
         if self.absolute_goal:
@@ -777,12 +738,27 @@ class Controller(object):
         subgoals = (subgoal + states[:, 0, :self.goal_dim])[:, None] - \
                    states[:, :, :self.goal_dim]
         return subgoals
+    
+    def pid_update(self, ep_cost_avg):
 
-    def train(self, replay_buffer, cost_model, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
+        delta = float(ep_cost_avg - self.safe_threshold)
+        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
+        a_p = self._pid_delta_p_ema_alpha
+        self._delta_p *= a_p
+        self._delta_p += (1 - a_p) * delta
+        a_d = self._pid_delta_d_ema_alpha
+        self._cost_d *= a_d
+        self._cost_d += (1 - a_d) * float(ep_cost_avg)
+        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
+        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+        self._cost_penalty = max(0.0, pid_o)
+        self._cost_ds.append(self._cost_d)
+
+    def train(self, replay_buffer, cost_model, predict_env, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
-        avg_eval_loss, avg_cost_loss, avg_cost_critic_loss = 0., 0., 0.
+        avg_cost_critic_loss = 0.
         debug_info = {}
-        for it in range(iterations):              
+        for _ in range(iterations):              
             if self.use_lagrange:
                 x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(batch_size)
                 cost = get_tensor(c)
@@ -843,12 +819,8 @@ class Controller(object):
                 self.cost_critic_optimizer.step()
 
             # Compute actor loss
-            eval_loss, safety_loss, cost_loss = self.actor_loss(state, sg, init_state, cost_model)
-            if self.use_lagrange:
-                actor_loss = (eval_loss + self._cost_penalty * cost_loss) / (1 + self._cost_penalty)
-            else:
-                actor_loss = eval_loss
-            actor_loss += self.controller_safety_coef * safety_loss
+            actor_loss = self.actor_loss(state, sg, init_state, cost_model, predict_env)
+
             # Optimize the actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -859,9 +831,7 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
-            avg_eval_loss += eval_loss
             avg_cost_critic_loss += cost_critic_loss
-            avg_cost_loss += cost_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
@@ -878,22 +848,10 @@ class Controller(object):
             if self.use_lagrange and ep_cost is not None:
                 self.pid_update(ep_cost)
 
-        return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info, \
-                avg_eval_loss / iterations, avg_cost_critic_loss / iterations, avg_cost_loss / iterations
-    
-    def pid_update(self, ep_cost_avg):
-        delta = float(ep_cost_avg - self._cost_limit)
-        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
-        a_p = self._pid_delta_p_ema_alpha
-        self._delta_p *= a_p
-        self._delta_p += (1 - a_p) * delta
-        a_d = self._pid_delta_d_ema_alpha
-        self._cost_d *= a_d
-        self._cost_d += (1 - a_d) * float(ep_cost_avg)
-        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
-        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
-        self._cost_penalty = max(0.0, pid_o)
-        self._cost_ds.append(self._cost_d)
+        if self.use_lagrange and ep_cost is not None:
+            debug_info["lagrangian"] = self._cost_penalty
+
+        return avg_act_loss / iterations, avg_crit_loss / iterations, avg_cost_critic_loss / iterations, debug_info
 
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))

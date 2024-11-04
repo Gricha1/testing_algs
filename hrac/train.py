@@ -3,6 +3,7 @@ import time
 import copy
 from math import ceil
 from collections import deque
+import random
 
 import torch
 import numpy as np
@@ -11,7 +12,6 @@ import wandb
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from stable_baselines3.common.logger import Video
 
 from safety_gym_wrapper.env import make_safety
 from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
@@ -23,7 +23,7 @@ import hrac.hrac as hrac
 from hrac.models import ANet
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
 
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -34,7 +34,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 
 
 def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model,
-                    calculate_controller_reward, ctrl_rew_scale,
+                    predict_env, calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
                     renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
     print("Starting evaluation number {}...".format(eval_idx))
@@ -54,7 +54,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
             avg_episode_real_subgoal_safety = 0
-            if env_name == "SafeAntMaze":
+            if "SafeAntMaze" in env_name:
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafeGym":
                 if args.cost_model:
@@ -63,7 +63,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
-                if env_name == "SafeAntMaze":
+                if "SafeAntMaze" in env_name:
                     x_with_zeros = np.concatenate((x_np, 
                                                 np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
                                                 axis=1)
@@ -76,16 +76,19 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     pred = cost_model.safe_model(x_tensor, hazard_poses)
                 else:
                     pred = cost_model.safe_model(x_tensor)
+                prev_probs = pred.squeeze().tolist()
+                val_safe_model_roc = roc_auc_score(true, prev_probs)
                 pred = (pred > 0.5).int().squeeze().tolist()
                 val_safe_model_f1 = f1_score(true, pred)
                 validation_date["safe_model_true_mean"] = np.mean(true)
                 validation_date["safe_model_pred_mean"] = np.mean(pred)
                 validation_date["safe_model_f1"] = val_safe_model_f1
+                validation_date["safe_model_roc"] = val_safe_model_roc
 
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
-            elif env_name == "SafeAntMaze":
+            elif "SafeAntMaze" in env_name:
                 obs = env.reset(eval_idx=eval_ep)
             elif env_name == "SafeGym":
                 # test
@@ -114,7 +117,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             episode_imagine_subgoal_safety = 0
             episode_subgoals_count = 0
             while not done:
-                if step_count % manager_propose_frequency == 0:
+                if not args.train_only_td3 and step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
@@ -127,18 +130,22 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
                                 subgoal_torch = torch.tensor(subgoal, dtype=torch.float32).to(device).unsqueeze(0)
-                                episode_imagine_subgoal_safety += manager_policy.state_safety_on_horizon(
+                                episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
                                                         state_torch, subgoal_torch, 
                                                         controller_policy, 
-                                                        safety_cost=cost_model.safe_model,
-                                                        all_steps_safety=True
+                                                        cost_model=cost_model,
+                                                        all_steps_safety=True,
+                                                        predict_env=predict_env
                                                         )
                     episode_subgoals_count += 1
 
                 step_count += 1
                 global_steps += 1
-
-                action = controller_policy.select_action(state, subgoal, evaluation=True)
+                if args.train_only_td3:
+                    controller_goal = goal[:2] - state[:2]
+                    action = controller_policy.select_action(state, controller_goal, evaluation=True)
+                else:
+                    action = controller_policy.select_action(state, subgoal, evaluation=True)
                 new_obs, reward, done, info = env.step(action)
                 if "Safe" in env_name:
                     cost = info["safety_cost"]
@@ -157,17 +164,19 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if step_count == 1:
                         renderer.setup_renderer()
                     debug_info = {}
-                    if env_name == "SafeAntMaze":
+                    if "SafeAntMaze" in env_name:
                         debug_info["safety_boundary"] = safety_boundary
                         debug_info["safe_dataset"] = safe_dataset
                         if args.world_model:
-                            debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
+                            if not args.train_only_td3:
+                                debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = episode_controller_rew
                     debug_info["t"] = step_count
                     debug_info["goals_achieved"] = episode_goals_achieved
-                    debug_info["dist_to_goal"] = env.env.dist_goal()
+                    if args.domain_name == "Safexp":
+                        debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
                         x = a_net((torch.from_numpy(state[:2]).type('torch.FloatTensor')).to("cuda"))
@@ -182,18 +191,19 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         current_step_info["goal_pos"] = np.array(goal[:2])
                     else:
                         current_step_info["goal_pos"] = None
-                    if manager_policy.absolute_goal:
-                        current_step_info["subgoal_pos"] = np.array(subgoal[:2])
-                    else:
-                        current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
-                                                           current_step_info["robot_pos"]
+                    if not args.train_only_td3:
+                        if manager_policy.absolute_goal:
+                            current_step_info["subgoal_pos"] = np.array(subgoal[:2])
+                        else:
+                            current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
+                                                            current_step_info["robot_pos"]
                     if env_name == "SafeGym":
                         current_step_info["robot_radius"] = env.goal_size
                     else:
                         current_step_info["robot_radius"] = 1.5
                     # get imagination of current state
-                    if not(manager_policy.predict_env is None):
-                        imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
+                    if not(predict_env is None):
+                        imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
                         prev_imagined_state = imagined_state
                         current_step_info["imagined_robot_pos"] = imagined_state[:2]
                     # add apples and bombs if GatherEnv
@@ -217,15 +227,21 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
 
-                subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
+                if not args.train_only_td3:
+                    subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
 
                 avg_reward += reward
                 if "Safe" in env_name:
                     avg_cost += cost
                     episode_cost += cost
-                avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
+                if args.train_only_td3:
+                    controller_goal = goal[:2] - state[:2]
+                    avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
+                    episode_controller_rew += calculate_controller_reward(state, goal, new_state, ctrl_rew_scale)
+                else:
+                    avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)    
+                    episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
                 episode_reward += reward
-                episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
 
                 state = new_state
                 prev_action = action
@@ -233,9 +249,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 current_trajectory.append(state)
 
             if "Safe" in env_name:
-                avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
-                avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
-                avg_episode_real_subgoal_safety += episode_cost / episode_subgoals_count
+                if not args.train_only_td3:
+                    avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
+                    avg_episode_imagine_subgoal_safety += episode_imagine_subgoal_safety / episode_subgoals_count
+                    avg_episode_real_subgoal_safety += episode_cost / episode_subgoals_count
                 
             del current_trajectory
         if not args.validation_without_image and not (renderer is None) and not (writer is None):
@@ -250,12 +267,15 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
         avg_reward /= eval_episodes
         if "Safe" in env_name:
             avg_episode_safety_subgoal_rate /= eval_episodes
-            validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
-            avg_episode_real_subgoal_safety /= eval_episodes
-            validation_date["real_subgoal_safety"] = avg_episode_real_subgoal_safety
+            if not args.train_only_td3:
+                avg_episode_safety_subgoal_rate /= eval_episodes
+                validation_date["safety_subgoal_rate"] = avg_episode_safety_subgoal_rate
+                avg_episode_real_subgoal_safety /= eval_episodes
+                validation_date["real_subgoal_safety"] = avg_episode_real_subgoal_safety
             if args.world_model:
-                avg_episode_imagine_subgoal_safety /= eval_episodes
-                validation_date["imagine_subgoal_safety"] = avg_episode_imagine_subgoal_safety
+                if not args.train_only_td3:
+                    avg_episode_imagine_subgoal_safety /= eval_episodes
+                    validation_date["imagine_subgoal_safety"] = avg_episode_imagine_subgoal_safety
             avg_cost /= eval_episodes
         avg_controller_rew /= global_steps
         avg_step_count = global_steps / eval_episodes
@@ -312,9 +332,24 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
-            for j in range(1, min(args.manager_propose_freq, len(traj) - i)):
-                s1 = tuple(np.round(traj[i][:controller_goal_dim]).astype(np.int32))
-                s2 = tuple(np.round(traj[i+j][:controller_goal_dim]).astype(np.int32))
+            for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
+                s_i = traj[i][:controller_goal_dim]
+                s_i_j = traj[i+j][:controller_goal_dim]
+                if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+                    if "1" in args.task_name:
+                        xy_min_max = 2
+                    elif "2" in args.task_name:
+                        xy_min_max = 5
+                    else:
+                        assert 1 == 0
+                    if args.clip_a_net_xy:
+                        s_i = np.clip(s_i, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                        s_i_j = np.clip(s_i_j, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                    else:
+                        s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                        s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                s1 = tuple(np.round(s_i).astype(np.int32))
+                s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
                     state_list.append(s1)
                     state_dict[s1] = n_states
@@ -326,10 +361,6 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 adj_mat[state_dict[s1], state_dict[s2]] = 1
                 adj_mat[state_dict[s2], state_dict[s1]] = 1
     print("Explored states: {}".format(n_states))
-    flags = np.ones((30, 30))
-    for s in state_list:
-        flags[int(s[0]), int(s[1])] = 0
-    print(flags)
     print("Training adjacency network...")
     loss = utils.train_adj_net(a_net, state_list, adj_mat[:n_states, :n_states],
                         optimizer_r, args.r_margin_pos, args.r_margin_neg,
@@ -377,17 +408,27 @@ def run_hrac(args):
         action_dim = env.action_space.shape[0]
         env.state_dim = state_dim
         # test, cost unique = [0, 1, 2]
+        # ------------ get dataset from env to estimate cost model, this data wont be used for training
         if args.cost_model:
-            print("get safedataset safetygym!!!")
-            start_time = time.time()
-            env.safe_dataset = get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num)
-            end_time = time.time()
-            print("time for safe dataset:", end_time-start_time)
-        renderer_args = {"plot_subgoal": True, 
+            if args.validate:
+                cost_dataset_seeds = [213]
+            else:
+                cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
+            safe_dataset = []
+            for seed_ in cost_dataset_seeds:
+                env.seed(seed_)
+                print("get safedataset safetygym!!!", f"seed={seed_}")
+                start_time = time.time()
+                safe_dataset.extend(get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num))
+                end_time = time.time()
+                print("time for safe dataset:", end_time-start_time)
+            env.safe_dataset = safe_dataset
+        renderer_args = {"plot_subgoal": False if args.train_only_td3 else True, 
                          "world_model_comparsion": False,
                          "plot_safety_boundary": False,
                          "plot_world_model_state": args.world_model,
                          "controller_safe_model": args.cost_model,
+                         "plot_cost_model_heatmap": True if args.train_only_td3 else False,
                          }
         renderer = get_renderer(env, args, renderer_args)
         env.seed(args.seed)
@@ -475,36 +516,48 @@ def run_hrac(args):
 
 
     # Initialize models
-    manager_policy = hrac.Manager(
-        state_dim=state_dim,
-        goal_dim=goal_dim,
-        action_dim=controller_goal_dim,
-        actor_lr=args.man_act_lr,
-        critic_lr=args.man_crit_lr,
-        candidate_goals=args.candidate_goals,
-        correction=not args.no_correction,
-        scale=man_scale,
-        goal_loss_coeff=args.goal_loss_coeff,
-        absolute_goal=args.absolute_goal,
-        wm_no_xy=no_xy,
-        img_horizon=args.img_horizon,        
-        modelfree_safety=args.modelfree_safety,
-        coef_safety_modelbased=args.coef_safety_modelbased,
-        coef_safety_modelfree=args.coef_safety_modelfree,
-        testing_mean_wm=args.testing_mean_wm,
-        subgoal_grad_clip=args.subgoal_grad_clip,
-        lidar_observation=True if args.domain_name == "Safexp" else False,
-        use_lagrange=args.use_lagrange,
-        pid_kp=args.pid_kp,
-        pid_ki=args.pid_ki,
-        pid_kd=args.pid_kd,
-        pid_d_delay=args.pid_d_delay,
-        pid_delta_p_ema_alpha=args.pid_delta_p_ema_alpha,
-        pid_delta_d_ema_alpha=args.pid_delta_d_ema_alpha,
-        penalty_max=args.penalty_max,
-        lagrangian_multiplier_init=args.lagrangian_multiplier_init,
-        cost_limit=args.cost_limit,
-    )
+    if not args.train_only_td3:
+        manager_policy = hrac.Manager(
+            state_dim=state_dim,
+            goal_dim=goal_dim,
+            action_dim=controller_goal_dim,
+            actor_lr=args.man_act_lr,
+            critic_lr=args.man_crit_lr,
+            candidate_goals=args.candidate_goals,
+            correction=not args.no_correction,
+            scale=man_scale,
+            goal_loss_coeff=args.goal_loss_coeff,
+            absolute_goal=args.absolute_goal,       
+            modelfree_safety=args.modelfree_safety,
+            coef_safety_modelbased=args.coef_safety_modelbased,
+            coef_safety_modelfree=args.coef_safety_modelfree,
+            testing_mean_wm=args.testing_mean_wm,
+            subgoal_grad_clip=args.subgoal_grad_clip,
+            lidar_observation=True if args.domain_name == "Safexp" else False,
+            use_lagrange=args.use_lagrange,
+            pid_kp=args.pid_kp,
+            pid_ki=args.pid_ki,
+            pid_kd=args.pid_kd,
+            pid_d_delay=args.pid_d_delay,
+            pid_delta_p_ema_alpha=args.pid_delta_p_ema_alpha,
+            pid_delta_d_ema_alpha=args.pid_delta_d_ema_alpha,
+            penalty_max=args.penalty_max,
+            lagrangian_multiplier_init=args.lagrangian_multiplier_init,
+            cost_limit=args.cost_limit,
+        )
+    else:
+        manager_policy = None
+    
+    lagrangian_data = {}
+    if args.controller_use_lagrange:
+        lagrangian_data["cost_limit"] = args.ctrl_cost_limit
+        lagrangian_data["pid_kp"] = args.ctrl_pid_kp
+        lagrangian_data["pid_ki"] = args.ctrl_pid_ki
+        lagrangian_data["pid_kd"] = args.ctrl_pid_kd
+        lagrangian_data["pid_d_delay"] = args.ctrl_pid_d_delay
+        lagrangian_data["pid_delta_p_ema_alpha"] = args.ctrl_pid_delta_p_ema_alpha
+        lagrangian_data["pid_delta_d_ema_alpha"] = args.ctrl_pid_delta_d_ema_alpha
+        lagrangian_data["lagrangian_multiplier_init"] = args.ctrl_lagrangian_multiplier_init
     
     controller_policy = hrac.Controller(
         state_dim=state_dim,
@@ -520,19 +573,14 @@ def run_hrac(args):
         cost_function=None if args.domain_name == "Safexp" or args.cost_memmory else env.cost_func,
         controller_imagination_safety_loss=args.controller_imagination_safety_loss,
         controller_grad_clip=args.controller_grad_clip,
-        manager=manager_policy,
         controller_safety_coef=args.controller_safety_coef,
         controller_cumul_img_safety=args.controller_cumul_img_safety,
-        use_lagrange=args.ctrl_use_lagrange,
-        pid_kp=args.ctrl_pid_kp,
-        pid_ki=args.ctrl_pid_ki,
-        pid_kd=args.ctrl_pid_kd,
-        pid_d_delay=args.ctrl_pid_d_delay,
-        pid_delta_p_ema_alpha=args.ctrl_pid_delta_p_ema_alpha,
-        pid_delta_d_ema_alpha=args.ctrl_pid_delta_d_ema_alpha,
-        penalty_max=args.ctrl_penalty_max,
-        lagrangian_multiplier_init=args.ctrl_lagrangian_multiplier_init,
-        cost_limit=args.ctrl_cost_limit,
+        img_horizon=args.img_horizon,
+        use_safe_threshold = args.use_safe_threshold,
+        safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon) \
+                         if args.use_safe_threshold or args.controller_cumul_img_safety else None,
+        use_lagrange=args.controller_use_lagrange,
+        lagrangian_data=lagrangian_data
     )
 
     calculate_controller_reward = get_reward_function(
@@ -546,23 +594,24 @@ def run_hrac(args):
         man_noise = utils.NormalNoise(sigma=args.man_noise_sigma)
         ctrl_noise = utils.NormalNoise(sigma=args.ctrl_noise_sigma)
 
-    manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size, cost_memmory=args.use_lagrange)
-    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, cost_memmory=args.ctrl_use_lagrange)
+    if not args.train_only_td3:
+        manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size, cost_memmory=args.use_lagrange)
+    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, cost_memmory=args.controller_use_lagrange)
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
                          ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
-                         ep_manager_reward, total_timesteps):
+                         ep_manager_reward, total_timesteps, pid_costs=None):
         print("train controller")
-        ctrl_act_loss, ctrl_crit_loss, debug_info_controller, ctrl_eval, ctrl_cost_crit_loss, ctrl_cost_loss = controller_policy.train(
+        ctrl_act_loss, ctrl_crit_loss, ctrl_cost_crit_loss, debug_info_controller = controller_policy.train(
             controller_buffer, 
             cost_model=cost_model,
+            predict_env=predict_env,
             iterations=episode_timesteps,
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
             tau=args.ctrl_soft_sync_rate,
-            ep_cost=np.mean(pid_costs) if episode_num > 10 else None
-        )
+            ep_cost=np.mean(pid_costs) if args.controller_use_lagrange and episode_num > 10 else None)
         if controller_policy.use_lagrange and episode_num > 10:
             print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
@@ -570,10 +619,8 @@ def run_hrac(args):
             print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
         writer.add_scalar("data/controller_actor_loss", ctrl_act_loss, total_timesteps)
         writer.add_scalar("data/controller_critic_loss", ctrl_crit_loss, total_timesteps)
-        if args.ctrl_use_lagrange:
-            writer.add_scalar("data/controller_eval_loss", ctrl_eval, total_timesteps)
+        if args.controller_use_lagrange:
             writer.add_scalar("data/controller_cost_critic_loss", ctrl_cost_crit_loss, total_timesteps)
-            writer.add_scalar("data/controller_cost_loss", ctrl_cost_loss, total_timesteps)
             writer.add_scalar("data/controller_lagrange_mult", controller_policy._cost_penalty, total_timesteps)
             writer.add_scalar("pid/ctrl_pid_i", controller_policy._pid_i, total_timesteps)
             writer.add_scalar("pid/ctrl_cost_d", controller_policy._cost_d, total_timesteps)
@@ -592,7 +639,10 @@ def run_hrac(args):
     n_states = 0
     state_list = []
     state_dict = {}
-    adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
+    if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+        adj_mat = np.diag(np.ones(3000, dtype=np.uint8))
+    else:
+        adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
     traj_buffer = utils.TrajectoryBuffer(capacity=args.traj_buffer_size)
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:
@@ -658,15 +708,14 @@ def run_hrac(args):
             env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
                                               reward_size, cost_size, pred_hidden_size,
                                               learning_rate=learning_rate, use_decay=use_decay)
-            predict_env = PredictEnv(env_model, env_name, model_type)
-        manager_policy.set_predict_env(predict_env)
+            predict_env = PredictEnv(env_model, env_name, model_type, args.testing_mean_wm)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size, cost_memmory=args.cost_memmory)
             
         def train_world_model(replay_buffer, acc_wm_imagination_episode_metric, batch_size=256, 
                               episode_num=0, total_timesteps=0):
             with TensorWrapper():
                 print("train world model")
-                world_model_loss = manager_policy.train_world_model(replay_buffer, batch_size=batch_size)
+                world_model_loss = predict_env.train_world_model(replay_buffer, batch_size=batch_size)
                 
                 writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
                 if episode_num > 1:
@@ -676,14 +725,18 @@ def run_hrac(args):
                     print("world model loss: {:.3f}".format(world_model_loss))
 
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
-            
+    else:
+        predict_env = None   
 
     if args.load:
         try:
-            manager_policy.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            if not args.train_only_td3:
+                manager_policy.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             if args.cost_model:
                 if not args.cost_oracle:
                     cost_model.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+            if args.world_model:
+                predict_env.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             controller_policy.load("/logdir/models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
             just_loaded = True
@@ -697,7 +750,7 @@ def run_hrac(args):
     if args.validate:
         # Start validation ...
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
             a_net=a_net, args=args)
@@ -813,15 +866,22 @@ def run_hrac(args):
                                           episode_num=episode_num,
                                           total_timesteps=total_timesteps)
                     
-                    ## Train TD3 controller                    
-                    train_controller(controller_buffer, ctrl_done, next_state, subgoal, 
+                    ## Train TD3 controller             
+                    if args.train_only_td3:
+                        controller_subgoal = goal[:2] - state[:2]
+                        episode_safety_subgoal_rate_ = 0  
+                    else:
+                        controller_subgoal = subgoal
+                        episode_safety_subgoal_rate_ = episode_safety_subgoal_rate/episode_subgoals_count     
+                    train_controller(controller_buffer, ctrl_done, next_state, controller_subgoal, 
                                     episode_timesteps, 
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
-                                    episode_safety_subgoal_rate/episode_subgoals_count, 
-                                    ep_manager_reward, total_timesteps)
+                                    episode_safety_subgoal_rate_, 
+                                    ep_manager_reward, total_timesteps,
+                                    pid_costs=pid_costs if controller_policy.use_lagrange else None)
 
                     ## Train manager
-                    if timesteps_since_manager >= args.train_manager_freq:
+                    if not args.train_only_td3 and timesteps_since_manager >= args.train_manager_freq:
                         timesteps_since_manager = 0
                         r_margin = (args.r_margin_pos + args.r_margin_neg) / 2
 
@@ -876,7 +936,7 @@ def run_hrac(args):
                         timesteps_since_eval = 0
                         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date =\
                             evaluate_policy(env, args.env_name, manager_policy, controller_policy, cost_model,
-                                calculate_controller_reward, args.ctrl_rew_scale, 
+                                predict_env, calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
                                 renderer=renderer, writer=writer, total_timesteps=total_timesteps,
                                 a_net=a_net, args=args)
@@ -902,10 +962,13 @@ def run_hrac(args):
 
                         if args.save_models:
                             controller_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
-                            manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
+                            if not args.train_only_td3:
+                                manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
                             if args.cost_model:
                                 if not args.cost_oracle:
                                     cost_model.save("/logdir/models", args.env_name, args.algo, exp_num)
+                            if args.world_model:
+                                predict_env.save("/logdir/models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
@@ -914,12 +977,13 @@ def run_hrac(args):
                         writer.add_scalar("data/a_net_loss", a_loss, total_timesteps)
 
 
-                    if len(manager_transition[-2]) != 1:                    
+                    if not args.train_only_td3 and len(manager_transition[-2]) != 1:                    
                         manager_transition[1] = state
                         manager_transition[5] = float(True)
                         manager_buffer.add(manager_transition)
 
                 obs = env.reset()
+
                 goal = obs["desired_goal"]
                 state = obs["observation"]
                 traj_buffer.create_new_trajectory()
@@ -938,8 +1002,9 @@ def run_hrac(args):
                 if "Safe" in args.env_name:
                     episode_cost = 0
                     controller_episode_cost = 0
-                    episode_safety_subgoal_rate = 0
-                    episode_subgoals_count = 0
+                    if not args.train_only_td3:
+                        episode_safety_subgoal_rate = 0
+                        episode_subgoals_count = 0
                 prev_action = None
                 if args.world_model:
                     prev_imagined_state = None
@@ -947,14 +1012,15 @@ def run_hrac(args):
                     acc_wm_imagination_episode_metric = 0
                     wm_imagination_episode_metric = 0
 
-                subgoal = manager_policy.sample_goal(state, goal)
-                episode_subgoals_count += 1
-                if not args.absolute_goal:
-                    subgoal = man_noise.perturb_action(subgoal,
-                        min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
-                else:
-                    subgoal = man_noise.perturb_action(subgoal,
-                        min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
+                if not args.train_only_td3:
+                    subgoal = manager_policy.sample_goal(state, goal)
+                    episode_subgoals_count += 1
+                    if not args.absolute_goal:
+                        subgoal = man_noise.perturb_action(subgoal,
+                            min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
+                    else:
+                        subgoal = man_noise.perturb_action(subgoal,
+                            min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
 
                 timesteps_since_subgoal = 0
                 if args.use_lagrange:
@@ -962,7 +1028,11 @@ def run_hrac(args):
                 else:
                     manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
-            action = controller_policy.select_action(state, subgoal)
+            if args.train_only_td3:
+                controller_goal = goal[:2] - state[:2]
+                action = controller_policy.select_action(state, controller_goal)
+            else:                
+                action = controller_policy.select_action(state, subgoal)
             action = ctrl_noise.perturb_action(action, -max_action, max_action)
 
             action_copy = action.copy()
@@ -971,22 +1041,28 @@ def run_hrac(args):
             cost = info["safety_cost"]
             total_cost += cost
 
-            manager_transition[4] += manager_reward * args.man_rew_scale
-            if args.use_lagrange:
-                manager_transition[5] += cost
+            if not args.train_only_td3:
+                manager_transition[4] += manager_reward * args.man_rew_scale
+                if args.use_lagrange:
+                    manager_transition[5] += cost
+                manager_transition[-1].append(action)
             ep_manager_reward += manager_reward * args.man_rew_scale
-            manager_transition[-1].append(action)
 
             next_goal = next_tup["desired_goal"]
             next_state = next_tup["observation"]
 
-            manager_transition[-2].append(next_state)
+            if not args.train_only_td3:
+                manager_transition[-2].append(next_state)
             traj_buffer.append(next_state)
 
-            controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
-            subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+            if args.train_only_td3:
+                controller_goal = goal[:2] - state[:2]
+                controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
+            else:
+                controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
+                subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+                controller_goal = subgoal
 
-            controller_goal = subgoal
             ep_controller_reward += controller_reward
             if "Safe" in args.env_name:
                 episode_cost += cost
@@ -1010,7 +1086,7 @@ def run_hrac(args):
                     world_model_buffer.add(
                         (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
             
-            if args.ctrl_use_lagrange:
+            if args.controller_use_lagrange:
                 controller_buffer.add(
                     (state, next_state, controller_goal, action, controller_reward, cost, float(ctrl_done), [], []))
             else:
@@ -1023,14 +1099,18 @@ def run_hrac(args):
             episode_timesteps += 1
             total_timesteps += 1
             timesteps_since_eval += 1
-            timesteps_since_manager += 1
-            timesteps_since_subgoal += 1
+            if not args.train_only_td3:
+                timesteps_since_manager += 1
+                timesteps_since_subgoal += 1
             if done:
                 pid_costs.append(episode_cost)
 
+            if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
+                controller_policy.controller_safety_coef = args.controller_curriculum_safety_coef
+
             ## logging world model performance
-            if args.world_model and episode_num > 1:
-                imagined_state = manager_policy.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
+            if not args.train_only_td3 and args.world_model and episode_num > 1:
+                imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
                 prev_imagined_state = imagined_state
                 cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state[:2] - state[:2]) ** 2))
                 wm_imagination_episode_metric += cur_wm_imagination_episode_metric
@@ -1040,7 +1120,7 @@ def run_hrac(args):
 
             prev_action = action_copy
 
-            if timesteps_since_subgoal % args.manager_propose_freq == 0:
+            if not args.train_only_td3 and timesteps_since_subgoal % args.manager_propose_freq == 0:
                 manager_transition[1] = state
                 manager_transition[-3] = float(done)
 
@@ -1049,10 +1129,10 @@ def run_hrac(args):
 
                 if "Safe" in args.env_name:
                     if manager_policy.absolute_goal:
-                        if env_name == "SafeAntMaze":
+                        if "SafeAntMaze" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        if env_name == "SafeAntMaze":
+                        if "SafeAntMaze" in env_name:
                             episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                     episode_subgoals_count += 1
 
@@ -1071,7 +1151,7 @@ def run_hrac(args):
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(
-            env, args.env_name, manager_policy, controller_policy, cost_model, calculate_controller_reward,
+            env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,
             a_net=a_net, args=args)
@@ -1085,10 +1165,13 @@ def run_hrac(args):
 
         if args.save_models:
             controller_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
-            manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
+            if not args.train_only_td3:
+                manager_policy.save("/logdir/models", args.env_name, args.algo, exp_num)
             if args.cost_model:
                 if not args.cost_oracle:
                     cost_model.save("/logdir/models", args.env_name, args.algo, exp_num)
+            if args.world_model:
+                predict_env.save("/logdir/models", args.env_name, args.algo, exp_num)
 
         writer.close()
 
