@@ -545,7 +545,7 @@ class Controller(object):
         self.cost_function = cost_function
         self.use_safe_threshold = use_safe_threshold
         self.use_lagrange = use_lagrange
-        if use_safe_threshold or use_lagrange:
+        if (use_safe_threshold or use_lagrange) and safe_threshold is not None:
             self.safe_threshold = torch.tensor(safe_threshold)
         if self.use_lagrange:
             self._pid_kp = lagrangian_data["pid_kp"]
