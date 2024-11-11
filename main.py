@@ -27,6 +27,8 @@ if __name__ == "__main__":
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
+    parser.add_argument("--sparce_reward", action="store_true")
+
     ## safety gym
     parser.add_argument("--image_size", type=int, default=2)
     parser.add_argument("--vector_env", default=False, action="store_true")
