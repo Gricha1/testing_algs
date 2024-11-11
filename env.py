@@ -19,13 +19,14 @@ from gym.envs.registration import register
 
 STATE_KEY = 'state'
 class ActionRepeatWrapper(Wrapper):
-    def __init__(self, env, repeat, binary_cost=False):
+    def __init__(self, env, repeat, binary_cost=False, sparce_reward=False):
         super().__init__(env)
         if not type(repeat) is int or repeat < 1:
             raise ValueError("Repeat value must be an integer and greater than 0.")
         self.action_repeat = repeat
         self._max_episode_steps = env.config["num_steps"]//repeat
         self.binary_cost = binary_cost
+        self.sparce_reward = sparce_reward
     
     def max_len(self):
         return self._max_episode_steps
@@ -33,40 +34,47 @@ class ActionRepeatWrapper(Wrapper):
     def step(self, action):
         observation, reward, done, info = self.env.step(action)
         track_info = info.copy()
-        track_reward = reward
-        # fix bug with goal met on goal continue
-        goal_met = False
-        if "goal_met" in info:
-            goal_met = True
+        track_done = done
+
+        if self.sparce_reward:
+            if "goal_met" in track_info:
+                track_reward = 1.0
+            else:
+                track_reward = 0.0
+        else:
+            track_reward = reward
+
         # fix cost bug with action repeat and done
         agent_action_repeat_xy = [self.env.robot_pos]
-        if done or self.action_repeat==1:
+        if track_done or self.action_repeat==1:
             # fix cost bug with action repeat
-            info["agent_action_repeat_xy"] = agent_action_repeat_xy
-            return observation, reward, done, info
-        done1 = False
+            track_info["agent_action_repeat_xy"] = agent_action_repeat_xy
+            return observation, track_reward, track_done, track_info
+        
         for i in range(self.action_repeat-1):
-            if done1:
+            if track_done:
                 # fix cost bug with action repeat and done
                 track_info["agent_action_repeat_xy"] = agent_action_repeat_xy
-                return observation1, track_reward, done1, track_info
+                return observation1, track_reward, track_done, track_info
             observation1, reward1, done1, info1 = self.env.step(action)
             # fix bug with goal met on goal continue
             if "goal_met" in info1:
-                goal_met = True
+                track_info["goal_met"] = True
+            track_done = track_done or done1
             track_info["cost"] += info1["cost"]
-            track_reward += reward1
+            if self.sparce_reward:
+                if "goal_met" in track_info:
+                    track_reward += 1.0
+            else:
+                track_reward += reward1
             agent_action_repeat_xy.append(self.env.robot_pos)
 
         if self.binary_cost:
             track_info["cost"] = 1 if track_info["cost"] > 0 else 0
         track_info["safety_cost"] = track_info["cost"]
-        # fix bug with goal met on goal continue
-        if goal_met:
-            track_info["goal_met"] = True
         # fix cost bug with action repeat
         track_info["agent_action_repeat_xy"] = agent_action_repeat_xy
-        return observation1, track_reward, done1, track_info
+        return observation1, track_reward, track_done, track_info
     
 
 
@@ -462,14 +470,16 @@ class SafetyEnvWrapper:
 
 gym.logger.set_level(40)
 
-def make_safety(domain_name, image_size, use_pixels=True, action_repeat=1, goal_conditioned=False, pseudo_lidar=False):
+def make_safety(domain_name, image_size, use_pixels=True, 
+                action_repeat=1, goal_conditioned=False, pseudo_lidar=False, 
+                sparce_reward=False):
     env = gym.make(
         domain_name, 
     )
 
     env.reset()
     env._max_episode_steps = env.config["num_steps"]
-    ar_env = ActionRepeatWrapper(env, repeat=action_repeat)
+    ar_env = ActionRepeatWrapper(env, repeat=action_repeat, sparce_reward=sparce_reward)
     if not use_pixels:
         if goal_conditioned:
             gc_env = GoalConditionedWrapper(ar_env, pseudo_lidar=pseudo_lidar)
