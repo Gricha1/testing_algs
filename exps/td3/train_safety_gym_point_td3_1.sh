@@ -10,7 +10,6 @@ python main.py --domain_name Safexp \
                --env_name SafeGym \
                --goal_conditioned \
                --vector_env \
-               --sparce_reward \
                --action_repeat 2 \
                --seed $seed \
                --train_only_td3 \

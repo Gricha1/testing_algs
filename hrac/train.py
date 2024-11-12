@@ -112,7 +112,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             episode_goals_achieved = 0
             episode_reward = 0
             episode_cost = 0
-            episode_controller_rew = 0
             episode_safety_subgoal_rate = 0
             episode_imagine_subgoal_safety = 0
             episode_subgoals_count = 0
@@ -142,7 +141,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 step_count += 1
                 global_steps += 1
                 if args.train_only_td3:
-                    controller_goal = goal[:2] - state[:2]
+                    controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
                     action = controller_policy.select_action(state, controller_goal, evaluation=True)
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
@@ -172,7 +171,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                 debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_cost"] = episode_cost
-                    debug_info["acc_controller_reward"] = episode_controller_rew
+                    debug_info["acc_controller_reward"] = avg_controller_rew
                     debug_info["t"] = step_count
                     debug_info["goals_achieved"] = episode_goals_achieved
                     if args.domain_name == "Safexp":
@@ -235,12 +234,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     avg_cost += cost
                     episode_cost += cost
                 if args.train_only_td3:
-                    controller_goal = goal[:2] - state[:2]
-                    avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
-                    episode_controller_rew += calculate_controller_reward(state, goal, new_state, ctrl_rew_scale)
+                    controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                    #avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
+                    avg_controller_rew = reward*ctrl_rew_scale
                 else:
                     avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)    
-                    episode_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)
                 episode_reward += reward
 
                 state = new_state
@@ -995,7 +993,7 @@ def run_hrac(args):
                     manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
             if args.train_only_td3:
-                controller_goal = goal[:2] - state[:2]
+                controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
                 action = controller_policy.select_action(state, controller_goal)
             else:                
                 action = controller_policy.select_action(state, subgoal)
@@ -1019,8 +1017,9 @@ def run_hrac(args):
             traj_buffer.append(next_state)
 
             if args.train_only_td3:
-                controller_goal = goal[:2] - state[:2]
-                controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
+                controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                #test_controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
+                controller_reward = manager_reward * args.ctrl_rew_scale
             else:
                 controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
                 subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)

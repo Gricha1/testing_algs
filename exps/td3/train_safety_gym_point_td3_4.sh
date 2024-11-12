@@ -11,6 +11,7 @@ python main.py --domain_name Safexp \
                --goal_conditioned \
                --vector_env \
                --action_repeat 2 \
+               --sparce_reward \
                --seed $seed \
                --train_only_td3 \
                --cost_memmory \
