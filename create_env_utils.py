@@ -305,4 +305,6 @@ def create_env(args, renderer_args={}):
 
     renderer = CustomVideoRendered(env, **renderer_args)
 
+    env.max_len = 500
+
     return env, state_dim, goal_dim, action_dim, renderer
