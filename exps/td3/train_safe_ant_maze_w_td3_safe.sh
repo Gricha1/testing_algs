@@ -8,8 +8,12 @@ cd ../..
 python main.py --env_name SafeAntMazeW \
                --seed $seed \
                --train_only_td3 \
+               --world_model \
+               --cost_model \
+               --cm_pretrain \
                --cost_memmory \
-               --img_horizon 10 \
+               --controller_imagination_safety_loss \
+               --controller_safety_coef 6 \
                --validation_without_image --eval_freq 30000 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
