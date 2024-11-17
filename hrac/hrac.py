@@ -417,6 +417,7 @@ class Controller(object):
                  use_safe_threshold=False,
                  safe_threshold=None,
                  use_lagrange=False,
+                 td3_lag=False,
                  lagrangian_data={}
 
     ):
@@ -467,6 +468,22 @@ class Controller(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
+        
+        self.td3_lag = td3_lag
+        if self.td3_lag:
+            self.cost_critic = ControllerCritic(
+                state_dim, goal_dim, action_dim
+            ).to(device)
+            self.cost_critic_target = ControllerCritic(
+                state_dim, goal_dim, action_dim
+            ).to(device)
+            self.cost_critic_target.load_state_dict(
+                self.cost_critic.state_dict()
+            )
+            self.cost_critic_optimizer = torch.optim.Adam(
+                self.cost_critic.parameters(), lr=critic_lr, weight_decay=0.0001
+            )
+            self.cost_criterion = nn.SmoothL1Loss() 
 
 
     def clean_obs(self, state, dims=2):
@@ -584,7 +601,13 @@ class Controller(object):
         return safety
 
     def actor_loss(self, state, sg, init_state, cost_model, predict_env):
-        actor_loss = -self.critic.Q1(state, sg, self.actor(state, sg)).mean()
+        action = self.actor(state, sg)
+        actor_loss = -self.critic.Q1(state, sg, action).mean()
+        if self.td3_lag:
+            safety_loss = self.cost_critic.Q1(state, sg, action).mean()
+            actor_loss = (
+                actor_loss + safety_loss * self._cost_penalty
+            ) / (1 + self._cost_penalty)
         if self.controller_imagination_safety_loss:
             safety_loss = self.state_safety_on_horizon(init_state, sg, 
                                                         controller_policy=self, 
@@ -633,9 +656,14 @@ class Controller(object):
 
     def train(self, replay_buffer, cost_model, predict_env, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
+        if self.td3_lag:
+            avg_cost_loss = 0.
         debug_info = {}
-        for _ in range(iterations):              
-            x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+        for _ in range(iterations):      
+            if self.td3_lag:        
+                x, y, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
+            else:
+                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
             next_g = get_tensor(self.subgoal_transition(x, sg, y))
             state = self.clean_obs(get_tensor(x))
@@ -644,8 +672,8 @@ class Controller(object):
             done = get_tensor(1 - d)
             reward = get_tensor(r)
             next_state = self.clean_obs(get_tensor(y)) 
-
-            
+            if self.td3_lag: 
+                cost = get_tensor(c)
             noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
             noise = noise.clamp(-self.noise_clip, self.noise_clip)
             next_action = (self.actor_target(next_state, next_g) + noise)
@@ -669,6 +697,29 @@ class Controller(object):
             critic_loss.backward()
             self.critic_optimizer.step()
 
+            cost_critic_loss = 0
+            if self.td3_lag:
+                # Cost critic
+                target_C1, target_C2 = self.cost_critic_target(
+                    next_state, next_g, next_action
+                )
+                target_C = torch.max(target_C1, target_C2)
+                target_C = cost + (done * discount * target_C)
+                target_C_no_grad = target_C.detach()
+
+                # Get current C estimate
+                current_C1, current_C2 = self.cost_critic(state, sg, action)
+
+                # Compute cost critic loss
+                cost_critic_loss = self.cost_criterion(
+                    current_C1, target_C_no_grad
+                ) + self.cost_criterion(current_C2, target_C_no_grad)
+
+                # Optimize the cost critic
+                self.cost_critic_optimizer.zero_grad()
+                cost_critic_loss.backward()
+                self.cost_critic_optimizer.step()
+
             # Compute actor loss
             actor_loss = self.actor_loss(state, sg, init_state, cost_model, predict_env)
 
@@ -682,16 +733,29 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
+            if self.td3_lag:
+                avg_cost_loss += cost_critic_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            if self.td3_lag:
+                for param, target_param in zip(
+                    self.cost_critic.parameters(),
+                    self.cost_critic_target.parameters()
+                ):
+                    target_param.data.copy_(
+                        tau * param.data + (1 - tau) * target_param.data
+                    )
 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
             if self.use_lagrange and ep_cost is not None:
                 self.pid_update(ep_cost)
+
+        if self.td3_lag:
+            debug_info["controller_critic_loss"] = avg_cost_loss / iterations
 
         if self.use_lagrange and ep_cost is not None:
             debug_info["lagrangian"] = self._cost_penalty

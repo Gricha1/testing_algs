@@ -547,6 +547,12 @@ def run_hrac(args):
         lagrangian_data["pid_delta_d_ema_alpha"] = args.ctrl_pid_delta_d_ema_alpha
         lagrangian_data["lagrangian_multiplier_init"] = args.ctrl_lagrangian_multiplier_init
 
+    safe_threshold = None
+    if args.controller_imagination_safety_loss:
+        if args.use_safe_threshold or args.controller_use_lagrange:
+            safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
+    elif args.controller_use_lagrange:
+        safe_threshold = args.cost_budget
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -565,9 +571,9 @@ def run_hrac(args):
         controller_cumul_img_safety=args.controller_cumul_img_safety,
         img_horizon=args.img_horizon,
         use_safe_threshold = args.use_safe_threshold,
-        safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon) \
-                         if args.use_safe_threshold or args.controller_cumul_img_safety else None,
+        safe_threshold = safe_threshold,
         use_lagrange=args.controller_use_lagrange,
+        td3_lag=args.td3_lag,
         lagrangian_data=lagrangian_data
     )
 
@@ -584,7 +590,7 @@ def run_hrac(args):
 
     if not args.train_only_td3:
         manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
-    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size)
+    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, cost_memmory=args.td3_lag)
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
@@ -1047,9 +1053,12 @@ def run_hrac(args):
                 else:
                     world_model_buffer.add(
                         (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
-            
-            controller_buffer.add(
-                (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+            if controller_buffer.cost_memmory:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
+            else:
+                controller_buffer.add(
+                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
 
             state = next_state
             goal = next_goal
@@ -1060,8 +1069,11 @@ def run_hrac(args):
             if not args.train_only_td3:
                 timesteps_since_manager += 1
                 timesteps_since_subgoal += 1
-            if controller_policy.use_lagrange and done:
-                pid_costs.append(episode_cost/args.img_horizon)
+            if done:
+                if args.controller_imagination_safety_loss and args.controller_use_lagrange:
+                    pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
+                elif args.controller_use_lagrange:
+                    pid_costs.append(episode_cost)
 
             if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
                 controller_policy.controller_safety_coef = args.controller_curriculum_safety_coef
