@@ -417,7 +417,8 @@ class Controller(object):
                  use_safe_threshold=False,
                  safe_threshold=None,
                  use_lagrange=False,
-                 td3_lag=False,
+                 algo="td3",
+                 sac_alpha=None,
                  lagrangian_data={}
 
     ):
@@ -431,6 +432,9 @@ class Controller(object):
         self.absolute_goal = absolute_goal
         self.criterion = nn.SmoothL1Loss()  
         self.controller_cumul_img_safety = controller_cumul_img_safety
+        self.algo = algo
+
+        self.sac_alpha = sac_alpha
 
         self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
@@ -456,10 +460,11 @@ class Controller(object):
             self._cost_penalty = 0.0
 
         self.actor = ControllerActor(state_dim, goal_dim, action_dim,
-                                    scale=max_action).to(device)
-        self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
-                                            scale=max_action).to(device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
+                                    scale=max_action, sac="sac" in self.algo).to(device)
+        if "td3" in self.algo:
+            self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
+                                                scale=max_action, sac="sac" in self.algo).to(device)
+            self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
             lr=actor_lr)
 
@@ -469,8 +474,7 @@ class Controller(object):
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
         
-        self.td3_lag = td3_lag
-        if self.td3_lag:
+        if self.algo in ["td3_lag", "sac_lag"]:
             self.cost_critic = ControllerCritic(
                 state_dim, goal_dim, action_dim
             ).to(device)
@@ -516,7 +520,13 @@ class Controller(object):
     def select_action(self, state, sg, evaluation=False):
         state = self.clean_obs(get_tensor(state))
         sg = get_tensor(sg)
-        return self.actor(state, sg).cpu().data.numpy().squeeze()
+        if "td3" in self.algo:
+            action = self.actor(state, sg).cpu().data.numpy().squeeze()
+        elif "sac" in self.algo:
+            action, _ = self.actor.sample_action_logprob(state, sg)
+            action = action.cpu().data.numpy().squeeze()
+
+        return action
 
     def value_estimate(self, state, sg, action):
         state = self.clean_obs(get_tensor(state))
@@ -601,9 +611,15 @@ class Controller(object):
         return safety
 
     def actor_loss(self, state, sg, init_state, cost_model, predict_env):
-        action = self.actor(state, sg)
-        actor_loss = -self.critic.Q1(state, sg, action).mean()
-        if self.td3_lag:
+        if "td3" in self.algo:
+            action = self.actor(state, sg)
+            actor_loss = -self.critic.Q1(state, sg, action).mean()
+        elif "sac" in self.algo:
+            action, log_prob = self.actor.sample_action_logprob(state, sg)
+            actor_loss = (self.sac_alpha * log_prob - self.critic.Q1(state, sg, action)).mean()
+        else:
+            assert 1 == 0
+        if "lag" in self.algo:
             safety_loss = self.cost_critic.Q1(state, sg, action).mean()
             actor_loss = (
                 actor_loss + safety_loss * self._cost_penalty
@@ -656,11 +672,11 @@ class Controller(object):
 
     def train(self, replay_buffer, cost_model, predict_env, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
-        if self.td3_lag:
+        if self.algo in ["td3_lag", "sac_lag"]:
             avg_cost_loss = 0.
         debug_info = {}
         for _ in range(iterations):      
-            if self.td3_lag:        
+            if self.algo in ["td3_lag", "sac_lag"]:        
                 x, y, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
             else:
                 x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
@@ -672,16 +688,21 @@ class Controller(object):
             done = get_tensor(1 - d)
             reward = get_tensor(r)
             next_state = self.clean_obs(get_tensor(y)) 
-            if self.td3_lag: 
+            if self.algo in ["td3_lag", "sac_lag"]: 
                 cost = get_tensor(c)
             noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
-            noise = noise.clamp(-self.noise_clip, self.noise_clip)
-            next_action = (self.actor_target(next_state, next_g) + noise)
-            next_action = torch.min(next_action, self.actor.scale)
-            next_action = torch.max(next_action, -self.actor.scale)
-
+            if "td3" in self.algo:
+                noise = noise.clamp(-self.noise_clip, self.noise_clip)
+                next_action = (self.actor_target(next_state, next_g) + noise)
+                next_action = torch.min(next_action, self.actor.scale)
+                next_action = torch.max(next_action, -self.actor.scale)
+            elif "sac" in self.algo:
+                with torch.no_grad():
+                    next_action, next_log_prob = self.actor.sample_action_logprob(next_state, next_g)
             target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
+            if "sac" in self.algo:
+                target_Q = target_Q - self.sac_alpha * next_log_prob
             target_Q = reward + (done * discount * target_Q)
             target_Q_no_grad = target_Q.detach()
 
@@ -689,7 +710,7 @@ class Controller(object):
             current_Q1, current_Q2 = self.critic(state, sg, action)
 
             # Compute critic loss
-            critic_loss = self.criterion(current_Q1, target_Q_no_grad) +\
+            critic_loss = self.criterion(current_Q1, target_Q_no_grad) + \
                         self.criterion(current_Q2, target_Q_no_grad)
 
             # Optimize the critic
@@ -698,7 +719,7 @@ class Controller(object):
             self.critic_optimizer.step()
 
             cost_critic_loss = 0
-            if self.td3_lag:
+            if self.algo in ["td3_lag", "sac_lag"]:
                 # Cost critic
                 target_C1, target_C2 = self.cost_critic_target(
                     next_state, next_g, next_action
@@ -733,13 +754,13 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
-            if self.td3_lag:
+            if self.algo in ["td3_lag", "sac_lag"]:
                 avg_cost_loss += cost_critic_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-            if self.td3_lag:
+            if self.algo in ["td3_lag", "sac_lag"]:
                 for param, target_param in zip(
                     self.cost_critic.parameters(),
                     self.cost_critic_target.parameters()
@@ -747,14 +768,14 @@ class Controller(object):
                     target_param.data.copy_(
                         tau * param.data + (1 - tau) * target_param.data
                     )
-
-            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            if "td3" in self.algo:
+                for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
             if self.use_lagrange and ep_cost is not None:
                 self.pid_update(ep_cost)
 
-        if self.td3_lag:
+        if self.algo in ["td3_lag", "sac_lag"]:
             debug_info["controller_critic_loss"] = avg_cost_loss / iterations
 
         if self.use_lagrange and ep_cost is not None:
@@ -765,11 +786,13 @@ class Controller(object):
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic.state_dict(), "{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo))
-        torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
+        if "td3" in self.algo:
+            torch.save(self.actor_target.state_dict(), "{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo))
         torch.save(self.critic_target.state_dict(), "{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo))
 
     def load(self, dir, env_name, algo, exp_num):
         self.actor.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo)))
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCritic.pth".format(dir, exp_num, env_name, algo)))
-        self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
+        if "td3" in self.algo:
+            self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))

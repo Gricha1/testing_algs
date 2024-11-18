@@ -71,7 +71,9 @@ if __name__ == "__main__":
     parser.add_argument("--candidate_goals", default=10, type=int)
     parser.add_argument("--man_discount", default=0.99, type=float)
 
-    # TD3 Controller Parameters
+    # Controller Parameters
+    parser.add_argument("--sac_alpha", default=0.2, type=float)
+    parser.add_argument("--controller_algo", default="td3", type=str)
     parser.add_argument("--train_only_td3", action='store_true', default=False)
     parser.add_argument("--controller_grad_clip", default=0, type=float)
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
@@ -98,7 +100,6 @@ if __name__ == "__main__":
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
 
     # Safety Controller Parameters
-    parser.add_argument("--td3_lag", action='store_true', default=False)
     parser.add_argument("--controller_curriculumn", action='store_true', default=False)
     parser.add_argument("--controller_curriculum_start_step", default=600_000, type=int)
     parser.add_argument("--controller_curriculum_safety_coef", default=4000., type=float)
@@ -146,7 +147,8 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    if args.td3_lag:
+    assert args.controller_algo in ["td3_lag", "td3", "sac_lag", "sac"]
+    if args.controller_algo=="td3_lag":
         assert args.controller_use_lagrange
         assert not args.controller_imagination_safety_loss
 

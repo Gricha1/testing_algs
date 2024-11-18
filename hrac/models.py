@@ -137,16 +137,27 @@ class ControllerSafeModel(nn.Module):
         return self.critic(x)
 
 class ControllerActor(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim, scale=1):
+    def __init__(self, state_dim, goal_dim, action_dim, scale=1, sac=False):
         super().__init__()
         if scale is None:
             scale = torch.ones(state_dim)
         self.scale = nn.Parameter(torch.tensor(scale).float(),
                                   requires_grad=False)
+        if sac:
+            self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
         self.actor = Actor(state_dim, goal_dim, action_dim, 1)
     
     def forward(self, x, g):
         return self.scale*self.actor(x, g)
+    
+    def sample_action_logprob(self, x, g):
+        action_mean = self.scale*self.actor(x, g)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        probs = Normal(action_mean, action_std)
+        action = probs.sample()
+        log_prob = probs.log_prob(action).sum(1)
+        return action, log_prob
 
 
 class ControllerCritic(nn.Module):

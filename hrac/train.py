@@ -573,7 +573,8 @@ def run_hrac(args):
         use_safe_threshold = args.use_safe_threshold,
         safe_threshold = safe_threshold,
         use_lagrange=args.controller_use_lagrange,
-        td3_lag=args.td3_lag,
+        algo=args.controller_algo,
+        sac_alpha=args.sac_alpha,
         lagrangian_data=lagrangian_data
     )
 
@@ -590,7 +591,9 @@ def run_hrac(args):
 
     if not args.train_only_td3:
         manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
-    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, cost_memmory=args.td3_lag)
+    controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, 
+                                           cost_memmory=(args.controller_algo=="td3_lag" \
+                                                            or args.controller_algo=="sac_lag"))
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
@@ -1001,9 +1004,11 @@ def run_hrac(args):
             if args.train_only_td3:
                 controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
                 action = controller_policy.select_action(state, controller_goal)
+                if "td3" in args.controller_algo:
+                    action = ctrl_noise.perturb_action(action, -max_action, max_action)
             else:                
                 action = controller_policy.select_action(state, subgoal)
-            action = ctrl_noise.perturb_action(action, -max_action, max_action)
+                action = ctrl_noise.perturb_action(action, -max_action, max_action)            
 
             action_copy = action.copy()
 
