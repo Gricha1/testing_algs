@@ -14,7 +14,7 @@ python main.py --domain_name Safexp \
                --sparce_reward \
                --seed $seed \
                --train_only_td3 \
-               --td3_lag \
+               --controller_algo td3_lag \
                --controller_use_lagrange \
                --cost_memmory \
                --img_horizon 10 \
