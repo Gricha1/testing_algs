@@ -46,7 +46,7 @@ class Dict2Obj(object):
         return "%s" % self.__dict__
 
 class SafetyGymEnv():
-    def __init__(self, robot='Point', task='Goal', level=1, seed=0, config=DEFAULT_CONFIG):
+    def __init__(self, robot='Point', task='Goal', level=1, seed=0, config=DEFAULT_CONFIG, sparce=False):
         self.robot = robot.capitalize()
         self.task = task.capitalize()
         assert self.robot in ROBOTS, "can not recognize the robot type {}".format(robot)
@@ -55,6 +55,7 @@ class SafetyGymEnv():
         env_name = 'Safexp-'+self.robot+self.task+str(level)+'-v0'
         print("Creating environment: ", env_name)
         self.env = gym.make(env_name)
+        self.sparce = sparce
         #self.env.seed(seed)
 
         print("Environment configuration: ", self.config)
@@ -113,6 +114,8 @@ class SafetyGymEnv():
 
         reward = 0
         cost = 0
+        if self.sparce:
+            sparce_reward = 0
 
         if self.config.stack_obs:
             cat_obs = np.zeros(self.config.action_repeat*self.obs_flat_size)
@@ -131,6 +134,8 @@ class SafetyGymEnv():
             if self.config.stack_obs:
                 cat_obs[k*self.obs_flat_size :(k+1)*self.obs_flat_size] = observation
             goal_met = ("goal_met" in info.keys()) # reach the goal
+            if self.sparce and goal_met:
+                sparce_reward += 1
             done = done or self.t == self.config.max_episode_length
             if done or goal_met:
                 if k != self.config.action_repeat-1 and self.config.stack_obs:
@@ -138,6 +143,8 @@ class SafetyGymEnv():
                         cat_obs[j*self.obs_flat_size :(j+1)*self.obs_flat_size] = observation
                 break
         cost = 1 if cost>0 else 0
+        if self.sparce:
+            reward = sparce_reward
 
         info = {"cost":cost, "goal_met":goal_met,   "goal_pos":self.env.goal_pos}
         if self.config.stack_obs:

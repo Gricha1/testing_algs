@@ -12,7 +12,7 @@ def dist_xy(pos1, pos2):
     return np.sqrt(np.sum(np.square(pos1 - pos2)))
 
 # Assuming we have reward & cost function. available with us in closed form.
-def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
+def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos, sparce=False):
     #------cost hazard-----------
     cost = 0
     hazards_size = 0.2
@@ -28,8 +28,12 @@ def get_reward_cost(last_dist_goal, robot_pos, hazards_pos, goal_pos):
     #----reward-----------------
 
     reward = 0
-    reward_distance = 1.0
-    reward_goal = 1.0
+    if sparce:
+        reward_distance = 0.0
+        reward_goal = 1.0
+    else:
+        reward_distance = 1.0
+        reward_goal = 1.0
     goal_size = 0.3
 
     dist_goal = dist_xy(robot_pos, goal_pos)

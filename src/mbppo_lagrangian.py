@@ -18,8 +18,9 @@ from mpi4py import MPI
 from utils.logx import EpochLogger
 from utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
 from utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
-from safety_gym_envs.env_utils import SafetyGymEnv
-from envs.create_env_utils import create_env
+from utils.env_utils import SafetyGymEnv
+#from safety_gym_envs.env_utils import SafetyGymEnv
+#from envs.create_env_utils import create_env
 from aux import dist_xy, get_reward_cost, get_goal_flag, ego_xy, generate_lidar
 from model import EnsembleDynamicsModel
 from predict_env import PredictEnv
@@ -27,9 +28,9 @@ from replay_memory import ReplayMemory
 from tqdm import tqdm
 from stable_baselines3.common.logger import Video
 
-from safety_gym_wrapper.env import make_safety
-from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
-from safety_gym_wrapper.render_utils.utils import get_renderer
+#from safety_gym_wrapper.env import make_safety
+#from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
+#from safety_gym_wrapper.render_utils.utils import get_renderer
 
 
 class PPOBuffer:
@@ -869,14 +870,14 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                 otensor = torch.as_tensor(obs_vec, device=cpudevice, dtype=torch.float32)
 
                 # test
-                if t < 3:
-                    print(f"t: {t}, obs:", otensor)
+                #if t < 3:
+                #    print(f"t: {t}, obs:", otensor)
                 #if t == max_ep_len2:
                 #    print(f"t: {t}, obs:", otensor)
                 a, v, vc, logp = ac.step(otensor)
                 # test
-                if t < 3:
-                    print("a:", a)
+                #if t < 3:
+                #    print("a:", a)
                 del otensor
 
                 if args.env_name == "SafeAntMaze":
@@ -894,7 +895,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                                                           goal_pos)
                     r = r * args.rew_scale
                 else:
-                    r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos)
+                    r, c, ld, goal_flag = get_reward_cost(ld, robot_pos, hazards_pos, goal_pos, 
+                                                                        sparce=args.sparce)
 
                 dep_ret += r
                 dep_cost += c
@@ -925,7 +927,7 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                     buf.finish_path(v, vc)
                     if terminal:
                         # only save EpRet / EpLen if trajectory finished
-                        logger.store(DynaEpRet=dep_ret, DynaEpCost=dep_cost)
+                        logger.store(DynaEpRet=dep_ret, DynaEpCost=dep_cost, TrainSucRate=float(goal_flag))
                     if args.env_name == "SafeAntMaze":
                         obs = env.reset()
                         goal_pos = obs["desired_goal"]
@@ -999,7 +1001,8 @@ def ppo(env_fn, num_steps, cost_limit, actor_critic=core.MLPActorCritic,
                                                                      goal_posv)
                             rv = rv * args.rew_scale
                         else:
-                            rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv)
+                            rv, cv, ldv, goal_flagv = get_reward_cost(ldv, robot_posv, hazards_posv, goal_posv, 
+                                                                        sparce=args.sparce)
 
                         valid_rets[va] += rv
                         if args.env_name == "SafeAntMaze":
@@ -1109,6 +1112,9 @@ if __name__ == '__main__':
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
     parser.add_argument("--pseudo_lidar", action="store_true", default=False)
 
+    parser.add_argument("--num_steps", type=int, default=450000)
+    parser.add_argument("--ep_len", type=int, default=750)
+
     # environment
     parser.add_argument('--env_name', type=str, default='Safexp-PointGoal2-v0')
     parser.add_argument("--random_start_pose", action="store_true", default=False)
@@ -1121,6 +1127,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     parser.add_argument('--cost_limit', type=int, default=18) # 18
     parser.add_argument('--beta', type=float, default=1)
+    parser.add_argument("--sparce", action="store_true", default=False)
     
     # world model
     parser.add_argument('--mix_real', default=1500, type=int)
@@ -1167,11 +1174,11 @@ if __name__ == '__main__':
 
     #if rank>0:
     #=================safety gym benchmarks defaults==============================
-    num_steps = 4.5e5
+    num_steps = args.num_steps
     #=============================================================================
     #---modified safety_gym-------------------------------------------------------
     DEFAULT_ENV_CONFIG_POINT = dict(
-        action_repeat=1,
+        action_repeat=args.action_repeat,
         max_episode_length=750,
         use_dist_reward=False,
         stack_obs=False,
@@ -1211,28 +1218,40 @@ if __name__ == '__main__':
         if "Point" in args.env_name or "Car" in args.env_name:
             if "Point" in args.env_name:
                 robot = 'Point'
-                eplen = 750
-                num_steps = 4.5e5
+                eplen = args.ep_len
+                num_steps = args.num_steps
                 DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
             elif "Car" in args.env_name:
                 robot = 'Car'
-                eplen = 750
+                eplen = args.ep_len
                 DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-                num_steps = 4.5e5
+                num_steps = args.num_steps
             env_config=DEFAULT_ENV_CONFIG_POINT
-            env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
+            # template = Safexp-PointGoal1-v0
+            dom_n, env_n, _ = args.env_name.split("-")
+            level = int(env_n[-1])    
+            env = SafetyGymEnv(robot=robot, task="goal", level=level, seed=args.seed, config=env_config, sparce=args.sparce)
             state_dim, action_dim = env.observation_size, env.action_size
             goal_dim = None
             renderer = None
             max_ep_len = eplen
             env.additional_config = {}
-            env.additional_config["robot_pose_start_idx"] = 40
-            env.additional_config["robot_pose_end_idx"] = 42
-            env.additional_config["goal_pose_start_idx"] = None
-            env.additional_config["goal_pose_end_idx"] = None
-            env.additional_config["robot_m_start_idx"] = 38
-            env.additional_config["robot_m__end_idx"] = 40
-            env.additional_config["kinematic_idx"] = 8
+            if env.env.hazards_num == 15:
+                env.additional_config["robot_pose_start_idx"] = 40
+                env.additional_config["robot_pose_end_idx"] = 42
+                env.additional_config["goal_pose_start_idx"] = None
+                env.additional_config["goal_pose_end_idx"] = None
+                env.additional_config["robot_m_start_idx"] = 38
+                env.additional_config["robot_m__end_idx"] = 40
+                env.additional_config["kinematic_idx"] = 8
+            elif env.env.hazards_num == 8:
+                env.additional_config["robot_pose_start_idx"] = 26
+                env.additional_config["robot_pose_end_idx"] = 28
+                env.additional_config["goal_pose_start_idx"] = None
+                env.additional_config["goal_pose_end_idx"] = None
+                env.additional_config["robot_m_start_idx"] = 24
+                env.additional_config["robot_m__end_idx"] = 26
+                env.additional_config["kinematic_idx"] = 8
 
     elif args.env_name == "SafeAntMaze":
         num_steps = 1.8e6

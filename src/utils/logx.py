@@ -162,8 +162,9 @@ class Logger:
 
     def log(self, msg, color='green'):
         """Print a colorized message to stdout."""
-        if proc_id()==0:
-            print(colorize(msg, color, bold=True))
+        #if proc_id()==0:
+        #    print(colorize(msg, color, bold=True))
+        None
 
     def log_tabular(self, key, val):
         """
@@ -207,8 +208,8 @@ class Logger:
             config_json['exp_name'] = self.exp_name
         if proc_id()==0:
             output = json.dumps(config_json, separators=(',',':\t'), indent=4, sort_keys=True)
-            print(colorize('Saving config:\n', color='cyan', bold=True))
-            print(output)
+            #print(colorize('Saving config:\n', color='cyan', bold=True))
+            #print(output)
             with open(osp.join(self.output_dir, "config.json"), 'w') as out:
                 out.write(output)
     
@@ -341,13 +342,13 @@ class Logger:
             keystr = '%'+'%d'%max_key_len
             fmt = "| " + keystr + "s | %15s |"
             n_slashes = 22 + max_key_len
-            print("-"*n_slashes)
+            #print("-"*n_slashes)
             for key in self.log_headers:
                 val = self.log_current_row.get(key, "")
                 valstr = "%8.3g"%val if hasattr(val, "__float__") else val
-                print(fmt%(key, valstr))
+                #print(fmt%(key, valstr))
                 vals.append(val)
-            print("-"*n_slashes, flush=True)
+            #print("-"*n_slashes, flush=True)
             if self.output_file is not None:
                 if self.first_row:
                     self.output_file.write("\t".join(self.log_headers)+"\n")

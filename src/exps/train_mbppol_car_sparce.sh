@@ -1,4 +1,5 @@
 #!/bin/bash
+cd ..
 
 generate_next_index() {
     local dir="./data"
@@ -20,10 +21,17 @@ generate_next_index() {
 }
 
 # Вызов функции для получения следующего индекса
-weights_folder=$(generate_next_index)
-echo "Weights folder: $weights_folder"
+next_folder=$(generate_next_index)
+echo "Следующая папка для экспериментов: $next_folder"
 
-#python3 mbppo_lagrangian.py --random_start_pose --exp_name=$weights_folder --seed=0 --env_name=SafeAntMaze --beta=0.02
-#python3 mbppo_lagrangian.py --exp_name=$weights_folder --seed=0 --env_name=Safexp-PointGoal2-v0 --beta=0.02
-python3 mbppo_lagrangian.py --ppo_without_safe --cost_limit 70 --exp_name=$weights_folder --seed=0 --env_name=Safexp-PointGoal2-v0 --beta=0.02
+python3 mbppo_lagrangian.py --domain_name initSafexp \
+                            --cost_limit 18 \
+                            --exp_name=$next_folder \
+                            --seed=0 \
+                            --env_name=Safexp-CarGoal2-v0 \
+                            --beta=0.02 \
+                            --num_steps 2000000 \
+                            --ep_len 1000 \
+                            --action_repeat 1 \
+                            --sparce
 
