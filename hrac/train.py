@@ -235,8 +235,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     episode_cost += cost
                 if args.train_only_td3:
                     controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
-                    #avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
-                    avg_controller_rew = reward*ctrl_rew_scale
+                    if args.self_td3_reward:
+                        avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
+                    else:
+                        avg_controller_rew = reward*ctrl_rew_scale
                 else:
                     avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)    
                 episode_reward += reward
@@ -1029,8 +1031,10 @@ def run_hrac(args):
 
             if args.train_only_td3:
                 controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
-                #test_controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
-                controller_reward = manager_reward * args.ctrl_rew_scale
+                if args.self_td3_reward:
+                    controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
+                else:
+                    controller_reward = manager_reward * args.ctrl_rew_scale
             else:
                 controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
                 subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)

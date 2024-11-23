@@ -18,5 +18,6 @@ python main.py --env_name SafeAntMazeC \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --not_use_wandb \
+               --self_td3_reward \
                --random_start_pose
 

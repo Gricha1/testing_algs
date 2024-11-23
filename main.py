@@ -75,6 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--sac_alpha", default=0.2, type=float)
     parser.add_argument("--controller_algo", default="td3", type=str)
     parser.add_argument("--train_only_td3", action='store_true', default=False)
+    parser.add_argument("--self_td3_reward", action='store_true', default=False)
     parser.add_argument("--controller_grad_clip", default=0, type=float)
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
     parser.add_argument("--ctrl_batch_size", default=128, type=int)
