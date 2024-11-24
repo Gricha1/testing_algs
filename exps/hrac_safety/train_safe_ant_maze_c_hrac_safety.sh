@@ -9,7 +9,6 @@ python main.py --seed $seed \
                --modelfree_safety \
                --env_name SafeAntMazeC \
                --controller_imagination_safety_loss \
-               --controller_grad_clip 0 \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
                --world_model \
