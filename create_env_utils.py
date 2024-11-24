@@ -236,13 +236,15 @@ def create_env(args, renderer_args={}):
     if args.env_name == "AntGather":
         env = GatherEnv(create_gather_env(args.env_name, args.seed), args.env_name)
         env.seed(args.seed)   
-    elif args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
+    elif args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "SafeAntMazeS", "AntMaze", "AntMazeSparse", "AntPush", "AntFall"]:
         if args.env_name == "AntMaze":
             maze_id = "Maze"
         if args.env_name == "SafeAntMazeC":
             maze_id = "MazeSafe_map_1"
         elif args.env_name == "SafeAntMazeW":
             maze_id = "MazeSafe_map_2"
+        elif args.env_name == "SafeAntMazeS":
+            maze_id = "MazeSafe_map_3"
         elif args.env_name == "AntMazeSparse":
             maze_id = "Maze2"
         elif args.env_name == "AntPush":
@@ -251,7 +253,7 @@ def create_env(args, renderer_args={}):
             maze_id = "Fall"
         else:
             assert 1 == 0
-        if args.env_name == "SafeAntMazeC" or args.env_name == "SafeAntMazeW":
+        if args.env_name == "SafeAntMazeC" or args.env_name == "SafeAntMazeW" or args.env_name == "SafeAntMazeS":
             env = SafeMazeAnt(EnvWithGoal(create_maze_env("AntMaze", args.seed, maze_id=maze_id), "AntMaze", maze_id=maze_id))
             if args.random_start_pose:
                 env.set_train_start_pose_to_random()
@@ -296,7 +298,8 @@ def create_env(args, renderer_args={}):
 
     action_dim = env.action_space.shape[0]
     state_dim = state.shape[0]
-    if args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "AntMaze", "AntPush", "AntFall", "AntMazeMultiMap"]:
+    if args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "SafeAntMazeS", "AntMaze", 
+                         "AntPush", "AntFall", "AntMazeMultiMap"]:
         goal_dim = goal.shape[0]
     else:
         goal_dim = 0
