@@ -3,7 +3,6 @@ import time
 import copy
 from math import ceil
 from collections import deque
-import random
 
 import torch
 import numpy as np

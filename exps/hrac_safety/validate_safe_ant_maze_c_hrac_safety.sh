@@ -1,6 +1,6 @@
 cd ../..
 python main.py --seed 2 \
-               --load --loaded_exp_num 9 \
+               --load --loaded_exp_num 760_copy \
                --modelfree_safety \
                --visulazied_episode 1 \
                --validate \

@@ -1,6 +1,7 @@
 cd ../..
-python main.py --visulazied_episode 10 --validate \
-               --load --loaded_exp_num 785 \
+python main.py --visulazied_episode 25 --validate \
+               --load --loaded_exp_num 880 \
+               --img_horizon 10 \
                --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
