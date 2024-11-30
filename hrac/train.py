@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import copy
 from math import ceil
@@ -16,6 +17,7 @@ from safety_gym_wrapper.env import make_safety
 from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
 from safety_gym_wrapper.render_utils.utils import get_renderer
 from envs.create_env_utils import create_env
+from bullet_safety_gym_env.utills_env_create import create_bullet_safety_gym_env
 
 import hrac.utils as utils
 import hrac.hrac as hrac
@@ -393,6 +395,10 @@ def run_hrac(args):
     if args.domain_name == "SafetyMaze":
         env, state_dim, goal_dim, action_dim, renderer = create_env(args)
         low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
+                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+    elif args.domain_name == "BulletSafeGym":
+        env, state_dim, goal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
+        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
     elif args.domain_name == "Safexp":
         assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
