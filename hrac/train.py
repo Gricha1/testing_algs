@@ -60,7 +60,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             elif env_name == "SafeGym":
                 if args.cost_model:
                     safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
-            if args.cost_model:
+            if args.cost_model and not args.domain_name == "BulletSafeGym":
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
@@ -91,9 +91,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 obs = env.reset(validate=True)
             elif "SafeAntMaze" in env_name:
                 obs = env.reset(eval_idx=eval_ep)
-            elif env_name == "SafeGym":
-                # test
-                # todo: make eval hard tasks
+            else:
                 obs = env.reset()
 
             goal = obs["desired_goal"]
@@ -121,10 +119,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     subgoal = manager_policy.sample_goal(state, goal)
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
-                        if "Safe" in env_name:
+                        if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        if "Safe" in env_name:
+                        if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
                             episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                         if args.world_model and args.cost_model:
                             with torch.no_grad():
@@ -154,7 +152,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if "goal_met" in info:
                         goals_achieved += 1
                         episode_goals_achieved += 1
-                        #done = True
+                elif args.domain_name == "BulletSafeGym":
+                    goals_achieved = 0
+                    episode_goals_achieved = 0
                 elif env_name != "AntGather" and env.success_fn(reward):
                     goals_achieved += 1
                     done = True
@@ -1113,10 +1113,10 @@ def run_hrac(args):
 
                 if "Safe" in args.env_name:
                     if manager_policy.absolute_goal:
-                        if "SafeAntMaze" in env_name:
+                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
                             episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
                     else:
-                        if "SafeAntMaze" in env_name:
+                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
                             episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
                     episode_subgoals_count += 1
 

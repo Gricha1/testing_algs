@@ -1,8 +1,6 @@
 import sys
 import os 
 
-#sys.path.append(os.path.dirname(__file__))
-#import bullet_safety_gym
 from .bullet_safety_gym_wrapper import GCBulletCarRun
 
 

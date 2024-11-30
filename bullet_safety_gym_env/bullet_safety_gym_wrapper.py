@@ -5,7 +5,6 @@ import bullet_safety_gym
 
 class GCBulletCarRun:
     def __init__(self):
-        registered_envs = gym.envs.registry.all()
 
         self.env = gym.make('SafetyCarRun-v0')
 
