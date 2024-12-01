@@ -4,10 +4,10 @@ from gym import spaces
 import bullet_safety_gym
 
 class GCBulletCarRun:
-    def __init__(self):
+    def __init__(self, goal_dim):
 
+        self.goal_dim = goal_dim
         self.env = gym.make('SafetyCarRun-v0')
-
         obs_shape = self.env.observation_space.shape[0]
         wrapped_observation_space = self.env.observation_space
         self.observation_space = spaces.Dict()
@@ -16,11 +16,11 @@ class GCBulletCarRun:
                                     low=-np.inf, high=np.inf,  
                                     dtype=wrapped_observation_space.dtype),
                      "desired_goal": spaces.Box(
-                                    shape=(2,), 
+                                    shape=(goal_dim,), 
                                     low=-np.inf, high=np.inf,  
                                     dtype=wrapped_observation_space.dtype),
                      "achieved_goal": spaces.Box(
-                                    shape=(2,), 
+                                    shape=(goal_dim,), 
                                     low=-np.inf, high=np.inf, 
                                     dtype=wrapped_observation_space.dtype)}
         
@@ -32,8 +32,8 @@ class GCBulletCarRun:
 
     def reset(self):
         x = self.env.reset()
-        agent_velocity_goal = np.array([self.env.agent.velocity_constraint])
-        agent_cur_velocity = x[2]
+        agent_velocity_goal = np.array([self.env.agent.velocity_constraint]*self.goal_dim)
+        agent_cur_velocity = np.array([x[2]]*self.goal_dim)
 
         gc_observation = {"observation": x, 
                           "desired_goal": agent_velocity_goal,
@@ -43,8 +43,8 @@ class GCBulletCarRun:
     def step(self, action):
         x, reward, done, info = self.env.step(action)
         info["safety_cost"] = info["cost"]
-        agent_velocity_goal = np.array([self.env.agent.velocity_constraint])
-        agent_cur_velocity = x[2]
+        agent_velocity_goal = np.array([self.env.agent.velocity_constraint]*self.goal_dim)
+        agent_cur_velocity = np.array([x[2]]*self.goal_dim)
 
         gc_observation = {"observation": x, 
                           "desired_goal": agent_velocity_goal,
@@ -52,3 +52,6 @@ class GCBulletCarRun:
 
 
         return gc_observation, reward, done, info
+    
+    def render(self, mode=None):
+        return self.env.render(mode=mode)

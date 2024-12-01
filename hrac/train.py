@@ -179,8 +179,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
-                        x = a_net((torch.from_numpy(state[:2]).type('torch.FloatTensor')).to("cuda"))
-                        y = a_net((torch.from_numpy(goal[:2]).type('torch.FloatTensor')).to("cuda"))
+                        print("controller_policy.goal_dim:", controller_policy.goal_dim)
+                        x = a_net((torch.from_numpy(state[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
+                        y = a_net((torch.from_numpy(goal[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
                         debug_info["dist_a_net_s_g"] = torch.sqrt(torch.pow(x - y, 2).sum() + 1e-12)
                     else:
                         debug_info["dist_a_net_s_g"] = 0
@@ -396,10 +397,12 @@ def run_hrac(args):
         env, state_dim, goal_dim, action_dim, renderer = create_env(args)
         low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        controller_goal_dim = goal_dim
     elif args.domain_name == "BulletSafeGym":
-        env, state_dim, goal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
+        env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
         low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        controller_goal_dim = subgoal_dim
     elif args.domain_name == "Safexp":
         assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
         env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
@@ -442,6 +445,7 @@ def run_hrac(args):
         # subgoal scale, only low[:2] is matter
         low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        controller_goal_dim = goal_dim
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
 
@@ -450,10 +454,6 @@ def run_hrac(args):
     noise_clip = 0.5
     high = -low
     man_scale = (high - low) / 2
-    if args.env_name == "AntFall":
-        controller_goal_dim = 3
-    else:
-        controller_goal_dim = 2
     if args.absolute_goal:
         man_scale[0] = 30
         man_scale[1] = 30
@@ -466,6 +466,7 @@ def run_hrac(args):
     print("state_dim:", state_dim)
     print("goal_dim:", goal_dim)
     print("action_dim:", action_dim)
+    print("controller_goal_dim:", controller_goal_dim)
     print("*******")
     print()
 
@@ -1009,7 +1010,7 @@ def run_hrac(args):
                     manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
             if args.train_only_td3:
-                controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
                 action = controller_policy.select_action(state, controller_goal)
                 if "td3" in args.controller_algo:
                     action = ctrl_noise.perturb_action(action, -max_action, max_action)
@@ -1035,7 +1036,7 @@ def run_hrac(args):
             traj_buffer.append(next_state)
 
             if args.train_only_td3:
-                controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
                 if args.self_td3_reward:
                     controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
                 else:
