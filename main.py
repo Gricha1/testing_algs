@@ -14,6 +14,7 @@ if __name__ == "__main__":
     
     # environment
     ## safety ant maze
+    parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
     parser.add_argument("--random_start_pose", action="store_true", default=False)
     parser.add_argument("--algo", default="hrac", type=str)
     parser.add_argument("--seed", default=2, type=int)

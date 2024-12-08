@@ -179,7 +179,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
-                        print("controller_policy.goal_dim:", controller_policy.goal_dim)
+                        #print("controller_policy.goal_dim:", controller_policy.goal_dim)
                         x = a_net((torch.from_numpy(state[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
                         y = a_net((torch.from_numpy(goal[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
                         debug_info["dist_a_net_s_g"] = torch.sqrt(torch.pow(x - y, 2).sum() + 1e-12)

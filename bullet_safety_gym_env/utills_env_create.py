@@ -111,8 +111,9 @@ def create_bullet_safety_gym_env(args, renderer_args={}):
 
     goal_dim = 4
     subgoal_dim = 4
+    tan_cost = args.bullet_env_tan_cost
     if args.env_name == "SafeBulletCarRun":
-        env = GCBulletCarRun(goal_dim)
+        env = GCBulletCarRun(goal_dim, tan_cost)
     else:
         assert 1 == 0
 

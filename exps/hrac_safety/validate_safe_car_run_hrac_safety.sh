@@ -13,4 +13,5 @@ python main.py --seed 2 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --not_use_wandb \
-               #--load --loaded_exp_num ml3_5 \
+               --bullet_env_tan_cost \
+               --load --loaded_exp_num ml3_10 \
