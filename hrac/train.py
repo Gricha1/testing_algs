@@ -72,11 +72,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     x_with_zeros = x_np
                 x_tensor = torch.tensor(x_with_zeros)
                 x_tensor = x_tensor.to(device)
-                if args.cost_oracle:
-                    hazard_poses = safe_dataset[2]
-                    pred = cost_model.safe_model(x_tensor, hazard_poses)
-                else:
-                    pred = cost_model.safe_model(x_tensor)
+                pred = cost_model.safe_model(x_tensor)
                 prev_probs = pred.squeeze().tolist()
                 val_safe_model_roc = roc_auc_score(true, prev_probs)
                 pred = (pred > 0.5).int().squeeze().tolist()
@@ -661,22 +657,15 @@ def run_hrac(args):
     env_name = 'safepg2'
     model_type='pytorch'
     if args.cost_model:
-        if args.cost_oracle:
-            class CostOracle:
-                def __init__(self, safe_model):
-                    self.safe_model = safe_model
-                    self.frame_stack_num = 1
-            cost_model = CostOracle(env.cost_func)
-        else:
-            cost_model = hrac.CostModel(state_dim, goal_dim, 
-                                        lidar_observation=True if args.domain_name == "Safexp" else False, 
-                                        frame_stack_num=args.cm_frame_stack_num,
-                                        safe_model_loss_coef=args.safe_model_loss_coef, 
-                                        lr=args.cm_lr)
+        cost_model = hrac.CostModel(state_dim, goal_dim, 
+                                    lidar_observation=True if args.domain_name == "Safexp" else False, 
+                                    frame_stack_num=args.cm_frame_stack_num,
+                                    safe_model_loss_coef=args.safe_model_loss_coef, 
+                                    lr=args.cm_lr,
+                                    regression_cost_model=args.regression_cost_model)
         if args.domain_name == "Safexp":
-            if not args.cost_oracle:
-                cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
-                                                                    frame_stack_num=args.cm_frame_stack_num)
+            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
+                                                                frame_stack_num=args.cm_frame_stack_num)
             
         def train_cost_model(replay_buffer,
                              cost_model_iterations=10,
@@ -697,7 +686,7 @@ def run_hrac(args):
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
-            if args.domain_name == "Safexp" and not args.cost_oracle:
+            if args.domain_name == "Safexp":
                 writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
     else:
         cost_model = None
@@ -732,8 +721,7 @@ def run_hrac(args):
             if not args.train_only_td3:
                 manager_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             if args.cost_model:
-                if not args.cost_oracle:
-                    cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
+                cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             if args.world_model:
                 predict_env.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
@@ -781,10 +769,9 @@ def run_hrac(args):
                         state = obs["observation"]
                         done = False
                         if args.domain_name == "Safexp" and args.cost_model:
-                            if not args.cost_oracle:
-                                if len(cost_model_buffer.trajectory) != 0:
-                                    cost_model_buffer.add_trajectory_to_buffer()
-                                cost_model_buffer.create_new_trajectory()
+                            if len(cost_model_buffer.trajectory) != 0:
+                                cost_model_buffer.add_trajectory_to_buffer()
+                            cost_model_buffer.create_new_trajectory()
                     action = env.action_space.sample()
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
@@ -796,8 +783,7 @@ def run_hrac(args):
                             world_model_buffer.add(
                                 (state, next_state, None, action, None, None, [], [])) 
                     if args.domain_name == "Safexp" and args.cost_model:
-                        if not args.cost_oracle:
-                            cost_model_buffer.append(next_state, info["safety_cost"])
+                        cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
                     exploration_total_timesteps += 1
 
@@ -847,7 +833,7 @@ def run_hrac(args):
                         print("Episode {}".format(episode_num))
                         
                     ## Train World Model or Cost Model
-                    if args.cost_model and not args.cost_oracle:
+                    if args.cost_model:
                         if args.domain_name == "Safexp":
                             buffer = cost_model_buffer
                         else:
@@ -949,8 +935,7 @@ def run_hrac(args):
                             if not args.train_only_td3:
                                 manager_policy.save("./models", args.env_name, args.algo, exp_num)
                             if args.cost_model:
-                                if not args.cost_oracle:
-                                    cost_model.save("./models", args.env_name, args.algo, exp_num)
+                                cost_model.save("./models", args.env_name, args.algo, exp_num)
                             if args.world_model:
                                 predict_env.save("./models", args.env_name, args.algo, exp_num)
 
@@ -973,10 +958,9 @@ def run_hrac(args):
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
                 if args.domain_name == "Safexp" and args.cost_model:
-                    if not args.cost_oracle:
-                        if len(cost_model_buffer.trajectory) != 0:
-                            cost_model_buffer.add_trajectory_to_buffer()
-                        cost_model_buffer.create_new_trajectory()
+                    if len(cost_model_buffer.trajectory) != 0:
+                        cost_model_buffer.add_trajectory_to_buffer()
+                    cost_model_buffer.create_new_trajectory()
                 done = False
                 ep_controller_reward = 0
                 ep_manager_reward = 0
@@ -1058,8 +1042,7 @@ def run_hrac(args):
 
 
             if args.domain_name == "Safexp" and args.cost_model:
-                if not args.cost_oracle:
-                    cost_model_buffer.append(next_state, info["safety_cost"])
+                cost_model_buffer.append(next_state, info["safety_cost"])
 
             if args.world_model:
                 if world_model_buffer.cost_memmory:
@@ -1150,8 +1133,7 @@ def run_hrac(args):
             if not args.train_only_td3:
                 manager_policy.save("./models", args.env_name, args.algo, exp_num)
             if args.cost_model:
-                if not args.cost_oracle:
-                    cost_model.save("./models", args.env_name, args.algo, exp_num)
+                cost_model.save("./models", args.env_name, args.algo, exp_num)
             if args.world_model:
                 predict_env.save("./models", args.env_name, args.algo, exp_num)
 

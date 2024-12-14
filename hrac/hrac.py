@@ -319,7 +319,8 @@ class Manager(object):
 class CostModel(object):
     def __init__(self, state_dim, goal_dim, lidar_observation, 
                        frame_stack_num, 
-                       safe_model_loss_coef, lr):
+                       safe_model_loss_coef, lr,
+                       regression_cost_model=False):
         self.lidar_observation = lidar_observation
         self.safe_model_loss_coef = safe_model_loss_coef        
         self.frame_stack_num = frame_stack_num
@@ -330,7 +331,10 @@ class CostModel(object):
         else:
             self.safe_model = ControllerSafeModel(state_dim).to(device)
         
-        self.safe_model_criterion = nn.BCELoss()
+        if regression_cost_model:
+            self.safe_model_criterion = nn.MSELoss()
+        else:
+            self.safe_model_criterion = nn.BCELoss()
         self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
                                                 lr=lr, weight_decay=0.0001)
         

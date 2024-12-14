@@ -93,8 +93,8 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
     ## Cost Model Parameters
     parser.add_argument("--cost_model", action='store_true', default=False)
+    parser.add_argument("--regression_cost_model", action='store_true', default=False)
     parser.add_argument("--cm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
-    parser.add_argument("--cost_oracle", action='store_true', default=False)
     parser.add_argument("--cost_model_batch_size", default=128, type=int)
     parser.add_argument("--cost_model_buffer_size", default=1e6, type=int)
     parser.add_argument("--cm_lr", default=1e-3, type=float)
