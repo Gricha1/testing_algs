@@ -25,12 +25,14 @@ RUN cd /root \
 
 # install mujoco_py
 RUN apt-get install -y \
-    libgl1-mesa-dev \
-    libgl1-mesa-glx \
-    libglew-dev \
     libosmesa6-dev \
-    software-properties-common \
     patchelf
+    #libgl1-mesa-dev \
+    #libgl1-mesa-glx \
+    #libglew-dev \
+    #libosmesa6-dev \
+    #software-properties-common \
+    #patchelf
 RUN pip install onnxruntime free-mujoco-py
 
 # install torch with cuda support
@@ -39,8 +41,8 @@ RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1
     && pip install wandb moviepy opencv-python
 
 # fixed&additional pip deps
-RUN apt-get install libopenmpi-dev
-RUN pip install mpi4py
+#RUN apt-get install libopenmpi-dev
+#RUN pip install mpi4py
 RUN pip install setuptools==65.5.0 "wheel<0.40.0"
 RUN pip install gym==0.18.3
 RUN pip install gymnasium==0.29.1
@@ -66,8 +68,11 @@ RUN pip install numpy==1.23.4
 #RUN pip install -r /tmp/requirements.txt
 #RUN pip install lightgbm
 #RUN pip install pip install scikit-learn
+RUN echo "cd /usr/home/workspace/bullet_safety_gym_env && pip install -e ." >> ~/.bashrc
+RUN echo "cd /usr/home/workspace" >> ~/.bashrc
 
 WORKDIR /usr/home/workspace
 
 # install safety gym
 #CMD cd /usr/home/workspace/safety-gym && pip install -e .
+RUN echo "/usr/home/workspace" >> ~/.bashrc

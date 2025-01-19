@@ -128,16 +128,16 @@ class SafeCritic(nn.Module):
 
 
 class ControllerSafeModel(nn.Module):
-    def __init__(self, state_dim):
+    def __init__(self, state_dim, hidden_dim):
         super().__init__()
 
-        self.critic = SafeCritic(state_dim)
+        self.critic = SafeCritic(state_dim, hidden_dim=hidden_dim)
     
     def forward(self, x):
         return self.critic(x)
 
 class ControllerActor(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim, scale=1, sac=False):
+    def __init__(self, state_dim, goal_dim, action_dim, hidden_size, scale=1, sac=False):
         super().__init__()
         if scale is None:
             scale = torch.ones(state_dim)
@@ -145,7 +145,7 @@ class ControllerActor(nn.Module):
                                   requires_grad=False)
         if sac:
             self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
-        self.actor = Actor(state_dim, goal_dim, action_dim, 1)
+        self.actor = Actor(state_dim, goal_dim, action_dim, 1, hidden_dim=hidden_size)
     
     def forward(self, x, g):
         return self.scale*self.actor(x, g)
@@ -161,10 +161,10 @@ class ControllerActor(nn.Module):
 
 
 class ControllerCritic(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim):
+    def __init__(self, state_dim, goal_dim, action_dim, hidden_size):
         super().__init__()
 
-        self.critic = Critic(state_dim, goal_dim, action_dim)
+        self.critic = Critic(state_dim, goal_dim, action_dim, hidden_dim=hidden_size)
     
     def forward(self, x, sg, u):
         return self.critic(x, sg, u)

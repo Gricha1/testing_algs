@@ -12,32 +12,33 @@ if __name__ == "__main__":
     parser.add_argument("--visulazied_episode", default=0, type=int)
     parser.add_argument("--test_train_dataset", action="store_true", default=False)
     
-    # environment
-    ## safety ant maze
-    parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
-    parser.add_argument("--random_start_pose", action="store_true", default=False)
-    parser.add_argument("--algo", default="hrac", type=str)
-    parser.add_argument("--seed", default=2, type=int)
-    parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
-    parser.add_argument("--max_timesteps", default=5e6, type=float)
-    parser.add_argument("--save_models", default=True, type=bool)
-    parser.add_argument("--env_name", default="SafeAntMazeC", type=str)
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
     parser.add_argument("--log_dir", default="./logs", type=str)
+    parser.add_argument("--save_models", default=True, type=bool)
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--sparce_reward", action="store_true")
 
+    # environment
+    parser.add_argument("--max_timesteps", default=5e6, type=float)
+    parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
+    parser.add_argument("--algo", default="hrac", type=str)
+    parser.add_argument("--seed", default=2, type=int)
+    parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
+    ## safety ant maze
+    parser.add_argument("--random_start_pose", action="store_true", default=False)
+    parser.add_argument("--env_name", default="SafeAntMazeC", type=str)
     ## safety gym
     parser.add_argument("--image_size", type=int, default=2)
     parser.add_argument("--vector_env", default=False, action="store_true")
     parser.add_argument("--action_repeat", type=int, default=2)
-    parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
     parser.add_argument("--goal_conditioned", action="store_true", default=False)
     parser.add_argument("--pseudo_lidar", action="store_true", default=False)
+    ## safety bullet
+    parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
 
     # Adjacency Network Parameters    
     parser.add_argument("--a_net_new_discretization_safety_gym", default=False, action="store_true")
@@ -71,6 +72,7 @@ if __name__ == "__main__":
     parser.add_argument("--man_crit_lr", default=1e-3, type=float)
     parser.add_argument("--candidate_goals", default=10, type=int)
     parser.add_argument("--man_discount", default=0.99, type=float)
+    parser.add_argument("--a_net_size", default=1500, type=int) # 10
 
     # Controller Parameters
     parser.add_argument("--sac_alpha", default=0.2, type=float)
@@ -85,6 +87,7 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_act_lr", default=1e-4, type=float)
     parser.add_argument("--ctrl_crit_lr", default=1e-3, type=float)
     parser.add_argument("--ctrl_discount", default=0.95, type=float)
+    parser.add_argument("--ctrl_hidden_size", default=300, type=int)
 
     # Safety Subgoal Parameters
     parser.add_argument("--modelfree_safety", action='store_true', default=False)
@@ -100,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--cm_lr", default=1e-3, type=float)
     parser.add_argument("--cm_frame_stack_num", default=1, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
+    parser.add_argument("--cm_hidden_size", default=300, type=int)
 
     # Safety Controller Parameters
     parser.add_argument("--controller_curriculumn", action='store_true', default=False)
@@ -143,7 +147,6 @@ if __name__ == "__main__":
     # logger
     parser.add_argument("--not_use_wandb", action='store_true', default=False)
     parser.add_argument("--wandb_postfix", default="", type=str)
-
     parser.add_argument("--tensorboard_descript", default="", type=str)
 
     # Run the algorithm

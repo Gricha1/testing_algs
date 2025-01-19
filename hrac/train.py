@@ -234,11 +234,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 if args.train_only_td3:
                     controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
                     if args.self_td3_reward:
-                        avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale)    
+                        avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale, action)    
                     else:
                         avg_controller_rew = reward*ctrl_rew_scale
                 else:
-                    avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale)    
+                    avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale, action)    
                 episode_reward += reward
 
                 state = new_state
@@ -295,32 +295,72 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             return avg_reward, avg_controller_rew, avg_step_count, avg_env_finish, validation_date
 
 
-def get_reward_function(dims, absolute_goal=False, binary_reward=False):
-    if absolute_goal and binary_reward:
-        def controller_reward(z, subgoal, next_z, scale):
-            z = z[:dims]
-            next_z = next_z[:dims]
-            reward = float(np.linalg.norm(subgoal - next_z, axis=-1) <= 1.414) * scale
-            return reward
-    elif absolute_goal:
-        def controller_reward(z, subgoal, next_z, scale):
-            z = z[:dims]
-            next_z = next_z[:dims]
-            reward = -np.linalg.norm(subgoal - next_z, axis=-1) * scale
-            return reward
-    elif binary_reward:
-        def controller_reward(z, subgoal, next_z, scale):
-            z = z[:dims]
-            next_z = next_z[:dims]
-            reward = float(np.linalg.norm(z + subgoal - next_z, axis=-1) <= 1.414) * scale
-            return reward
-    else:
-        def controller_reward(z, subgoal, next_z, scale):
-            z = z[:dims]
-            next_z = next_z[:dims]
-            reward = -np.linalg.norm(z + subgoal - next_z, axis=-1) * scale
-            return reward
+def get_reward_function(dims, args=None, absolute_goal=False, binary_reward=False):
+    if args.env_name in ["SafePusher"]:
+        action_penalty_coeff = 0.0001
+        distance_threshold = 0.25
+        if absolute_goal and not binary_reward:
+            def controller_reward(ag, subgoal, next_ag, scale, action):
+                ag = ag[:dims]
+                next_ag = next_ag[:dims]
+                reward = -np.sum(np.square(ag - subgoal))
+                reward -= action_penalty_coeff * np.square(action).sum()
+                return reward * scale
 
+        elif absolute_goal and binary_reward:
+            def controller_reward(ag, subgoal, next_ag, scale, action):
+                ag = ag[:dims]
+                next_ag = next_ag[:dims]
+                reward_ctrl = action_penalty_coeff * -np.square(action).sum()
+                fail = True
+                if np.sqrt(np.sum(np.square(ag - subgoal))) <= distance_threshold:
+                    fail = False
+                reward = reward_ctrl - float(fail)
+                return reward * scale
+
+        elif not absolute_goal and not binary_reward:
+            def controller_reward(ag, subgoal, next_ag, scale, action):
+                ag = ag[:dims]
+                next_ag = next_ag[:dims]
+                reward = -np.sum(np.square(ag + subgoal - next_ag))
+                reward -= action_penalty_coeff * np.square(action).sum()
+                return reward * scale
+
+        elif not absolute_goal and binary_reward:
+            def controller_reward(ag, subgoal, next_ag, scale, action):
+                ag = ag[:dims]
+                next_ag = next_ag[:dims]
+                reward_ctrl = action_penalty_coeff * -np.square(action).sum()
+                fail = True
+                if np.sqrt(np.sum(np.square(ag - subgoal))) <= distance_threshold:
+                    fail = False
+                reward = reward_ctrl - float(fail)
+                return reward * scale
+    else:
+        if absolute_goal and binary_reward:
+            def controller_reward(z, subgoal, next_z, scale, action):
+                z = z[:dims]
+                next_z = next_z[:dims]
+                reward = float(np.linalg.norm(subgoal - next_z, axis=-1) <= 1.414) * scale
+                return reward
+        elif absolute_goal:
+            def controller_reward(z, subgoal, next_z, scale, action):
+                z = z[:dims]
+                next_z = next_z[:dims]
+                reward = -np.linalg.norm(subgoal - next_z, axis=-1) * scale
+                return reward
+        elif binary_reward:
+            def controller_reward(z, subgoal, next_z, scale, action):
+                z = z[:dims]
+                next_z = next_z[:dims]
+                reward = float(np.linalg.norm(z + subgoal - next_z, axis=-1) <= 1.414) * scale
+                return reward
+        else:
+            def controller_reward(z, subgoal, next_z, scale, action):
+                z = z[:dims]
+                next_z = next_z[:dims]
+                reward = -np.linalg.norm(z + subgoal - next_z, axis=-1) * scale
+                return reward
     return controller_reward
 
 
@@ -389,6 +429,8 @@ def run_hrac(args):
     # action_dim
     # renderer
     # low
+    assert "Safe" in args.env_name, "consider only safe envs"
+
     if args.domain_name == "SafetyMaze":
         env, state_dim, goal_dim, action_dim, renderer = create_env(args)
         low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
@@ -563,6 +605,7 @@ def run_hrac(args):
         action_dim=action_dim,
         max_action=max_action,
         actor_lr=args.ctrl_act_lr,
+        hidden_size=args.ctrl_hidden_size,
         critic_lr=args.ctrl_crit_lr,
         no_xy=no_xy,
         absolute_goal=args.absolute_goal,
@@ -583,7 +626,7 @@ def run_hrac(args):
     )
 
     calculate_controller_reward = get_reward_function(
-        controller_goal_dim, absolute_goal=args.absolute_goal, binary_reward=args.binary_int_reward)
+        controller_goal_dim, args=args, absolute_goal=args.absolute_goal, binary_reward=args.binary_int_reward)
     
     if args.noise_type == "ou":
         man_noise = utils.OUNoise(state_dim, sigma=args.man_noise_sigma)
@@ -635,9 +678,10 @@ def run_hrac(args):
     state_list = []
     state_dict = {}
     if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-        adj_mat = np.diag(np.ones(3000, dtype=np.uint8))
+        args.a_net_size = 3000
+        adj_mat = np.diag(np.ones(args.a_net_size, dtype=np.uint8))
     else:
-        adj_mat = np.diag(np.ones(1500, dtype=np.uint8))
+        adj_mat = np.diag(np.ones(args.a_net_size, dtype=np.uint8))
     traj_buffer = utils.TrajectoryBuffer(capacity=args.traj_buffer_size)
     a_net = ANet(controller_goal_dim, args.r_hidden_dim, args.r_embedding_dim)
     if args.load_adj_net:
@@ -662,6 +706,7 @@ def run_hrac(args):
                                     frame_stack_num=args.cm_frame_stack_num,
                                     safe_model_loss_coef=args.safe_model_loss_coef, 
                                     lr=args.cm_lr,
+                                    cm_hidden_size=args.cm_hidden_size,
                                     regression_cost_model=args.regression_cost_model)
         if args.domain_name == "Safexp":
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
@@ -857,7 +902,12 @@ def run_hrac(args):
                         episode_safety_subgoal_rate_ = 0  
                     else:
                         controller_subgoal = subgoal
-                        episode_safety_subgoal_rate_ = episode_safety_subgoal_rate/episode_subgoals_count     
+                        if "Safe" in args.env_name:
+                            episode_safety_subgoal_rate_ = episode_safety_subgoal_rate/episode_subgoals_count     
+                        else:
+                            episode_safety_subgoal_rate_ = 0
+                    if not "Safe" in args.env_name:
+                        controller_episode_cost = 0
                     train_controller(controller_buffer, ctrl_done, next_state, controller_subgoal, 
                                     episode_timesteps, 
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
@@ -982,7 +1032,8 @@ def run_hrac(args):
 
                 if not args.train_only_td3:
                     subgoal = manager_policy.sample_goal(state, goal)
-                    episode_subgoals_count += 1
+                    if "Safe" in args.env_name:
+                        episode_subgoals_count += 1
                     if not args.absolute_goal:
                         subgoal = man_noise.perturb_action(subgoal,
                             min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
@@ -1022,11 +1073,11 @@ def run_hrac(args):
             if args.train_only_td3:
                 controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
                 if args.self_td3_reward:
-                    controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale)
+                    controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale, action)
                 else:
                     controller_reward = manager_reward * args.ctrl_rew_scale
             else:
-                controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale)
+                controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale, action)
                 subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
                 controller_goal = subgoal
 

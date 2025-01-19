@@ -223,6 +223,52 @@ class MultyEnvWithGoal(EnvWithGoal):
     def step(self, action):
         return self.env.step(action)
     
+class SafeFetch:
+    def __init__(self, env):
+        self.env = env
+        self.render_info = {}
+        self.render_info["shift_x"] = 0
+        self.render_info["shift_y"] = 0
+
+    def seed(self, seed):
+        self.env.seed(seed)
+
+    def set_state_dim(self, x):
+        self.state_dim = x
+    
+    def set_goal_dim(self, x):
+        self.goal_dim = x
+
+    @property
+    def evaluate(self):
+        return self.env.evaluate
+
+    @evaluate.setter
+    def evaluate(self, val):
+        self.env.evaluate = val
+
+    @property
+    def action_space(self):
+        return self.env.action_space
+
+    def reset(self):
+        return self.env.reset()
+    
+    #TODO
+    def step(self, action):
+        next_tup, rew, done, info = self.env.step(action)
+        info["safety_cost"] = 0
+
+        return next_tup, rew, done, info
+    
+    #TODO
+    def cost_func(self, state):
+        return 0
+    
+    #TODO
+    def success_fn(self, reward):
+        return 0
+    
 
 class SafeMazeAnt:
     def __init__(self, env):
@@ -251,6 +297,10 @@ class SafeMazeAnt:
     def evaluate(self):
         return self.env.evaluate
     
+    @property
+    def action_space(self):
+        return self.env.action_space
+    
     @evaluate.setter
     def evaluate(self, val):
         self.env.evaluate = val
@@ -259,10 +309,6 @@ class SafeMazeAnt:
                 self.set_start_pose(random_start_pose=False)
             else:
                 self.set_start_pose(random_start_pose=True)
-
-    @property
-    def action_space(self):
-        return self.env.action_space
     
     def set_state_dim(self, x):
         self.state_dim = x

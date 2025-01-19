@@ -319,7 +319,7 @@ class Manager(object):
 class CostModel(object):
     def __init__(self, state_dim, goal_dim, lidar_observation, 
                        frame_stack_num, 
-                       safe_model_loss_coef, lr,
+                       safe_model_loss_coef, lr, cm_hidden_size,
                        regression_cost_model=False):
         self.lidar_observation = lidar_observation
         self.safe_model_loss_coef = safe_model_loss_coef        
@@ -327,9 +327,9 @@ class CostModel(object):
         if self.lidar_observation:
             agent_xy = 2     
             lidar_obs = 16       
-            self.safe_model = ControllerSafeModel(goal_dim + (agent_xy + lidar_obs) * frame_stack_num).to(device)
+            self.safe_model = ControllerSafeModel(goal_dim + (agent_xy + lidar_obs) * frame_stack_num, cm_hidden_size).to(device)
         else:
-            self.safe_model = ControllerSafeModel(state_dim).to(device)
+            self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
         
         if regression_cost_model:
             self.safe_model_criterion = nn.MSELoss()
@@ -411,7 +411,7 @@ class CostModel(object):
 
 
 class Controller(object):
-    def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr,
+    def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr, hidden_size,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, 
                  cost_function=None,
@@ -464,27 +464,27 @@ class Controller(object):
             self._cost_d = 0.0
             self._cost_penalty = 0.0
 
-        self.actor = ControllerActor(state_dim, goal_dim, action_dim,
+        self.actor = ControllerActor(state_dim, goal_dim, action_dim, hidden_size,
                                     scale=max_action, sac="sac" in self.algo).to(device)
         if "td3" in self.algo:
-            self.actor_target = ControllerActor(state_dim, goal_dim, action_dim,
+            self.actor_target = ControllerActor(state_dim, goal_dim, action_dim, hidden_size,
                                                 scale=max_action, sac="sac" in self.algo).to(device)
             self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
             lr=actor_lr)
 
-        self.critic = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
-        self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim).to(device)
+        self.critic = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
+        self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
         
         if self.algo in ["td3_lag", "sac_lag"]:
             self.cost_critic = ControllerCritic(
-                state_dim, goal_dim, action_dim
+                state_dim, goal_dim, action_dim, hidden_size
             ).to(device)
             self.cost_critic_target = ControllerCritic(
-                state_dim, goal_dim, action_dim
+                state_dim, goal_dim, action_dim, hidden_size
             ).to(device)
             self.cost_critic_target.load_state_dict(
                 self.cost_critic.state_dict()

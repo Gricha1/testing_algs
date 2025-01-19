@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pylab as plt
 
-from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal, SafeMazeAnt
+from envs import EnvWithGoal, GatherEnv, MultyEnvWithGoal, SafeMazeAnt, SafeFetch
 from envs.create_gather_env import create_gather_env
 from envs.create_maze_env import create_maze_env
 from envs.plots import plot_values
+from envs.pusher import PusherEnv
+from envs.create_fetch_env import create_fetch_env
 
 
 class CustomVideoRendered:
@@ -269,25 +271,16 @@ def create_env(args, renderer_args={}):
             envs.append(env)
             env = MultyEnvWithGoal(envs)
         env.seed(args.seed)
-    ## Safety gym envs
-    elif "Point" in args.env_name:
-        # test
-        DEFAULT_ENV_CONFIG_POINT = dict(
-            action_repeat=1,
-            max_episode_length=750,
-            use_dist_reward=False,
-            stack_obs=False,
+    elif "SafePusher" in args.env_name:
+        from gym.envs.registration import register
+        register(
+            id='Pusher-v0',
+            entry_point='envs.create_fetch_env:create_fetch_env',
+            kwargs={'env_name': 'Pusher-v0'},
+            max_episode_steps=100
         )
-        robot = 'Point'
-        eplen = 750
-        num_steps = 4.5e5
-        steps_per_epoch = 30000
-        epochs = 60
-        DEFAULT_ENV_CONFIG_POINT['max_episode_length'] = eplen
-        env_config=DEFAULT_ENV_CONFIG_POINT
-        #env = SafetyGymEnv(robot=robot, task="goal", level='2', seed=10, config=env_config)
-        #state_dim, action_dim = env.observation_size, env.action_size
-        assert 1 == 0
+        import gym 
+        env = SafeFetch(gym.make("Pusher-v0", reward_shaping="dense"))
     else:
         raise NotImplementedError
     
@@ -299,10 +292,11 @@ def create_env(args, renderer_args={}):
     action_dim = env.action_space.shape[0]
     state_dim = state.shape[0]
     if args.env_name in ["SafeAntMazeC", "SafeAntMazeW", "SafeAntMazeS", "AntMaze", 
-                         "AntPush", "AntFall", "AntMazeMultiMap"]:
+                         "AntPush", "AntFall", "AntMazeMultiMap", "SafePusher"]:
         goal_dim = goal.shape[0]
     else:
         goal_dim = 0
+
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
 
