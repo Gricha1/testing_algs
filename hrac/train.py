@@ -57,6 +57,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             avg_episode_real_subgoal_safety = 0
             if "SafeAntMaze" in env_name:
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            elif env_name == "SafePusher":
+                safety_boundary = env.get_safety_bounds()
             elif env_name == "SafeGym":
                 if args.cost_model:
                     safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
@@ -92,11 +94,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
 
             goal = obs["desired_goal"]
             state = obs["observation"]
+            achieved_goal = obs["achieved_goal"]
 
             # render env
             if eval_ep == eval_image_ep:
                 if not args.validation_without_image:
                     positions_screens = []
+                    if env_name == "SafePusher":
+                        env_screens = []
                 imagined_state_freq = 100
                 prev_imagined_state = None
 
@@ -166,6 +171,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         if args.world_model:
                             if not args.train_only_td3:
                                 debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
+                    elif env_name == "SafePusher":
+                        debug_info["safety_boundary"] = safety_boundary
                     debug_info["acc_reward"] = episode_reward
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = avg_controller_rew
@@ -175,7 +182,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
-                        #print("controller_policy.goal_dim:", controller_policy.goal_dim)
                         x = a_net((torch.from_numpy(state[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
                         y = a_net((torch.from_numpy(goal[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
                         debug_info["dist_a_net_s_g"] = torch.sqrt(torch.pow(x - y, 2).sum() + 1e-12)
@@ -183,8 +189,16 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_a_net_s_g"] = 0
                     debug_info["dist_a_net_s_g"] = 0
                     current_step_info = {}
-                    current_step_info["robot_pos"] = np.array(state[:2])
-                    if env_name != "AntGather" and env_name != "AntMazeSparse":
+                    if env_name == "SafePusher":
+                        current_step_info["robot_pos"] = np.array(state[14:16])
+                    else:
+                        current_step_info["robot_pos"] = np.array(state[:2])
+                    if env_name == "SafePusher":
+                        current_step_info["obj_pos"] = np.array(state[17:19])
+                    if env_name == "SafePusher":
+                        #current_step_info["goal_pos"] = np.array(achieved_goal[:2])
+                        current_step_info["goal_pos"] = np.array(goal[:2])
+                    elif env_name != "AntGather" and env_name != "AntMazeSparse":
                         current_step_info["goal_pos"] = np.array(goal[:2])
                     else:
                         current_step_info["goal_pos"] = None
@@ -198,6 +212,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         current_step_info["robot_radius"] = env.goal_size
                     else:
                         current_step_info["robot_radius"] = 1.5
+                        if env_name == "SafePusher":
+                            current_step_info["robot_radius"] = 1.5 / 20
                     # get imagination of current state
                     if not(predict_env is None):
                         imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, step_count, imagined_state_freq)
@@ -214,6 +230,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         current_step_info["cm_frame_stack_num"] = args.cm_frame_stack_num
                         current_step_info["prev_agent_full_observations"] = copy.deepcopy(current_trajectory)
                     if not args.validation_without_image:
+                        if env_name == "SafePusher":
+                            env_screen = env.render()
+                            env_screens.append(env_screen.transpose(2, 0, 1))
                         screen = renderer.custom_render(current_step_info, 
                                                         debug_info=debug_info, 
                                                         plot_goal=True,
@@ -223,6 +242,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
 
                 goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
+                new_achieved_goal = obs["achieved_goal"]
 
                 if not args.train_only_td3:
                     subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
@@ -243,6 +263,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
 
                 state = new_state
                 prev_action = action
+                achieved_goal = new_achieved_goal 
 
                 current_trajectory.append(state)
 
@@ -260,6 +281,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 total_timesteps,
             )
             del positions_screens
+            if env_name == "SafePusher":
+                writer.add_video(
+                    "eval/env_video",
+                    torch.ByteTensor([env_screens]),
+                    total_timesteps,
+                )
+                del env_screens
             renderer.delete_data()
             
         avg_reward /= eval_episodes
@@ -432,7 +460,14 @@ def run_hrac(args):
     assert "Safe" in args.env_name, "consider only safe envs"
 
     if args.domain_name == "SafetyMaze":
-        env, state_dim, goal_dim, action_dim, renderer = create_env(args)
+        renderer_args = {}
+        if args.env_name == "SafePusher":
+            renderer_args = {"plot_subgoal": False if args.train_only_td3 else True, 
+                            "world_model_comparsion": False,
+                            "plot_safety_boundary": True,
+                            "controller_safe_model": False,
+                            }
+        env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
         low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
         controller_goal_dim = goal_dim
@@ -873,7 +908,7 @@ def run_hrac(args):
         while total_timesteps < args.max_timesteps:
             if done:
                 if total_timesteps != 0 and not just_loaded:
-                    print("episode num:", episode_num)
+                    print("episode num:", episode_num, "step:", total_timesteps)
                     if episode_num % 10 == 0:
                         print("Episode {}".format(episode_num))
                         

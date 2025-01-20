@@ -259,15 +259,107 @@ class SafeFetch:
         next_tup, rew, done, info = self.env.step(action)
         info["safety_cost"] = 0
 
+        #print("state:", next_tup.keys())
+        #print("state shape:", next_tup['observation'].shape)
+        #print("goal shape:", next_tup['desired_goal'].shape)
+        #print("achieved_goal shape:", next_tup['achieved_goal'].shape)
+        #print("state:", next_tup['observation'])
+        #print("goal:", next_tup['desired_goal'])
+        #print("achieved_goal:", next_tup['achieved_goal'])
+
         return next_tup, rew, done, info
     
     #TODO
     def cost_func(self, state):
+        
         return 0
     
     #TODO
     def success_fn(self, reward):
         return 0
+
+    def get_safety_bounds(self, get_safe_unsafe_dataset=False):
+
+        def extrapolate_points(l):
+            extrapolated_points = []
+            for i in range(len(l) - 1):
+                x1, y1 = l[i]
+                x2, y2 = l[i + 1]
+                dx = (x2 - x1) / 5
+                dy = (y2 - y1) / 5
+                extrapolated_points.append((x1, y1))
+                for j in range(1, 5):
+                    extrapolated_points.append((x1 + j * dx, y1 + j * dy))
+            return extrapolated_points
+
+        # dataset = (
+            #             [(x11, x12), (x21, x22), ... ], 
+            #             [y1, y2, ... ]
+            #           )
+        """
+        8-------------------1=9
+        |                    |
+        |                    |
+        7-----------6        |
+                    |        |
+                    |        |
+                    |        |
+        4-----------5        |
+        |                    |
+        |                    |
+        3--------------------2
+        """
+        #safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
+        #safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
+        #safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
+        #safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
+        #safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
+        #safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+        safety_point_3 = Point(0.0, -0.3)
+        safety_point_2 = Point(1.0, -0.5)
+        safety_point_1 = safety_point_3
+        
+        xs = []
+        ys = []
+        # usafe states
+        #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+        #xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
+        #xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
+        #xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
+        #xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
+        #xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
+        xs.append((safety_point_2.x, safety_point_2.y))
+        xs.append((safety_point_3.x, safety_point_3.y))
+        #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+        xs = extrapolate_points(xs)
+        for i in range(len(xs)):
+            ys.append(1)
+        num_unsafe_states = len(xs)
+
+        # safe states
+        """
+        xs_safe = []
+        xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
+        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
+        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
+        xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
+        xs_safe = extrapolate_points(xs_safe)
+        xs.extend(xs_safe)
+        for i in range(len(xs_safe)):
+            ys.append(0)
+        dataset = [xs, ys]
+        """
+
+        safety_boundary = [safety_point_1,
+                           safety_point_2, safety_point_3]
+                        #safety_point_4, safety_point_5, 
+                        #safety_point_6, safety_point_7,
+                        #safety_point_8, safety_point_9]
+
+        return safety_boundary
+
+    def render(self):
+        return self.env.render("rgb_array")
     
 
 class SafeMazeAnt:

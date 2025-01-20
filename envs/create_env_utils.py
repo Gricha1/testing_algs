@@ -10,7 +10,7 @@ from envs.create_fetch_env import create_fetch_env
 
 
 class CustomVideoRendered:
-    def __init__(self, env, controller_safe_model=False, 
+    def __init__(self, env, env_name, controller_safe_model=False, 
                  world_model_comparsion=True, plot_subgoal=True, 
                  plot_safety_boundary=True):
         # config
@@ -28,8 +28,12 @@ class CustomVideoRendered:
         self.controller_safe_model = controller_safe_model
         self.shift_x = env.render_info["shift_x"]
         self.shift_y = env.render_info["shift_y"]
-        self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20
-        self.render_info["env_min_y"], self.render_info["env_max_y"] = -20, 20
+        if env_name == "SafePusher":
+            self.render_info["env_min_x"], self.render_info["env_max_x"] = -2, 2
+            self.render_info["env_min_y"], self.render_info["env_max_y"] = -2, 2
+        else:
+            self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20
+            self.render_info["env_min_y"], self.render_info["env_max_y"] = -20, 20
         self.render_info["grid_resolution_x"] = 20
         self.render_info["grid_resolution_y"] = 20
         self.render_info["state_dim"] = env.state_dim
@@ -96,6 +100,7 @@ class CustomVideoRendered:
 
         # robot imagined pose
         if self.world_model_comparsion:
+            radius = current_step_info["robot_radius"]
             x = current_step_info["imagined_robot_pos"][0] + shift_x
             y = current_step_info["imagined_robot_pos"][1] + shift_y
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
@@ -103,6 +108,12 @@ class CustomVideoRendered:
             self.render_info["ax_states"].text(x, y + 0.05, "i_s")
             self.world_model_poses.append((x - shift_x, y - shift_y))   
 
+        if env_name == "SafePusher":
+            x = current_step_info["obj_pos"][0] + shift_x
+            y = current_step_info["obj_pos"][1] + shift_y
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="r", alpha=0.5)
+            self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj") 
         # subgoal
         if self.plot_subgoal:
             x = current_step_info["subgoal_pos"][0] + shift_x
@@ -167,7 +178,10 @@ class CustomVideoRendered:
 
             
         # print maze
-        if env_name != "AntGather":
+        if env_name == "SafePusher":
+            #self.render_info["ax_states"].add_patch(item_)
+            pass
+        elif env_name != "AntGather":
             env_map = self.env.get_maze()
             for i in env_map:
                 for indx, val in enumerate(i):
@@ -215,8 +229,12 @@ class CustomVideoRendered:
                 if "imagine_subgoal_safety" in debug_info:
                     imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
                     self.render_info["ax_states"].text(env_max_x - 34.5, env_max_y - 2, f"Is:{int(imagine_subgoal_safety*100)/100}")
-                self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
-                self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
+                if env_name == "SafePusher":
+                    self.render_info["ax_states"].text(env_max_x - 7.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 9.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
+                else:
+                    self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
 
         # render img
         self.render_info["fig"].canvas.draw()
@@ -300,7 +318,7 @@ def create_env(args, renderer_args={}):
     env.set_state_dim(state_dim)
     env.set_goal_dim(goal_dim)
 
-    renderer = CustomVideoRendered(env, **renderer_args)
+    renderer = CustomVideoRendered(env, args.env_name, **renderer_args)
 
     env.max_len = 500
 
