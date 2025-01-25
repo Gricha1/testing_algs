@@ -123,7 +123,6 @@ if __name__ == "__main__":
     parser.add_argument("--ctrl_pid_delta_d_ema_alpha", default=0.95, type=float)
     parser.add_argument("--ctrl_lagrangian_multiplier_init", default=0., type=float)
     ## WorldModel Parameters
-    parser.add_argument("--cm_train_on_dataset", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--wm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--wm_pretrain_epoches", default=20, type=int) # to avoid wm explosion in beggining
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
