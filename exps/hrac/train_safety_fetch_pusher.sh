@@ -16,6 +16,7 @@ python main.py --domain_name SafetyMaze \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --a_net_size 3000 \
+               --a_net_discretization_koef 3.0 \
                --not_use_wandb \
                #--r_margin_pos 0.5 \
                #--r_margin_neg 0.7 \

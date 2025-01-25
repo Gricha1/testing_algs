@@ -41,8 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
 
     # Adjacency Network Parameters    
-    parser.add_argument("--a_net_new_discretization_safety_gym", default=False, action="store_true")
-    parser.add_argument("--a_net_discretization_koef", default=3.0, type=float) # 50_000
+    parser.add_argument("--a_net_discretization_koef", default=1.0, type=float) # 50_000
     parser.add_argument("--clip_a_net_xy", default=False, action="store_true")
     parser.add_argument("--load_adj_net", default=False, action="store_true")
     parser.add_argument("--adj_loss_coef", default=1., type=float)

@@ -401,7 +401,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
             for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
                 s_i = traj[i][:controller_goal_dim]
                 s_i_j = traj[i+j][:controller_goal_dim]
-                if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+                if args.domain_name == "Safexp":
                     if "1" in args.task_name:
                         xy_min_max = 2
                     elif "2" in args.task_name:
@@ -411,9 +411,9 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                     if args.clip_a_net_xy:
                         s_i = np.clip(s_i, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
                         s_i_j = np.clip(s_i_j, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
-                    else:
-                        s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
-                        s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                else:
+                    s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
+                    s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
                 s1 = tuple(np.round(s_i).astype(np.int32))
                 s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
@@ -712,7 +712,7 @@ def run_hrac(args):
     n_states = 0
     state_list = []
     state_dict = {}
-    if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
+    if args.domain_name == "Safexp":
         args.a_net_size = 3000
         adj_mat = np.diag(np.ones(args.a_net_size, dtype=np.uint8))
     else:

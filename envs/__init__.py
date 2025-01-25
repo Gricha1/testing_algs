@@ -229,6 +229,7 @@ class SafeFetch:
         self.render_info = {}
         self.render_info["shift_x"] = 0
         self.render_info["shift_y"] = 0
+        self.safety_bounds = self.get_safety_bounds()
 
     def seed(self, seed):
         self.env.seed(seed)
@@ -257,20 +258,27 @@ class SafeFetch:
     #TODO
     def step(self, action):
         next_tup, rew, done, info = self.env.step(action)
-        info["safety_cost"] = 0
-
-        #print("state:", next_tup.keys())
-        #print("state shape:", next_tup['observation'].shape)
-        #print("goal shape:", next_tup['desired_goal'].shape)
-        #print("achieved_goal shape:", next_tup['achieved_goal'].shape)
-        #print("state:", next_tup['observation'])
-        #print("goal:", next_tup['desired_goal'])
-        #print("achieved_goal:", next_tup['achieved_goal'])
+        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
 
         return next_tup, rew, done, info
     
     #TODO
     def cost_func(self, state):
+        if len(state.shape) == 1:
+            robot_x, robot_y = state[:2]
+            cost = 0
+            if robot_y <= self.safety_bounds[1-1].y:
+                cost = 1
+            elif robot_x <= self.safety_bounds[4-1].x and robot_x >= self.safety_bounds[3-1].x:
+                if robot_y <= self.safety_bounds[3-1].y:
+                    cost = 1
+        else:
+            robot_x = state[:, 0]
+            robot_y = state[:, 1]
+            cost = (robot_y <= self.safety_bounds[3-1].y)
+            cost = cost + (robot_y <= self.safety_bounds[1-1].y)
+            cost = cost + (robot_x <= self.safety_bounds[4-1].x) * (robot_x >= self.safety_bounds[3-1].x) * (robot_y <= self.safety_bounds[3-1].y)
+            cost = (cost >= 1)
         
         return 0
     
@@ -279,7 +287,6 @@ class SafeFetch:
         return 0
 
     def get_safety_bounds(self, get_safe_unsafe_dataset=False):
-
         def extrapolate_points(l):
             extrapolated_points = []
             for i in range(len(l) - 1):
@@ -297,17 +304,13 @@ class SafeFetch:
             #             [y1, y2, ... ]
             #           )
         """
-        8-------------------1=9
-        |                    |
-        |                    |
-        7-----------6        |
-                    |        |
-                    |        |
-                    |        |
-        4-----------5        |
-        |                    |
-        |                    |
-        3--------------------2
+
+                             3---------------4
+                             |               |
+                             |               |
+                             |               |
+                             |               |
+        1--------------------2               5-----------6
         """
         #safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
         #safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
@@ -315,9 +318,12 @@ class SafeFetch:
         #safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
         #safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
         #safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
-        safety_point_3 = Point(0.0, -0.3)
-        safety_point_2 = Point(1.0, -0.5)
-        safety_point_1 = safety_point_3
+        safety_point_6 = Point(1.5, -1)
+        safety_point_5 = Point(0.6, -1)
+        safety_point_4 = Point(0.6, 0.5)
+        safety_point_3 = Point(-0.5, 0.5)
+        safety_point_2 = Point(-0.5, -1)
+        safety_point_1 = Point(-1.5, -1)
         
         xs = []
         ys = []
@@ -330,6 +336,9 @@ class SafeFetch:
         #xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
         xs.append((safety_point_2.x, safety_point_2.y))
         xs.append((safety_point_3.x, safety_point_3.y))
+        xs.append((safety_point_4.x, safety_point_4.y))
+        xs.append((safety_point_5.x, safety_point_5.y))
+        xs.append((safety_point_6.x, safety_point_6.y))
         #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
         xs = extrapolate_points(xs)
         for i in range(len(xs)):
@@ -350,11 +359,14 @@ class SafeFetch:
         dataset = [xs, ys]
         """
 
-        safety_boundary = [safety_point_1,
-                           safety_point_2, safety_point_3]
-                        #safety_point_4, safety_point_5, 
-                        #safety_point_6, safety_point_7,
-                        #safety_point_8, safety_point_9]
+        safety_boundary = [
+                           safety_point_1,
+                           safety_point_2, 
+                           safety_point_3,
+                           safety_point_4,
+                           safety_point_5,
+                           safety_point_6,
+                           ]
 
         return safety_boundary
 
@@ -463,8 +475,7 @@ class SafeMazeAnt:
             return self.env.reset(start_point=xy, goal_xy=goal_xy)
 
     def step(self, action):
-        next_tup, rew, done, info = self.env.step(action)
-        safety_bounds = self.get_safety_bounds()
+        next_tup, rew, done, info = self.env.step(action)        
         info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
 
         return next_tup, rew, done, info
