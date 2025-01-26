@@ -530,6 +530,8 @@ def run_hrac(args):
         man_scale[0] = 30
         man_scale[1] = 30
         no_xy = False
+    if args.env_name == "SafePusher":
+        no_xy = False
     else:
         no_xy = True
 
