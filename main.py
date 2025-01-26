@@ -103,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--cm_frame_stack_num", default=1, type=int)
     parser.add_argument("--safe_model_loss_coef", default=1., type=float)
     parser.add_argument("--cm_hidden_size", default=300, type=int)
+    parser.add_argument("--cost_model_trajectory_buffer", action='store_true', default=False) # to avoid wm explosion in beggining
 
     # Safety Controller Parameters
     parser.add_argument("--controller_curriculumn", action='store_true', default=False)

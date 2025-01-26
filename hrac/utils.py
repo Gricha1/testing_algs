@@ -98,13 +98,20 @@ class ReplayBuffer(object):
 
 class CostModelTrajectoryBuffer(object):
 
-    def __init__(self, maxsize, frame_stack_num=1):
+    def __init__(self, maxsize, state_dim, goal_dim, lidar_observation, frame_stack_num=1):
         self.maxsize = maxsize
         self.frame_stack_num = frame_stack_num
         self.next_idx = 0
         self.trajectory = []
         self.storage = [[] for _ in range(2)]
         self.name = "cost_trajectory_buffer"
+        self.goal_dim = goal_dim
+        if lidar_observation:
+            self.state_dim = 2
+            self.agent_obst_len = 16
+        else:
+            self.state_dim = state_dim
+            self.agent_obst_len = 0
 
     def __len__(self):
         return len(self.storage[0])
@@ -137,23 +144,30 @@ class CostModelTrajectoryBuffer(object):
                 state_j = current_trajectory[j][0]
                 cost_j = current_trajectory[j][1]
 
-                manager_absolute_goal = state_j[:2]
+                manager_absolute_goal = state_j[:self.goal_dim]
                 part_of_state = []
                 if self.frame_stack_num > 1:
-                    agent_poses = [state_i[:2] for state_i in frame_stack_states_i]
-                    obstacle_datas = [state_i[-16:] for state_i in frame_stack_states_i]
+                    agent_poses = [state_i[:self.state_dim] for state_i in frame_stack_states_i]
+                    if self.agent_obst_len == 0:
+                        obstacle_data = []
+                    else:
+                        obstacle_datas = [state_i[-self.agent_obst_len:] for state_i in frame_stack_states_i]
                     # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
                     while len(agent_poses) < self.frame_stack_num:
-                        agent_poses.append([0 for i in range(2)])
-                        obstacle_datas.append([0 for i in range(16)])
+                        agent_poses.append([0 for i in range(self.state_dim)])
+                        if self.agent_obst_len == 0:
+                            obstacle_data = []
+                        else:
+                            obstacle_datas.append([0 for i in range(self.agent_obst_len)])
                     for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas):
                         part_of_state.extend(agent_pose)
                         part_of_state.extend(obstacle_data)
                 else:
-                    agent_pose = state_i[:2]
-                    obstacle_data = state_i[-16:]
+                    agent_pose = state_i[:self.state_dim]
                     part_of_state.extend(agent_pose)
-                    part_of_state.extend(obstacle_data)
+                    if self.agent_obst_len != 0:
+                        obstacle_data = state_i[-self.agent_obst_len:]
+                        part_of_state.extend(obstacle_data)
                 state = []
                 state.extend(manager_absolute_goal)
                 state.extend(part_of_state)
@@ -337,9 +351,8 @@ class MetricDataset(Data.Dataset):
             for j in range(i + 1, n_samples):
                 s_i = np.array(states[i])
                 s_j = np.array(states[j])
-                if args.domain_name == "Safexp" and args.a_net_new_discretization_safety_gym:
-                    s_i = s_i.astype(float) / args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
-                    s_j = s_j.astype(float) / args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                s_i = s_i.astype(float) / args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
+                s_j = s_j.astype(float) / args.a_net_discretization_koef # from -1.5, 1.5 to 0, 30
                 self.x.append(s_i)
                 self.y.append(s_j)
                 self.label.append(adj_mat[i, j])

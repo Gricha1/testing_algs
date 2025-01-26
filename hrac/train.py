@@ -67,9 +67,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
                 if "SafeAntMaze" in env_name:
-                    x_with_zeros = np.concatenate((x_np, 
-                                                np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
-                                                axis=1)
+                    x_with_zeros = np.concatenate((x_np,
+                                                   x_np,
+                                                   np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
+                                                   axis=1)
                 else:
                     x_with_zeros = x_np
                 x_tensor = torch.tensor(x_with_zeros)
@@ -401,19 +402,17 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
             for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
                 s_i = traj[i][:controller_goal_dim]
                 s_i_j = traj[i+j][:controller_goal_dim]
-                if args.domain_name == "Safexp":
+                if args.domain_name == "Safexp" and args.clip_a_net_xy:
                     if "1" in args.task_name:
                         xy_min_max = 2
                     elif "2" in args.task_name:
                         xy_min_max = 5
                     else:
                         assert 1 == 0
-                    if args.clip_a_net_xy:
-                        s_i = np.clip(s_i, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
-                        s_i_j = np.clip(s_i_j, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
-                else:
-                    s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
-                    s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
+                    s_i = np.clip(s_i, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                    s_i_j = np.clip(s_i_j, a_min=-xy_min_max, a_max=xy_min_max) * args.a_net_discretization_koef
+                s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
+                s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
                 s1 = tuple(np.round(s_i).astype(np.int32))
                 s2 = tuple(np.round(s_i_j).astype(np.int32))
                 if s1 not in state_list:
@@ -743,8 +742,11 @@ def run_hrac(args):
                                     lr=args.cm_lr,
                                     cm_hidden_size=args.cm_hidden_size,
                                     regression_cost_model=args.regression_cost_model)
-        if args.domain_name == "Safexp":
-            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size, 
+        if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
+            cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size,
+                                                                state_dim=state_dim,
+                                                                goal_dim=goal_dim,
+                                                                lidar_observation=True if args.domain_name == "Safexp" else False, 
                                                                 frame_stack_num=args.cm_frame_stack_num)
             
         def train_cost_model(replay_buffer,
@@ -846,7 +848,7 @@ def run_hrac(args):
                         obs = env.reset()
                         state = obs["observation"]
                         done = False
-                        if args.domain_name == "Safexp" and args.cost_model:
+                        if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                             if len(cost_model_buffer.trajectory) != 0:
                                 cost_model_buffer.add_trajectory_to_buffer()
                             cost_model_buffer.create_new_trajectory()
@@ -860,7 +862,7 @@ def run_hrac(args):
                         else:
                             world_model_buffer.add(
                                 (state, next_state, None, action, None, None, [], [])) 
-                    if args.domain_name == "Safexp" and args.cost_model:
+                    if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                         cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
                     exploration_total_timesteps += 1
@@ -878,7 +880,7 @@ def run_hrac(args):
                                         batch_size=args.wm_batch_size, episode_num=episode_num,
                                         total_timesteps=total_timesteps)
                 if args.cm_pretrain:
-                    if args.domain_name == "Safexp":
+                    if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
                         buffer = cost_model_buffer
                     else:
                         buffer = world_model_buffer
@@ -911,7 +913,7 @@ def run_hrac(args):
                         
                     ## Train World Model or Cost Model
                     if args.cost_model:
-                        if args.domain_name == "Safexp":
+                        if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
                             buffer = cost_model_buffer
                         else:
                             buffer = world_model_buffer
@@ -1038,7 +1040,7 @@ def run_hrac(args):
                 state = obs["observation"]
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
-                if args.domain_name == "Safexp" and args.cost_model:
+                if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                     if len(cost_model_buffer.trajectory) != 0:
                         cost_model_buffer.add_trajectory_to_buffer()
                     cost_model_buffer.create_new_trajectory()
@@ -1123,7 +1125,7 @@ def run_hrac(args):
                 ctrl_done = done
 
 
-            if args.domain_name == "Safexp" and args.cost_model:
+            if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                 cost_model_buffer.append(next_state, info["safety_cost"])
 
             if args.world_model:
