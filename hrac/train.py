@@ -179,6 +179,31 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["acc_controller_reward"] = avg_controller_rew
                     debug_info["t"] = step_count
                     debug_info["goals_achieved"] = episode_goals_achieved
+                    if args.cost_model:
+                        with torch.no_grad():
+                            torch_state = torch.from_numpy(state[None, :])
+                            if cost_model.frame_stack_num > 1:
+                                agent_pose = torch_state[:, :cost_model.state_dim]
+                                part_of_state = agent_pose
+                                if cost_model.agent_obst_len != 0:
+                                    obstacle_data = torch_state[:, -cost_model.agent_obst_len:]
+                                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
+                                for i in range(cost_model.frame_stack_num - 1):
+                                    if cost_model.agent_obst_len != 0:
+                                        part_of_state = torch.cat((part_of_state, agent_pose, obstacle_data), dim=1)
+                                    else:
+                                        part_of_state = torch.cat((part_of_state, agent_pose), dim=1)
+                            else:
+                                agent_pose = torch_state[:, :cost_model.state_dim]
+                                part_of_state = agent_pose
+                                if cost_model.agent_obst_len != 0:
+                                    obstacle_data = state[:, -cost_model.agent_obst_len:]
+                                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
+                            manager_absolute_goal = torch_state[:, :cost_model.goal_dim]
+                            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                            manager_absolute_goal = manager_absolute_goal.type('torch.FloatTensor').to("cuda")
+                            cost_model_val = cost_model.safe_model(manager_absolute_goal)
+                        debug_info["cost_model_val"] = cost_model_val
                     if args.domain_name == "Safexp":
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
@@ -255,11 +280,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 if args.train_only_td3:
                     controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
                     if args.self_td3_reward:
-                        avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale, action)    
+                        #avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale, action)    
+                        avg_controller_rew += calculate_controller_reward(achieved_goal, controller_goal, new_achieved_goal, ctrl_rew_scale, action)    
                     else:
                         avg_controller_rew = reward*ctrl_rew_scale
                 else:
-                    avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale, action)    
+                    #avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale, action)    
+                    avg_controller_rew += calculate_controller_reward(achieved_goal, subgoal, new_achieved_goal, ctrl_rew_scale, action)    
                 episode_reward += reward
 
                 state = new_state
@@ -1040,6 +1067,7 @@ def run_hrac(args):
 
                 goal = obs["desired_goal"]
                 state = obs["observation"]
+                achieved_goal = obs["achieved_goal"]
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
                 if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
@@ -1100,6 +1128,7 @@ def run_hrac(args):
 
             next_goal = next_tup["desired_goal"]
             next_state = next_tup["observation"]
+            next_achieved_goal = next_tup["achieved_goal"]
 
             if not args.train_only_td3:
                 manager_transition[-2].append(next_state)
@@ -1108,11 +1137,13 @@ def run_hrac(args):
             if args.train_only_td3:
                 controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
                 if args.self_td3_reward:
-                    controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale, action)
+                    #controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale, action)
+                    controller_reward = calculate_controller_reward(achieved_goal, controller_goal, next_achieved_goal, args.ctrl_rew_scale, action)
                 else:
                     controller_reward = manager_reward * args.ctrl_rew_scale
             else:
-                controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale, action)
+                #controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale, action)
+                controller_reward = calculate_controller_reward(achieved_goal, subgoal, next_achieved_goal, args.ctrl_rew_scale, action)
                 subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
                 controller_goal = subgoal
 

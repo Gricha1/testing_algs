@@ -533,11 +533,11 @@ class Controller(object):
         return self.critic(state, sg, action)
     
     def state_safety_on_horizon(self, state, actions, 
-                            controller_policy, 
-                            cost_model, 
-                            all_steps_safety=False, 
-                            train=False,
-                            predict_env=None):
+                                controller_policy, 
+                                cost_model, 
+                                all_steps_safety=False, 
+                                train=False,
+                                predict_env=None):
 
         assert not(predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
@@ -557,8 +557,8 @@ class Controller(object):
             img_states.append(img_state)
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
             next_img_state = predict_env.step(img_state, ctrl_actions, 
-                                                    deterministic=True, 
-                                                    torch_deviced=True)
+                                                deterministic=True, 
+                                                torch_deviced=True)
             if all_steps_safety:
                 if cost_model.frame_stack_num > 1:
                     part_of_state = []
@@ -668,7 +668,8 @@ class Controller(object):
         self._cost_penalty = max(0.0, pid_o)
         self._cost_ds.append(self._cost_d)
 
-    def train(self, replay_buffer, cost_model, predict_env, iterations, batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
+    def train(self, replay_buffer, cost_model, predict_env, iterations, 
+              batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         if self.algo in ["td3_lag", "sac_lag"]:
             avg_cost_loss = 0.

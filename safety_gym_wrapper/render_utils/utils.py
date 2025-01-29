@@ -193,12 +193,14 @@ class CustomVideoRendered:
             assert "acc_reward" in debug_info 
             assert "acc_cost" in debug_info
             assert "t" in debug_info
+            assert "cost_model_val" in debug_info
             if len(debug_info) != 0:
                 # main
                 acc_reward = debug_info["acc_reward"]
                 acc_cost = debug_info["acc_cost"]
                 t = debug_info["t"]
                 self.render_info["ax_states"].text(env_max_x - 9.5, env_max_y - 1, f"t:{t}")
+                cost_model_val = debug_info["cost_model_val"]
                 # option
                 if "acc_controller_reward" in debug_info:
                     acc_controller_reward = debug_info["acc_controller_reward"]
@@ -219,6 +221,7 @@ class CustomVideoRendered:
                     self.render_info["ax_states"].text(env_max_x - 5, env_max_y - 1, f"Is:{int(imagine_subgoal_safety*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 3.5, env_max_y - 1, f"Cm:{int(acc_cost*100)/100}")
                 self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 1, f"Rm:{int(acc_reward*10)/10}")
+                self.render_info["ax_states"].text(env_max_x - 11.5, env_max_y - 1, f"CM:{int(cost_model_val*10)/10}")
 
         # render img
         self.render_info["fig"].canvas.draw()
