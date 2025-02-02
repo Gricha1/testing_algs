@@ -12,7 +12,8 @@ class GoalWrapper(Wrapper):
         super(GoalWrapper, self).__init__(env)
         self.env_name = env_name
         ob_space = env.observation_space
-        high = np.array([np.inf, np.inf, np.inf])
+        #high = np.array([np.inf, np.inf, np.inf])
+        high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
         low = -high
         goal_space = gym.spaces.Box(low=low, high=high)
 
