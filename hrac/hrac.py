@@ -141,7 +141,10 @@ class Manager(object):
                 if cost_model.agent_obst_len != 0:
                     obstacle_data = copy_state[:, -cost_model.agent_obst_len:]
                     part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            if cost_model.cost_memmory:
+                manager_absolute_goal = agent_pose
+            else:
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelfree * safety_model_free_loss 
@@ -321,20 +324,24 @@ class CostModel(object):
     def __init__(self, state_dim, goal_dim, lidar_observation, 
                        frame_stack_num, 
                        safe_model_loss_coef, lr, cm_hidden_size,
-                       regression_cost_model=False):
+                       regression_cost_model=False,
+                       cost_memmory=False):
         self.lidar_observation = lidar_observation
         self.safe_model_loss_coef = safe_model_loss_coef        
         self.frame_stack_num = frame_stack_num
         self.goal_dim = goal_dim
+        self.cost_memmory = cost_memmory
         if self.lidar_observation:
             self.state_dim = 2
             self.agent_obst_len = 16       
             self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
         else:
-            #self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
             self.state_dim = state_dim
             self.agent_obst_len = 0
-            self.safe_model = ControllerSafeModel(self.goal_dim + self.state_dim, cm_hidden_size).to(device)
+            if self.cost_memmory:
+                self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
+            else:
+                self.safe_model = ControllerSafeModel(self.goal_dim + self.state_dim, cm_hidden_size).to(device)
             #print("cost model in:", state_dim)
         
         if regression_cost_model:
@@ -362,6 +369,8 @@ class CostModel(object):
                 cost_device = cost.to(device)
             elif replay_buffer.cost_memmory:
                 x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                if not self.cost_memmory:
+                    y = np.concatenate((y[:, :self.goal_dim], y), axis=1)
                 state = get_tensor(y, to_device=False) # cost for the next_state
                 state_device = state.to(device)
                 cost = get_tensor(c, to_device=False)
@@ -597,8 +606,11 @@ class Controller(object):
             if cost_model.agent_obst_len != 0:
                 obstacle_data = next_img_state[:, -cost_model.agent_obst_len:]
                 part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-            manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
-            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            if cost_model.cost_memmory:
+                manager_absolute_goal = agent_pose
+            else:
+                manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
+                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             safety = safety_cost(manager_absolute_goal)
         else:
             safety = 0

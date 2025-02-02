@@ -66,11 +66,15 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
-                if "SafeAntMaze" in env_name:
+                if cost_model.cost_memmory:
                     x_with_zeros = np.concatenate((x_np,
-                                                   x_np,
                                                    np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
                                                    axis=1)
+                #if "SafeAntMaze" in env_name:
+                #    x_with_zeros = np.concatenate((x_np,
+                #                                   x_np,
+                #                                   np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
+                #                                   axis=1)
                 else:
                     x_with_zeros = x_np
                 x_tensor = torch.tensor(x_with_zeros)
@@ -130,13 +134,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
                                 subgoal_torch = torch.tensor(subgoal, dtype=torch.float32).to(device).unsqueeze(0)
-                                episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
-                                                        state_torch, subgoal_torch, 
-                                                        controller_policy, 
-                                                        cost_model=cost_model,
-                                                        all_steps_safety=True,
-                                                        predict_env=predict_env
-                                                        )
+                                #episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
+                                #                        state_torch, subgoal_torch, 
+                                #                        controller_policy, 
+                                #                        cost_model=cost_model,
+                                #                        all_steps_safety=True,
+                                #                        predict_env=predict_env
+                                #                        )
                     episode_subgoals_count += 1
 
                 step_count += 1
@@ -199,10 +203,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                 if cost_model.agent_obst_len != 0:
                                     obstacle_data = state[:, -cost_model.agent_obst_len:]
                                     part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-                            manager_absolute_goal = torch_state[:, :cost_model.goal_dim]
-                            manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                            if cost_model.cost_memmory:
+                                manager_absolute_goal = torch_state[:, :cost_model.goal_dim]
+                                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+                            else:
+                                manager_absolute_goal = agent_pose
                             manager_absolute_goal = manager_absolute_goal.type('torch.FloatTensor').to("cuda")
-                            cost_model_val = cost_model.safe_model(manager_absolute_goal)
+                            cost_model_val = cost_model.safe_model(manager_absolute_goal)                            
                         debug_info["cost_model_val"] = cost_model_val
                     if args.domain_name == "Safexp":
                         debug_info["dist_to_goal"] = env.env.dist_goal()
@@ -222,8 +229,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if env_name == "SafePusher":
                         current_step_info["obj_pos"] = np.array(state[17:19])
                     if env_name == "SafePusher":
-                        #current_step_info["goal_pos"] = np.array(achieved_goal[:2])
-                        current_step_info["goal_pos"] = np.array(goal[:2])
+                        current_step_info["goal_pos"] = np.array(achieved_goal[:2])
+                        #current_step_info["goal_pos"] = np.array(goal[:2])
                     elif env_name != "AntGather" and env_name != "AntMazeSparse":
                         current_step_info["goal_pos"] = np.array(goal[:2])
                     else:
@@ -770,7 +777,8 @@ def run_hrac(args):
                                     safe_model_loss_coef=args.safe_model_loss_coef, 
                                     lr=args.cm_lr,
                                     cm_hidden_size=args.cm_hidden_size,
-                                    regression_cost_model=args.regression_cost_model)
+                                    regression_cost_model=args.regression_cost_model,
+                                    cost_memmory=args.cost_memmory)
         if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size,
                                                                 state_dim=state_dim,
