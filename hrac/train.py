@@ -62,7 +62,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             elif env_name == "SafeGym":
                 if args.cost_model:
                     safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
-            if args.cost_model and not args.domain_name == "BulletSafeGym":
+            if args.cost_model and not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
                 x = safe_dataset[0]
                 true = safe_dataset[1]
                 x_np = np.array(x, dtype=np.float32)
@@ -229,8 +229,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if env_name == "SafePusher":
                         current_step_info["obj_pos"] = np.array(state[17:19])
                     if env_name == "SafePusher":
-                        current_step_info["goal_pos"] = np.array(achieved_goal[:2])
-                        #current_step_info["goal_pos"] = np.array(goal[:2])
+                        #current_step_info["goal_pos"] = np.array(achieved_goal[:2])
+                        current_step_info["goal_pos"] = np.array(goal[:2])
                     elif env_name != "AntGather" and env_name != "AntMazeSparse":
                         current_step_info["goal_pos"] = np.array(goal[:2])
                     else:
@@ -278,7 +278,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 new_achieved_goal = obs["achieved_goal"]
 
                 if not args.train_only_td3:
-                    subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
+                    #subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
+                    subgoal = controller_policy.subgoal_transition(achieved_goal, subgoal, new_achieved_goal)
 
                 avg_reward += reward
                 if "Safe" in env_name:
@@ -1152,7 +1153,8 @@ def run_hrac(args):
             else:
                 #controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale, action)
                 controller_reward = calculate_controller_reward(achieved_goal, subgoal, next_achieved_goal, args.ctrl_rew_scale, action)
-                subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+                #subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+                subgoal = controller_policy.subgoal_transition(achieved_goal, subgoal, next_achieved_goal)
                 controller_goal = subgoal
 
             ep_controller_reward += controller_reward

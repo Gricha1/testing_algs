@@ -342,7 +342,6 @@ class CostModel(object):
                 self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
             else:
                 self.safe_model = ControllerSafeModel(self.goal_dim + self.state_dim, cm_hidden_size).to(device)
-            #print("cost model in:", state_dim)
         
         if regression_cost_model:
             self.safe_model_criterion = nn.MSELoss()
@@ -385,8 +384,6 @@ class CostModel(object):
         return debug_info
     
     def train_batch_cost_model(self, init_state, cost):
-        #print("cost model batch in:", init_state.shape)
-        #print("cost model batch target:", cost.shape)
         pred = self.safe_model(init_state)
         numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
         if not(cost is None):
