@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation_without_image", action="store_true", default=False)
     parser.add_argument("--visulazied_episode", default=0, type=int)
     parser.add_argument("--test_train_dataset", action="store_true", default=False)
+    parser.add_argument("--validate_img_states", action="store_true", default=False)
     
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
@@ -111,10 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("--controller_curriculum_safety_coef", default=4000., type=float)
     parser.add_argument("--controller_cumul_img_safety", action='store_true', default=False)
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
-    parser.add_argument("--controller_imagination_safety_loss", action='store_true', default=False)
-    parser.add_argument("--use_safe_threshold", action='store_true', default=False)
     parser.add_argument("--cost_budget", default=25, type=float)
-    parser.add_argument("--controller_use_lagrange", action='store_true', default=False)
     parser.add_argument("--ctrl_pid_kp", default=1e-6, type=float)
     parser.add_argument("--ctrl_pid_ki", default=1e-7, type=float)
     parser.add_argument("--ctrl_pid_kd", default=1e-7, type=float)
@@ -151,26 +149,14 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
-    assert args.controller_algo in ["td3_lag", "td3", "sac_lag", "sac"]
-    if args.controller_algo=="td3_lag":
-        assert args.controller_use_lagrange
-        assert not args.controller_imagination_safety_loss
+    assert args.controller_algo in ["td3_img_safe_lag", "td3_img_safe", "td3_lag", "td3", "sac_lag", "sac"]
 
-    if args.modelfree_safety:
-        assert args.cost_model
-    if args.controller_imagination_safety_loss:
+    if "img_safe" in args.controller_algo:
         assert args.world_model and args.cost_model
-
-    if args.controller_imagination_safety_loss and args.controller_use_lagrange:
+    if "td3_img_safe_lag" == args.controller_algo:
         assert args.controller_cumul_img_safety
-    if args.use_safe_threshold:
-        assert not args.controller_use_lagrange
-        assert args.controller_cumul_img_safety
-    assert not args.controller_imagination_safety_loss or (args.controller_imagination_safety_loss and args.img_horizon <= args.manager_propose_freq)
-    assert not args.cost_model or \
-        ( (args.cost_model and args.domain_name == "Safexp") or \
-          (args.cost_model and args.domain_name != "Safexp" and args.world_model)
-        )
+    if "img_safe" in args.controller_algo:
+        args.img_horizon <= args.manager_propose_freq
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
         args.man_rew_scale = 1.0

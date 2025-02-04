@@ -414,13 +414,10 @@ class Controller(object):
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, 
                  cost_function=None,
-                 controller_imagination_safety_loss=False,
                  controller_grad_clip=0, controller_safety_coef=0, 
                  controller_cumul_img_safety=False,
                  img_horizon=10,
-                 use_safe_threshold=False,
                  safe_threshold=None,
-                 use_lagrange=False,
                  algo="td3",
                  sac_alpha=None,
                  lagrangian_data={}
@@ -440,16 +437,12 @@ class Controller(object):
 
         self.sac_alpha = sac_alpha
 
-        self.controller_imagination_safety_loss = controller_imagination_safety_loss
         self.controller_safety_coef = controller_safety_coef
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
         self.cost_function = cost_function
-        self.use_safe_threshold = use_safe_threshold
-        self.use_lagrange = use_lagrange
-        if use_safe_threshold or use_lagrange:
+        if "lag" in self.algo:
             self.safe_threshold = torch.tensor(safe_threshold)
-        if self.use_lagrange:
             self._pid_kp = lagrangian_data["pid_kp"]
             self._pid_ki = lagrangian_data["pid_ki"]
             self._pid_kd = lagrangian_data["pid_kd"]
@@ -543,7 +536,8 @@ class Controller(object):
                                 cost_model, 
                                 all_steps_safety=False, 
                                 train=False,
-                                predict_env=None):
+                                predict_env=None,
+                                return_img_states=False):
 
         assert not(predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
@@ -615,9 +609,13 @@ class Controller(object):
                 safety += el
             if train:
                 safety /= self.img_horizon
+
+        if return_img_states:
+            return safety, img_states
         return safety
 
     def actor_loss(self, state, sg, init_state, cost_model, predict_env):
+        # reward loss
         if "td3" in self.algo:
             action = self.actor(state, sg)
             actor_loss = -self.critic.Q1(state, sg, action).mean()
@@ -626,26 +624,25 @@ class Controller(object):
             actor_loss = (self.sac_alpha * log_prob - self.critic.Q1(state, sg, action)).mean()
         else:
             assert 1 == 0
-        if "lag" in self.algo:
+        # cost loss
+        if self.algo in ["td3_lag", "sac_lag"]:
             safety_loss = self.cost_critic.Q1(state, sg, action).mean()
             actor_loss = (
                 actor_loss + safety_loss * self._cost_penalty
             ) / (1 + self._cost_penalty)
-        if self.controller_imagination_safety_loss:
+
+        elif "img_safe" in self.algo:
             safety_loss = self.state_safety_on_horizon(init_state, sg, 
                                                         controller_policy=self, 
                                                         cost_model=cost_model,
                                                         all_steps_safety=self.controller_cumul_img_safety,
-                                                        train=not self.use_safe_threshold and not self.use_lagrange,
+                                                        train=self.controller_cumul_img_safety,
                                                         predict_env=predict_env)
-            if self.use_safe_threshold:
-                safety_loss = torch.max(safety_loss, self.safe_threshold) / self.safe_threshold
-            elif self.use_lagrange:
+            if "lag" in self.algo:
                 actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
-            if not self.use_lagrange:
+            else:
                 actor_loss += self.controller_safety_coef * safety_loss.mean()
-
-            
+   
         return actor_loss
 
     def subgoal_transition(self, state, subgoal, next_state):
@@ -780,13 +777,13 @@ class Controller(object):
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
-            if self.use_lagrange and ep_cost is not None:
+            if "lag" in self.algo and ep_cost is not None:
                 self.pid_update(ep_cost)
 
         if self.algo in ["td3_lag", "sac_lag"]:
             debug_info["controller_critic_loss"] = avg_cost_loss / iterations
 
-        if self.use_lagrange and ep_cost is not None:
+        if "lag" in self.algo and ep_cost is not None:
             debug_info["lagrangian"] = self._cost_penalty
 
         return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info

@@ -134,13 +134,27 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
                                 subgoal_torch = torch.tensor(subgoal, dtype=torch.float32).to(device).unsqueeze(0)
-                                #episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
-                                #                        state_torch, subgoal_torch, 
-                                #                        controller_policy, 
-                                #                        cost_model=cost_model,
-                                #                        all_steps_safety=True,
-                                #                        predict_env=predict_env
-                                #                        )
+                                if args.validate_img_states:
+                                    curr_imagine_subgoal_safety, img_states = controller_policy.state_safety_on_horizon(
+                                                            state_torch, subgoal_torch, 
+                                                            controller_policy, 
+                                                            cost_model=cost_model,
+                                                            all_steps_safety=True,
+                                                            predict_env=predict_env,
+                                                            return_img_states=False,
+                                                            )
+                                    episode_imagine_subgoal_safety += curr_imagine_subgoal_safety
+                                    print("len img_states:", len(img_states))
+                                    print("shape [0]:", img_states[0].shape)
+                                else:
+                                    episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
+                                                            state_torch, subgoal_torch, 
+                                                            controller_policy, 
+                                                            cost_model=cost_model,
+                                                            all_steps_safety=False if cost_model.cost_memmory else True,
+                                                            predict_env=predict_env,
+                                                            return_img_states=False,
+                                                            )
                     episode_subgoals_count += 1
 
                 step_count += 1
@@ -655,7 +669,7 @@ def run_hrac(args):
         manager_policy = None
 
     lagrangian_data = {}
-    if args.controller_use_lagrange:
+    if "lag" in args.controller_algo:
         lagrangian_data["pid_kp"] = args.ctrl_pid_kp
         lagrangian_data["pid_ki"] = args.ctrl_pid_ki
         lagrangian_data["pid_kd"] = args.ctrl_pid_kd
@@ -665,10 +679,9 @@ def run_hrac(args):
         lagrangian_data["lagrangian_multiplier_init"] = args.ctrl_lagrangian_multiplier_init
 
     safe_threshold = None
-    if args.controller_imagination_safety_loss:
-        if args.use_safe_threshold or args.controller_use_lagrange:
-            safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
-    elif args.controller_use_lagrange:
+    if "td3_img_safe_lag" == args.controller_algo:
+        safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
+    elif "lag" in args.controller_algo:
         safe_threshold = args.cost_budget
     controller_policy = hrac.Controller(
         state_dim=state_dim,
@@ -683,14 +696,11 @@ def run_hrac(args):
         policy_noise=policy_noise,
         noise_clip=noise_clip,
         cost_function=None if args.domain_name == "Safexp" or args.cost_memmory else env.cost_func,
-        controller_imagination_safety_loss=args.controller_imagination_safety_loss,
         controller_grad_clip=args.controller_grad_clip,
         controller_safety_coef=args.controller_safety_coef,
         controller_cumul_img_safety=args.controller_cumul_img_safety,
         img_horizon=args.img_horizon,
-        use_safe_threshold = args.use_safe_threshold,
         safe_threshold = safe_threshold,
-        use_lagrange=args.controller_use_lagrange,
         algo=args.controller_algo,
         sac_alpha=args.sac_alpha,
         lagrangian_data=lagrangian_data
@@ -726,8 +736,8 @@ def run_hrac(args):
             batch_size=args.ctrl_batch_size, 
             discount=args.ctrl_discount, 
             tau=args.ctrl_soft_sync_rate,
-            ep_cost=np.mean(pid_costs) if args.controller_use_lagrange and episode_num > 10 else None)
-        if controller_policy.use_lagrange and episode_num > 10:
+            ep_cost=np.mean(pid_costs) if "lag" in args.controller_algo and episode_num > 10 else None)
+        if "lag" in args.controller_algo and episode_num > 10:
             print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
             print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
@@ -937,7 +947,7 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
-        if controller_policy.use_lagrange:
+        if "lag" in args.controller_algo:
             pid_costs = deque(maxlen=10)
 
         ## Main training ...
@@ -984,7 +994,7 @@ def run_hrac(args):
                                     ep_controller_reward, controller_episode_cost, episode_cost, 
                                     episode_safety_subgoal_rate_, 
                                     ep_manager_reward, total_timesteps,
-                                    pid_costs=pid_costs if controller_policy.use_lagrange else None)
+                                    pid_costs=pid_costs if "lag" in args.controller_algo else None)
 
                     ## Train manager
                     if not args.train_only_td3 and timesteps_since_manager >= args.train_manager_freq:
@@ -1195,9 +1205,9 @@ def run_hrac(args):
                 timesteps_since_manager += 1
                 timesteps_since_subgoal += 1
             if done:
-                if args.controller_imagination_safety_loss and args.controller_use_lagrange:
+                if "td3_img_safe_lag" == args.controller_algo:
                     pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
-                elif args.controller_use_lagrange:
+                elif "lag" in args.controller_algo:
                     pid_costs.append(episode_cost)
 
             if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
