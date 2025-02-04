@@ -6,16 +6,16 @@ fi
 
 cd ../..
 python main.py --seed $seed \
-               --modelfree_safety \
                --env_name SafeAntMazeC \
-               --controller_imagination_safety_loss \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
+               --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
                --world_model \
                --cost_memmory \
                --cost_model \
-               --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
+               --modelfree_safety \
                --coef_safety_modelfree 800 \
+               --controller_algo "td3_img_safe" \
                --controller_safety_coef 6 \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
