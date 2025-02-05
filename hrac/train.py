@@ -77,6 +77,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 #                                   axis=1)
                 else:
                     x_with_zeros = x_np
+                    if "SafeAntMaze" in env_name:
+                            x_with_zeros = np.concatenate((x_np,
+                                                           x_np,
+                                                           np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
+                                                           axis=1)
                 x_tensor = torch.tensor(x_with_zeros)
                 x_tensor = x_tensor.to(device)
                 pred = cost_model.safe_model(x_tensor)
