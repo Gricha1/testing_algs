@@ -255,14 +255,12 @@ class SafeFetch:
     def reset(self):
         return self.env.reset()
     
-    #TODO
     def step(self, action):
         next_tup, rew, done, info = self.env.step(action)
         info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
 
         return next_tup, rew, done, info
     
-    #TODO
     def cost_func(self, state):
         if len(state.shape) == 1:
             robot_x, robot_y = state[:2]

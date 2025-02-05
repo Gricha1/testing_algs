@@ -101,7 +101,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 obs = env.reset(eval_idx=eval_ep)
             else:
                 obs = env.reset()
-
             goal = obs["desired_goal"]
             state = obs["observation"]
             achieved_goal = obs["achieved_goal"]
@@ -170,6 +169,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
                 new_obs, reward, done, info = env.step(action)
+                new_goal = new_obs["desired_goal"]
+                new_state = new_obs["observation"]
+                new_achieved_goal = new_obs["achieved_goal"]
+
                 if "Safe" in env_name:
                     cost = info["safety_cost"]
                 if env_name == "SafeGym":
@@ -242,11 +245,11 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["dist_a_net_s_g"] = 0
                     current_step_info = {}
                     if env_name == "SafePusher":
-                        current_step_info["robot_pos"] = np.array(state[14:16])
+                        current_step_info["robot_pos"] = np.array(achieved_goal[3:5])
                     else:
                         current_step_info["robot_pos"] = np.array(state[:2])
                     if env_name == "SafePusher":
-                        current_step_info["obj_pos"] = np.array(state[17:19])
+                        current_step_info["obj_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
                         #current_step_info["goal_pos"] = np.array(achieved_goal[:2])
                         current_step_info["goal_pos"] = np.array(goal[:2])
@@ -258,7 +261,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         if manager_policy.absolute_goal:
                             current_step_info["subgoal_pos"] = np.array(subgoal[:2])
                         else:
-                            current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
+                            if env_name == "SafePusher":
+                                current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
+                                                                current_step_info["obj_pos"]
+                                current_step_info["second_goal_pos"] = np.array(subgoal[3:5]) + \
+                                                                current_step_info["robot_pos"]
+                            else:
+                                current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                             current_step_info["robot_pos"]
                     if env_name == "SafeGym":
                         current_step_info["robot_radius"] = env.goal_size
@@ -292,10 +301,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                         safe_model=cost_model.safe_model if args.cost_model else None)
                         positions_screens.append(screen.transpose(2, 0, 1))
 
-                goal = new_obs["desired_goal"]
-                new_state = new_obs["observation"]
-                new_achieved_goal = obs["achieved_goal"]
-
                 if not args.train_only_td3:
                     #subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
                     subgoal = controller_policy.subgoal_transition(achieved_goal, subgoal, new_achieved_goal)
@@ -316,9 +321,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     avg_controller_rew += calculate_controller_reward(achieved_goal, subgoal, new_achieved_goal, ctrl_rew_scale, action)    
                 episode_reward += reward
 
+                goal = new_goal
                 state = new_state
-                prev_action = action
-                achieved_goal = new_achieved_goal 
+                achieved_goal = new_achieved_goal
+                prev_action = action 
 
                 current_trajectory.append(state)
 
@@ -900,6 +906,7 @@ def run_hrac(args):
                     if done:
                         obs = env.reset()
                         state = obs["observation"]
+                        goal = obs["desired_goal"]
                         done = False
                         if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                             if len(cost_model_buffer.trajectory) != 0:
@@ -908,6 +915,7 @@ def run_hrac(args):
                     action = env.action_space.sample()
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
+                    next_goal = next_tup["desired_goal"]
                     if args.world_model:
                         if world_model_buffer.cost_memmory:
                             world_model_buffer.add(
@@ -918,6 +926,8 @@ def run_hrac(args):
                     if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                         cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
+                    goal = next_goal
+                    achieved_goal = next_achieved_goal
                     exploration_total_timesteps += 1
 
 
@@ -1088,10 +1098,10 @@ def run_hrac(args):
                         manager_buffer.add(manager_transition)
 
                 obs = env.reset()
-
                 goal = obs["desired_goal"]
                 state = obs["observation"]
                 achieved_goal = obs["achieved_goal"]
+
                 traj_buffer.create_new_trajectory()
                 traj_buffer.append(state)
                 if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
@@ -1143,16 +1153,15 @@ def run_hrac(args):
             action_copy = action.copy()
 
             next_tup, manager_reward, done, info = env.step(action_copy)
+            next_goal = next_tup["desired_goal"]
+            next_state = next_tup["observation"]
+            next_achieved_goal = next_tup["achieved_goal"]
             cost = info["safety_cost"]
 
             if not args.train_only_td3:
                 manager_transition[4] += manager_reward * args.man_rew_scale
                 manager_transition[-1].append(action)
             ep_manager_reward += manager_reward * args.man_rew_scale
-
-            next_goal = next_tup["desired_goal"]
-            next_state = next_tup["observation"]
-            next_achieved_goal = next_tup["achieved_goal"]
 
             if not args.train_only_td3:
                 manager_transition[-2].append(next_state)
@@ -1202,6 +1211,7 @@ def run_hrac(args):
 
             state = next_state
             goal = next_goal
+            achieved_goal = next_achieved_goal
 
             episode_timesteps += 1
             total_timesteps += 1

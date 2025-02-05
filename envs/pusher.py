@@ -41,6 +41,8 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         #self.ac_goal_pos = self.get_body_com("object")
         self.ac_goal_pos = np.concatenate((self.get_body_com("object"), self.get_body_com("tips_arm")))
 
+        self.goal = np.concatenate((self.get_body_com("goal"), self.get_body_com("object")))
+
         return ob, - float(fail) + reward_ctrl, self.num_timesteps >= 100, {'is_success': not fail}
 
 

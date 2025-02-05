@@ -114,16 +114,30 @@ class CustomVideoRendered:
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="r", alpha=0.5)
             self.render_info["ax_states"].add_patch(circle_robot) 
             self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj") 
+            
         # subgoal
         if self.plot_subgoal:
-            x = current_step_info["subgoal_pos"][0] + shift_x
-            y = current_step_info["subgoal_pos"][1] + shift_y
-            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
-            self.render_info["ax_states"].add_patch(circle_robot)
-            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
-            if self.add_subgoal_values:
-                self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
-                self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
+            if env_name == "SafePusher":
+                x = current_step_info["subgoal_pos"][0] + shift_x
+                y = current_step_info["subgoal_pos"][1] + shift_y
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot)
+                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj_g")
+
+                x = current_step_info["second_goal_pos"][0] + shift_x
+                y = current_step_info["second_goal_pos"][1] + shift_y
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot)
+                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "hand_g")
+            else:
+                x = current_step_info["subgoal_pos"][0] + shift_x
+                y = current_step_info["subgoal_pos"][1] + shift_y
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot)
+                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
+                if self.add_subgoal_values:
+                    self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
+                    self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
 
         # goal
         if env_name != "AntGather" and env_name != "AntMazeSparse" and plot_goal:
