@@ -582,10 +582,15 @@ def run_hrac(args):
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
 
     max_action = float(env.action_space.high[0])
-    policy_noise = 0.2
-    noise_clip = 0.5
+    policy_noise = args.train_policy_noise
+    noise_clip = args.train_noise_clip
     high = -low
-    man_scale = (high - low) / 2
+    if args.env_name == "SafePusher":
+        #man_scale = np.array([2, 2, 2, 2, 2, 2])
+        man_scale = (high - low) / 2
+    else:
+        man_scale = (high - low) / 2
+    print("man scale:", man_scale)
     if args.absolute_goal:
         man_scale[0] = 30
         man_scale[1] = 30

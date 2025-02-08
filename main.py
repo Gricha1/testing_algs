@@ -140,6 +140,8 @@ if __name__ == "__main__":
     parser.add_argument("--noise_type", default="normal", type=str)
     parser.add_argument("--ctrl_noise_sigma", default=1., type=float)
     parser.add_argument("--man_noise_sigma", default=1., type=float)
+    parser.add_argument("--train_policy_noise", default=0.2, type=float)
+    parser.add_argument("--train_noise_clip", default=0.5, type=float)
 
     # logger
     parser.add_argument("--not_use_wandb", action='store_true', default=False)
