@@ -130,10 +130,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                            episode_safety_subgoal_rate += env.cost_func(subgoal)
                     else:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                            episode_safety_subgoal_rate += env.cost_func(achieved_goal + subgoal)
                         if args.world_model and args.cost_model:
                             with torch.no_grad():
                                 state_torch = torch.tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
@@ -164,7 +164,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 step_count += 1
                 global_steps += 1
                 if args.train_only_td3:
-                    controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                    controller_goal = goal - achieved_goal
                     action = controller_policy.select_action(state, controller_goal, evaluation=True)
                 else:
                     action = controller_policy.select_action(state, subgoal, evaluation=True)
@@ -208,6 +208,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if args.cost_model:
                         with torch.no_grad():
                             torch_state = torch.from_numpy(state[None, :])
+                            torch_achieved_goal = torch.from_numpy(achieved_goal[None, :])
                             if cost_model.frame_stack_num > 1:
                                 agent_pose = torch_state[:, :cost_model.state_dim]
                                 part_of_state = agent_pose
@@ -226,7 +227,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                     obstacle_data = state[:, -cost_model.agent_obst_len:]
                                     part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
                             if cost_model.cost_memmory:
-                                manager_absolute_goal = torch_state[:, :cost_model.goal_dim]
+                                manager_absolute_goal = torch_achieved_goal
                                 manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
                             else:
                                 manager_absolute_goal = agent_pose
@@ -237,8 +238,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
                     if env_name != "AntGather" and env_name != "AntMazeSparse":
-                        x = a_net((torch.from_numpy(state[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
-                        y = a_net((torch.from_numpy(goal[:controller_policy.goal_dim]).type('torch.FloatTensor')).to("cuda"))
+                        x = a_net((torch.from_numpy(achieved_goal).type('torch.FloatTensor')).to("cuda"))
+                        y = a_net((torch.from_numpy(goal).type('torch.FloatTensor')).to("cuda"))
                         debug_info["dist_a_net_s_g"] = torch.sqrt(torch.pow(x - y, 2).sum() + 1e-12)
                     else:
                         debug_info["dist_a_net_s_g"] = 0
@@ -247,7 +248,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if env_name == "SafePusher":
                         current_step_info["robot_pos"] = np.array(achieved_goal[3:5])
                     else:
-                        current_step_info["robot_pos"] = np.array(state[:2])
+                        current_step_info["robot_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
                         current_step_info["obj_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
@@ -302,7 +303,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         positions_screens.append(screen.transpose(2, 0, 1))
 
                 if not args.train_only_td3:
-                    #subgoal = controller_policy.subgoal_transition(state, subgoal, new_state)
                     subgoal = controller_policy.subgoal_transition(achieved_goal, subgoal, new_achieved_goal)
 
                 avg_reward += reward
@@ -310,15 +310,17 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     avg_cost += cost
                     episode_cost += cost
                 if args.train_only_td3:
-                    controller_goal = goal[:controller_policy.goal_dim] - state[:controller_policy.goal_dim]
+                    controller_goal = goal - new_achieved_goal
                     if args.self_td3_reward:
-                        #avg_controller_rew += calculate_controller_reward(state, controller_goal, new_state, ctrl_rew_scale, action)    
-                        avg_controller_rew += calculate_controller_reward(achieved_goal, controller_goal, new_achieved_goal, ctrl_rew_scale, action)    
+                        avg_controller_rew += calculate_controller_reward(achieved_goal, 
+                                                                          controller_goal, 
+                                                                          new_achieved_goal, ctrl_rew_scale, action)    
                     else:
                         avg_controller_rew = reward*ctrl_rew_scale
                 else:
-                    #avg_controller_rew += calculate_controller_reward(state, subgoal, new_state, ctrl_rew_scale, action)    
-                    avg_controller_rew += calculate_controller_reward(achieved_goal, subgoal, new_achieved_goal, ctrl_rew_scale, action)    
+                    avg_controller_rew += calculate_controller_reward(achieved_goal, 
+                                                                      subgoal, 
+                                                                      new_achieved_goal, ctrl_rew_scale, action)    
                 episode_reward += reward
 
                 goal = new_goal
@@ -390,16 +392,12 @@ def get_reward_function(dims, args=None, absolute_goal=False, binary_reward=Fals
         distance_threshold = 0.25
         if absolute_goal and not binary_reward:
             def controller_reward(ag, subgoal, next_ag, scale, action):
-                ag = ag[:dims]
-                next_ag = next_ag[:dims]
                 reward = -np.sum(np.square(ag - subgoal))
                 reward -= action_penalty_coeff * np.square(action).sum()
                 return reward * scale
 
         elif absolute_goal and binary_reward:
             def controller_reward(ag, subgoal, next_ag, scale, action):
-                ag = ag[:dims]
-                next_ag = next_ag[:dims]
                 reward_ctrl = action_penalty_coeff * -np.square(action).sum()
                 fail = True
                 if np.sqrt(np.sum(np.square(ag - subgoal))) <= distance_threshold:
@@ -409,16 +407,12 @@ def get_reward_function(dims, args=None, absolute_goal=False, binary_reward=Fals
 
         elif not absolute_goal and not binary_reward:
             def controller_reward(ag, subgoal, next_ag, scale, action):
-                ag = ag[:dims]
-                next_ag = next_ag[:dims]
                 reward = -np.sum(np.square(ag + subgoal - next_ag))
                 reward -= action_penalty_coeff * np.square(action).sum()
                 return reward * scale
 
         elif not absolute_goal and binary_reward:
             def controller_reward(ag, subgoal, next_ag, scale, action):
-                ag = ag[:dims]
-                next_ag = next_ag[:dims]
                 reward_ctrl = action_penalty_coeff * -np.square(action).sum()
                 fail = True
                 if np.sqrt(np.sum(np.square(ag - subgoal))) <= distance_threshold:
@@ -460,8 +454,8 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
             for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
-                s_i = traj[i][:controller_goal_dim]
-                s_i_j = traj[i+j][:controller_goal_dim]
+                s_i = traj[i]
+                s_i_j = traj[i+j]
                 if args.domain_name == "Safexp" and args.clip_a_net_xy:
                     if "1" in args.task_name:
                         xy_min_max = 2
@@ -584,13 +578,13 @@ def run_hrac(args):
     max_action = float(env.action_space.high[0])
     policy_noise = args.train_policy_noise
     noise_clip = args.train_noise_clip
-    high = -low
+
     if args.env_name == "SafePusher":
-        #man_scale = np.array([2, 2, 2, 2, 2, 2])
-        man_scale = (high - low) / 2
-    else:
-        man_scale = (high - low) / 2
+        low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
+    high = -low
+    man_scale = (high - low) / 2
     print("man scale:", man_scale)
+
     if args.absolute_goal:
         man_scale[0] = 30
         man_scale[1] = 30
@@ -644,14 +638,12 @@ def run_hrac(args):
         output_dir = output_dir + "_" + str(run_number + 1)
     output_dir += "_" + args.tensorboard_descript
     output_dir += "_model_" + str(exp_num)
-
     print("Logging in {}".format(output_dir))
     writer = SummaryWriter(log_dir=output_dir)
     config_text = '\t'.join([f"{key}: {value}" for key, value in vars(args).items()])
     writer.add_text('Training Configuration', config_text)
     torch.cuda.set_device(args.gid)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     file_name = "{}_{}_{}".format(args.env_name, args.algo, args.seed)
     output_data = {"frames": [], "reward": [], "dist": []}    
 
@@ -999,7 +991,7 @@ def run_hrac(args):
                     
                     ## Train TD3 controller             
                     if args.train_only_td3:
-                        controller_subgoal = goal[:2] - state[:2]
+                        controller_subgoal = goal - achieved_goal
                         episode_safety_subgoal_rate_ = 0  
                     else:
                         controller_subgoal = subgoal
@@ -1108,7 +1100,7 @@ def run_hrac(args):
                 achieved_goal = obs["achieved_goal"]
 
                 traj_buffer.create_new_trajectory()
-                traj_buffer.append(state)
+                traj_buffer.append(achieved_goal)
                 if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                     if len(cost_model_buffer.trajectory) != 0:
                         cost_model_buffer.add_trajectory_to_buffer()
@@ -1138,16 +1130,18 @@ def run_hrac(args):
                         episode_subgoals_count += 1
                     if not args.absolute_goal:
                         subgoal = man_noise.perturb_action(subgoal,
-                            min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
+                            min_action=-man_scale, 
+                            max_action=man_scale)
                     else:
                         subgoal = man_noise.perturb_action(subgoal,
-                            min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
+                            min_action=-man_scale, 
+                            max_action=man_scale)
 
                     timesteps_since_subgoal = 0
                     manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
 
             if args.train_only_td3:
-                controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
+                controller_goal = goal - achieved_goal
                 action = controller_policy.select_action(state, controller_goal)
                 if "td3" in args.controller_algo:
                     action = ctrl_noise.perturb_action(action, -max_action, max_action)
@@ -1170,19 +1164,20 @@ def run_hrac(args):
 
             if not args.train_only_td3:
                 manager_transition[-2].append(next_state)
-            traj_buffer.append(next_state)
+            traj_buffer.append(next_achieved_goal)
 
             if args.train_only_td3:
-                controller_goal = goal[:controller_goal_dim] - state[:controller_goal_dim]
+                controller_goal = goal - next_achieved_goal
                 if args.self_td3_reward:
-                    #controller_reward = calculate_controller_reward(state, controller_goal, next_state, args.ctrl_rew_scale, action)
-                    controller_reward = calculate_controller_reward(achieved_goal, controller_goal, next_achieved_goal, args.ctrl_rew_scale, action)
+                    controller_reward = calculate_controller_reward(achieved_goal, 
+                                                                    controller_goal, 
+                                                                    next_achieved_goal, 
+                                                                    args.ctrl_rew_scale, action)
                 else:
                     controller_reward = manager_reward * args.ctrl_rew_scale
             else:
-                #controller_reward = calculate_controller_reward(state, subgoal, next_state, args.ctrl_rew_scale, action)
-                controller_reward = calculate_controller_reward(achieved_goal, subgoal, next_achieved_goal, args.ctrl_rew_scale, action)
-                #subgoal = controller_policy.subgoal_transition(state, subgoal, next_state)
+                controller_reward = calculate_controller_reward(achieved_goal, subgoal, next_achieved_goal, 
+                                                                args.ctrl_rew_scale, action)
                 subgoal = controller_policy.subgoal_transition(achieved_goal, subgoal, next_achieved_goal)
                 controller_goal = subgoal
 
@@ -1255,18 +1250,20 @@ def run_hrac(args):
                 if "Safe" in args.env_name:
                     if manager_policy.absolute_goal:
                         if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(np.array(subgoal[:2]))
+                            episode_safety_subgoal_rate += env.cost_func(subgoal)
                     else:
                         if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(np.array(state[:2]) + np.array(subgoal[:2]))
+                            episode_safety_subgoal_rate += env.cost_func(achieved_goal + subgoal)
                     episode_subgoals_count += 1
 
                 if not args.absolute_goal:
                     subgoal = man_noise.perturb_action(subgoal,
-                        min_action=-man_scale[:controller_goal_dim], max_action=man_scale[:controller_goal_dim])
+                        min_action=-man_scale, 
+                        max_action=man_scale)
                 else:
                     subgoal = man_noise.perturb_action(subgoal,
-                        min_action=np.zeros(controller_goal_dim), max_action=2*man_scale[:controller_goal_dim])
+                        min_action=-man_scale, 
+                        max_action=man_scale)
 
                 timesteps_since_subgoal = 0
                 manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
