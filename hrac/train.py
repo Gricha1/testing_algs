@@ -422,26 +422,18 @@ def get_reward_function(dims, args=None, absolute_goal=False, binary_reward=Fals
     else:
         if absolute_goal and binary_reward:
             def controller_reward(z, subgoal, next_z, scale, action):
-                z = z[:dims]
-                next_z = next_z[:dims]
                 reward = float(np.linalg.norm(subgoal - next_z, axis=-1) <= 1.414) * scale
                 return reward
         elif absolute_goal:
             def controller_reward(z, subgoal, next_z, scale, action):
-                z = z[:dims]
-                next_z = next_z[:dims]
                 reward = -np.linalg.norm(subgoal - next_z, axis=-1) * scale
                 return reward
         elif binary_reward:
             def controller_reward(z, subgoal, next_z, scale, action):
-                z = z[:dims]
-                next_z = next_z[:dims]
                 reward = float(np.linalg.norm(z + subgoal - next_z, axis=-1) <= 1.414) * scale
                 return reward
         else:
             def controller_reward(z, subgoal, next_z, scale, action):
-                z = z[:dims]
-                next_z = next_z[:dims]
                 reward = -np.linalg.norm(z + subgoal - next_z, axis=-1) * scale
                 return reward
     return controller_reward
@@ -522,7 +514,7 @@ def run_hrac(args):
                             }
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
         low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
-                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
         controller_goal_dim = goal_dim
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
@@ -569,8 +561,7 @@ def run_hrac(args):
         env.seed(args.seed)
         # test
         # subgoal scale, only low[:2] is matter
-        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
-                    -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y))
         controller_goal_dim = goal_dim
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
