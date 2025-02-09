@@ -216,3 +216,18 @@ class ANet(nn.Module):
         x = F.relu(self.fc3(x))
         x = self.fc4(x)
         return x
+    
+
+class RndPredictor(nn.Module):
+    def __init__(self, state_dim, hidden_dim=300, output_dim=128):
+        super().__init__()
+        self.l1 = nn.Linear(state_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x1 = F.relu(self.l1(x))
+        x1 = F.relu(self.l2(x1))
+        x1 = self.l3(x1)
+
+        return x1

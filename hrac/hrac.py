@@ -8,9 +8,10 @@ import torch.nn.functional as F
 import numpy as np
 
 from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic, ControllerSafeModel
+    ManagerActor, ManagerCritic, ControllerSafeModel, RndPredictor
 
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv
+from planner.goal_plan import Planner
 
 """
 HIRO part adapted from
@@ -53,7 +54,15 @@ class Manager(object):
                  subgoal_grad_clip=0,
                  coef_safety_modelbased=1.0,
                  coef_safety_modelfree=1.0,
-                 lidar_observation=False):
+                 lidar_observation=False, algo=None,
+                 planner_start_step=None,
+                 planner_cov_sampling=None,
+                 planner_clip_v=None,
+                 n_landmark_cov=None,
+                 planner_initial_sample=None,
+                 planner_goal_thr=None):
+        
+        self.algo = algo
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -89,6 +98,21 @@ class Manager(object):
         self.coef_safety_modelbased = coef_safety_modelbased
         self.coef_safety_modelfree = coef_safety_modelfree
 
+        self.planner = None
+        self.planner_start_step = planner_start_step
+        self.planner_cov_sampling = planner_cov_sampling
+        self.planner_clip_v = planner_clip_v
+        self.n_landmark_cov = n_landmark_cov
+        self.planner_initial_sample = planner_initial_sample
+        self.planner_goal_thr = planner_goal_thr
+    
+    def init_planner(self):
+        self.planner = Planner(landmark_cov_sampling=self.planner_cov_sampling,
+                               clip_v=self.planner_clip_v,
+                               n_landmark_cov=self.n_landmark_cov,
+                               initial_sample=self.planner_initial_sample,
+                               goal_thr=self.planner_goal_thr)
+
     def set_eval(self):
         self.actor.set_eval()
         self.actor_target.set_eval()
@@ -109,15 +133,32 @@ class Manager(object):
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
             
-    def actor_loss(self, state, goal, a_net, r_margin, cost_model=None):
+    def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
+                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
         actions = self.actor(state, goal)
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
-        goal_loss = None
-        safety_loss = None
+
+        scaled_norm_direction = var(torch.FloatTensor([0.] * self.action_dim))
+        gen_subgoal = actions if self.absolute_goal else achieved_goal + actions
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
-                a_net(state[:, :self.action_dim]), a_net(state[:, :self.action_dim] + actions)) - r_margin, min=0.).mean()
+                a_net(achieved_goal), a_net(gen_subgoal)) - r_margin, min=0.).mean()
+        #if selected_landmark is None:
+        #    return eval + norm, goal_loss, None, scaled_norm_direction  # HRAC
+        
+        ld_loss = None
+        if not selected_landmark is None:
+            # HIGL
+            if no_pseudo_landmark:
+                selected_landmark[selected_landmark == float('inf')] = achieved_goal[selected_landmark == float('inf')]
+                batch_landmarks = selected_landmark.clone()
+            else:
+                batch_landmarks, scaled_norm_direction = self.get_pseudo_landmark(achieved_goal, selected_landmark)
+            ld_loss = torch.clamp(F.pairwise_distance(a_net(batch_landmarks), a_net(gen_subgoal)) - r_margin, min=0.).mean()
+            
+        # ITES
+        safety_loss = None
         safety_model_free_loss = 0
         if self.modelfree_safety:
             copy_state = state.detach()
@@ -148,7 +189,8 @@ class Manager(object):
             safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelfree * safety_model_free_loss 
-        return eval + norm, goal_loss, safety_loss
+
+        return eval + norm, goal_loss, safety_loss, ld_loss, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -196,9 +238,9 @@ class Manager(object):
 
         return candidates[np.arange(batch_size), max_indices]
 
-    def train(self, controller_policy, replay_buffer, cost_model, 
+    def train(self, controller_policy, replay_buffer, controller_replay_buffer, cost_model, 
               iterations, batch_size=100, discount=0.99,
-              tau=0.005, a_net=None, r_margin=None):
+              tau=0.005, a_net=None, r_margin=None, total_timesteps=None, novelty_pq=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
@@ -207,9 +249,13 @@ class Manager(object):
             avg_safety_subgoals_loss = 0.
         else:
             avg_safety_subgoals_loss = None
+
+        if self.algo == 'higl' and self.planner is None and total_timesteps >= self.planner_start_step:
+            self.init_planner()
+
         for it in range(iterations):
             # Sample replay buffer
-            x, y, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
+            x, y, x_ag, y_ag, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
             batch_size = min(batch_size, x.shape[0])
 
             if self.correction and not self.absolute_goal:
@@ -220,6 +266,8 @@ class Manager(object):
 
             state = get_tensor(x)
             next_state = get_tensor(y)
+            achieved_goal = get_tensor(x_ag)
+            next_achieved_goal = get_tensor(y_ag)
             # print(g)
             goal = get_tensor(g)
             subgoal = get_tensor(sg)
@@ -253,7 +301,41 @@ class Manager(object):
             self.critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss, goal_loss, safety_subgoals_loss = self.actor_loss(state, goal, a_net, r_margin, cost_model)
+            if self.algo == "hrac":
+                assert a_net is not None
+
+                actor_loss, goal_loss, safety_subgoals_loss, _, _ = \
+                    self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, selected_landmark=None)
+                
+            elif self.algo == "higl":
+                assert a_net is not None
+
+                if self.planner is None:  # If planner is not ready
+                    selected_landmark = torch.ones(len(state), self.action_dim).to(device)
+                    selected_landmark *= float("inf")  # Build dummy selected landmark
+                else:  # Select a landmark by a planner
+                    selected_landmark = self.planner(cur_obs=x,
+                                                     cur_ag=x_ag,
+                                                     final_goal=g,
+                                                     agent=controller_policy,
+                                                     replay_buffer=controller_replay_buffer,
+                                                     novelty_pq=novelty_pq)
+                    if self.automatic_delta_pseudo:
+                        ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
+                        self.set_delta(ag2sel)
+
+                actor_loss, goal_loss, ld_loss, scaled_norm_direction = self.actor_loss(state, achieved_goal, goal,
+                                                                                        a_net, r_margin, cost_model,
+                                                                                        selected_landmark,
+                                                                                        self.no_pseudo_landmark)
+                actor_loss = actor_loss + self.landmark_loss_coeff * ld_loss
+                avg_goal_loss += goal_loss
+                avg_ld_loss += ld_loss
+                avg_scaled_norm_direction += scaled_norm_direction
+            else:
+                raise NotImplementedError
+
+                
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
             if self.modelfree_safety:
@@ -367,7 +449,7 @@ class CostModel(object):
                 cost = get_tensor(c, to_device=False)
                 cost_device = cost.to(device)
             elif replay_buffer.cost_memmory:
-                x, y, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
+                x, y, x_ag, y_ag, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
                 if not self.cost_memmory:
                     y = np.concatenate((y[:, :self.goal_dim], y), axis=1)
                 state = get_tensor(y, to_device=False) # cost for the next_state
@@ -587,6 +669,7 @@ class Controller(object):
                     manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
                 safety = safety_cost(manager_absolute_goal)
                 safeties.append(safety)
+            assert 1 == 0, "subgoal transition with input state"
             manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
                                                                          manager_proposed_goal, 
                                                                          next_img_state)
@@ -645,17 +728,18 @@ class Controller(object):
    
         return actor_loss
 
-    def subgoal_transition(self, state, subgoal, next_state):
+    def subgoal_transition(self, achieved_goal, subgoal, next_achieved_goal):
         if self.absolute_goal:
             return subgoal
         else:
-            if len(state.shape) == 1:  # check if batched
-                return state[:self.goal_dim] + subgoal - next_state[:self.goal_dim]
+            if len(achieved_goal.shape) == 1:  # check if batched
+                return achieved_goal + subgoal - next_achieved_goal
             else:
-                return state[:, :self.goal_dim] + subgoal -\
-                       next_state[:, :self.goal_dim]
+                return achieved_goal + subgoal -\
+                       next_achieved_goal
 
     def multi_subgoal_transition(self, states, subgoal):
+        assert 1 == 0, "achieved goal instead of states should be"
         subgoals = (subgoal + states[:, 0, :self.goal_dim])[:, None] - \
                    states[:, :, :self.goal_dim]
         return subgoals
@@ -682,11 +766,11 @@ class Controller(object):
         debug_info = {}
         for _ in range(iterations):      
             if self.algo in ["td3_lag", "sac_lag"]:        
-                x, y, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
+                x, y, x_ag, y_ag, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
             else:
-                x, y, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
+                x, y, x_ag, y_ag, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
-            next_g = get_tensor(self.subgoal_transition(x, sg, y))
+            next_g = get_tensor(self.subgoal_transition(x_ag, sg, y_ag))
             state = self.clean_obs(get_tensor(x))
             action = get_tensor(u)
             sg = get_tensor(sg)
@@ -801,3 +885,43 @@ class Controller(object):
         if "td3" in self.algo:
             self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
+
+
+class RandomNetworkDistillation(object):
+    def __init__(self, input_dim, output_dim, lr, use_ag_as_input=False):
+        self.predictor = RndPredictor(input_dim, output_dim)
+        self.predictor_target = RndPredictor(input_dim, output_dim)
+
+        if torch.cuda.is_available():
+            self.predictor = self.predictor.to(device)
+            self.predictor_target = self.predictor_target.to(device)
+
+        self.optimizer = torch.optim.Adam(self.predictor.parameters(), lr=lr)
+        self.use_ag_as_input = use_ag_as_input
+
+    def get_novelty(self, obs):
+        obs = get_tensor(obs)
+        with torch.no_grad():
+            target_feature = self.predictor_target(obs)
+            feature = self.predictor(obs)
+            novelty = (feature - target_feature).pow(2).sum(1).unsqueeze(1) / 2
+        return novelty
+
+    def train(self, replay_buffer, iterations, batch_size=100):
+        for it in range(iterations):
+            # Sample replay buffer
+            x, _, ag, _, _, _, _, _, _, _, _ = replay_buffer.sample(batch_size)
+
+            input = x if not self.use_ag_as_input else ag
+            input = get_tensor(input)
+
+            with torch.no_grad():
+                target_feature = self.predictor_target(input)
+            feature = self.predictor(input)
+            loss = (feature - target_feature).pow(2).mean()
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+        return loss

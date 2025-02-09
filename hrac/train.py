@@ -445,7 +445,8 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
-            for j in range(1, min(args.manager_propose_freq, len(traj) - i)):                
+            adj_factor = args.adj_factor if args.algo == "higl" else 1
+            for j in range(1, min(int(args.manager_propose_freq*adj_factor), len(traj) - i)):                
                 s_i = traj[i]
                 s_i_j = traj[i+j]
                 if args.domain_name == "Safexp" and args.clip_a_net_xy:
@@ -512,9 +513,12 @@ def run_hrac(args):
                             "plot_safety_boundary": True,
                             "controller_safe_model": False,
                             }
+            low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
+        else:
+            #low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
+            #            -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+            low = np.array((-10, -10))
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
-        low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
-                        -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
         controller_goal_dim = goal_dim
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
@@ -570,8 +574,6 @@ def run_hrac(args):
     policy_noise = args.train_policy_noise
     noise_clip = args.train_noise_clip
 
-    if args.env_name == "SafePusher":
-        low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
     high = -low
     man_scale = (high - low) / 2
     print("man scale:", man_scale)
@@ -593,7 +595,7 @@ def run_hrac(args):
     print("controller_goal_dim:", controller_goal_dim)
     print("*******")
     print()
-
+    assert controller_goal_dim == len(man_scale)
 
     # Set logger(Wandb logger, SummaryWriter logger) and seeds
     if not args.not_use_wandb:
@@ -662,7 +664,14 @@ def run_hrac(args):
             coef_safety_modelfree=args.coef_safety_modelfree,
             testing_mean_wm=args.testing_mean_wm,
             subgoal_grad_clip=args.subgoal_grad_clip,
-            lidar_observation=True if args.domain_name == "Safexp" else False
+            lidar_observation=True if args.domain_name == "Safexp" else False,
+            algo=args.algo,
+            planner_start_step=args.planner_start_step,
+            planner_cov_sampling=args.landmark_sampling,
+            planner_clip_v=args.clip_v,
+            n_landmark_cov=args.n_landmark_coverage,
+            planner_initial_sample=args.initial_sample,
+            planner_goal_thr=args.goal_thr,
         )
     else:
         manager_policy = None
@@ -953,10 +962,42 @@ def run_hrac(args):
         if "lag" in args.controller_algo:
             pid_costs = deque(maxlen=10)
 
+        ep_obs_seq = None
+        ep_ac_seq = None
+
+        # Novelty PQ and novelty algorithm
+        if (args.algo == 'higl' or args.algo == 'ites_higl') and args.use_novelty_landmark:
+            if args.novelty_algo == 'rnd':
+                novelty_pq = utils.PriorityQueue(args.n_landmark_novelty,
+                                                close_thr=args.close_thr,
+                                                discard_by_anet=args.discard_by_anet)
+                rnd_input_dim = state_dim if not args.use_ag_as_input else controller_goal_dim
+                RND = hrac.RandomNetworkDistillation(rnd_input_dim, args.rnd_output_dim, args.rnd_lr, args.use_ag_as_input)
+                print("Novelty PQ is generated")
+            else:
+                raise NotImplementedError
+        else:
+            novelty_pq = None
+            RND = None
+
         ## Main training ...
         print("start training...")
         while total_timesteps < args.max_timesteps:
             if done:
+                # Update Novelty Priority Queue
+                if ep_obs_seq is not None:
+                    assert ep_ac_seq is not None
+                    if (args.algo == 'higl' or args.algo == 'ites_higl') and args.use_novelty_landmark:
+                        if args.novelty_algo == 'rnd':
+                            if args.use_ag_as_input:
+                                novelty = RND.get_novelty(np.array(ep_ac_seq).copy())
+                            else:
+                                novelty = RND.get_novelty(np.array(ep_obs_seq).copy())
+                            novelty_pq.add_list(ep_obs_seq, ep_ac_seq, list(novelty), a_net=a_net)
+                            novelty_pq.squeeze_by_kth(k=args.n_landmark_novelty)
+                        else:
+                            raise NotImplementedError
+                        
                 if total_timesteps != 0 and not just_loaded:
                     print("episode num:", episode_num, "step:", total_timesteps)
                     if episode_num % 10 == 0:
@@ -993,11 +1034,11 @@ def run_hrac(args):
                     if not "Safe" in args.env_name:
                         controller_episode_cost = 0
                     train_controller(controller_buffer, ctrl_done, next_state, controller_subgoal, 
-                                    episode_timesteps, 
-                                    ep_controller_reward, controller_episode_cost, episode_cost, 
-                                    episode_safety_subgoal_rate_, 
-                                    ep_manager_reward, total_timesteps,
-                                    pid_costs=pid_costs if "lag" in args.controller_algo else None)
+                                     episode_timesteps, 
+                                     ep_controller_reward, controller_episode_cost, episode_cost, 
+                                     episode_safety_subgoal_rate_, 
+                                     ep_manager_reward, total_timesteps,
+                                     pid_costs=pid_costs if "lag" in args.controller_algo else None)
 
                     ## Train manager
                     if not args.train_only_td3 and timesteps_since_manager >= args.train_manager_freq:
@@ -1008,12 +1049,15 @@ def run_hrac(args):
                         man_act_loss, man_crit_loss, man_goal_loss, man_safety_loss, debug_maganer_info = \
                                             manager_policy.train(controller_policy,
                                                                  manager_buffer, 
+                                                                 controller_buffer,
                                                                  cost_model,
                                                                  ceil(episode_timesteps/args.train_manager_freq),
                                                                  batch_size=args.man_batch_size, 
                                                                  discount=args.man_discount, 
                                                                  tau=args.man_soft_sync_rate,
-                                                                 a_net=a_net, r_margin=r_margin)
+                                                                 a_net=a_net, r_margin=r_margin,
+                                                                 total_timesteps=total_timesteps,
+                                                                 novelty_pq=novelty_pq)
                         
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
@@ -1082,7 +1126,8 @@ def run_hrac(args):
 
                     if not args.train_only_td3 and len(manager_transition[-2]) != 1:                    
                         manager_transition[1] = state
-                        manager_transition[5] = float(True)
+                        manager_transition[3] = achieved_goal
+                        manager_transition[7] = float(True)
                         manager_buffer.add(manager_transition)
 
                 obs = env.reset()
@@ -1129,7 +1174,7 @@ def run_hrac(args):
                             max_action=man_scale)
 
                     timesteps_since_subgoal = 0
-                    manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+                    manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
 
             if args.train_only_td3:
                 controller_goal = goal - achieved_goal
@@ -1149,7 +1194,7 @@ def run_hrac(args):
             cost = info["safety_cost"]
 
             if not args.train_only_td3:
-                manager_transition[4] += manager_reward * args.man_rew_scale
+                manager_transition[6] += manager_reward * args.man_rew_scale
                 manager_transition[-1].append(action)
             ep_manager_reward += manager_reward * args.man_rew_scale
 
@@ -1195,10 +1240,10 @@ def run_hrac(args):
                         (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
             if controller_buffer.cost_memmory:
                 controller_buffer.add(
-                    (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
+                    (state, next_state, achieved_goal, next_achieved_goal, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
             else:
                 controller_buffer.add(
-                    (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+                    (state, next_state, achieved_goal, next_achieved_goal, controller_goal, action, controller_reward, float(ctrl_done), [], []))
 
             state = next_state
             goal = next_goal
@@ -1233,7 +1278,8 @@ def run_hrac(args):
 
             if not args.train_only_td3 and timesteps_since_subgoal % args.manager_propose_freq == 0:
                 manager_transition[1] = state
-                manager_transition[5] = float(done)
+                manager_transition[3] = achieved_goal
+                manager_transition[7] = float(done)
 
                 manager_buffer.add(manager_transition)
                 subgoal = manager_policy.sample_goal(state, goal)
@@ -1257,7 +1303,7 @@ def run_hrac(args):
                         max_action=man_scale)
 
                 timesteps_since_subgoal = 0
-                manager_transition = [state, None, goal, subgoal, 0, False, [state], []]
+                manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(

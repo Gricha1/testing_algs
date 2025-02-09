@@ -1,4 +1,6 @@
 import random
+from itertools import compress
+from functools import total_ordering
 
 import torch
 import torch.nn as nn
@@ -17,20 +19,20 @@ class ReplayBuffer(object):
         self.name = "simple_buffer"
         self.cost_memmory = cost_memmory
         if cost_memmory:
-            self.storage = [[] for _ in range(9)]
+            self.storage = [[] for _ in range(11)]
         else:
-            self.storage = [[] for _ in range(8)]
+            self.storage = [[] for _ in range(10)]
         self.maxsize = maxsize
         self.next_idx = 0
 
     def clear(self):
         if self.cost_memmory:
-            self.storage = [[] for _ in range(9)]    
+            self.storage = [[] for _ in range(11)]    
         else:
-            self.storage = [[] for _ in range(8)]
+            self.storage = [[] for _ in range(10)]
         self.next_idx = 0
 
-    # Expects tuples of (x, x', g, u, r, d, x_seq, a_seq)
+    # Expects tuples of (x, x', x_ag, x'_ag, g, u, r, d, x_seq, a_seq)
     def add(self, data):
         self.next_idx = int(self.next_idx)
         if self.next_idx >= len(self.storage[0]):
@@ -47,17 +49,19 @@ class ReplayBuffer(object):
             ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
 
         if self.cost_memmory:
-            x, y, g, u, r, c, d, x_seq, a_seq = [], [], [], [], [], [], [], [], []          
+            x, y, x_ag, y_ag, g, u, r, c, d, x_seq, a_seq = [], [], [], [], [], [], [], [], [], [], []       
         else:
-            x, y, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], []          
+            x, y, x_ag, y_ag, g, u, r, d, x_seq, a_seq = [], [], [], [], [], [], [], [], [], []
 
         for i in ind: 
             if self.cost_memmory:
-                X, Y, G, U, R, C, D, obs_seq, acts = (array[i] for array in self.storage)
+                X, Y, X_AG, Y_AG, G, U, R, C, D, obs_seq, acts = (array[i] for array in self.storage)
             else:
-                X, Y, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
+                X, Y, X_AG, Y_AG, G, U, R, D, obs_seq, acts = (array[i] for array in self.storage)
             x.append(np.array(X, copy=False))
             y.append(np.array(Y, copy=False))
+            x_ag.append(np.array(X_AG, copy=False))
+            y_ag.append(np.array(Y_AG, copy=False))
             g.append(np.array(G, copy=False))
             u.append(np.array(U, copy=False))
             r.append(np.array(R, copy=False))
@@ -70,12 +74,12 @@ class ReplayBuffer(object):
             a_seq.append(np.array(acts, copy=False))
         
         if self.cost_memmory:
-            return np.array(x), np.array(y), np.array(g), \
+            return np.array(x), np.array(y), np.array(x_ag), np.array(y_ag), np.array(g), \
                 np.array(u), np.array(r).reshape(-1, 1), np.array(c).reshape(-1, 1), \
                 np.array(d).reshape(-1, 1), \
                 x_seq, a_seq
         else:
-            return np.array(x), np.array(y), np.array(g), \
+            return np.array(x), np.array(y), np.array(x_ag), np.array(y_ag), np.array(g), \
                 np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1), \
                 x_seq, a_seq
 
@@ -365,3 +369,118 @@ class MetricDataset(Data.Dataset):
 
     def __getitem__(self, idx):
         return self.x[idx], self.y[idx], self.label[idx]
+    
+
+@total_ordering
+class StorageElement:
+    def __init__(self, state, achieved_goal, score):
+        self.state = state
+        self.achieved_goal = achieved_goal
+        self.score = score
+
+    def __eq__(self, other):
+        return np.isclose(self.score, other.score)
+
+    def __lt__(self, other):
+        return self.score < other.score
+
+    def __hash__(self):
+        return hash(tuple(self.state))
+
+
+def unravel_elems(elems):
+    return tuple(map(list, zip(*[(elem.state, elem.score) for elem in elems])))
+
+class PriorityQueue:
+    def __init__(self, top_k, close_thr=0.1, discard_by_anet=False):
+        self.elems = []
+        self.elems_state_tensor = None
+        self.elems_achieved_goal_tensor = None
+
+        self.top_k = top_k
+        self.close_thr = close_thr
+        self.discard_by_anet = discard_by_anet
+
+    def __len__(self):
+        return len(self.elems)
+
+    def add_list(self, state_list, achieved_goal_list, score_list, a_net=None):
+        if self.discard_by_anet:
+            self.discard_out_of_date_by_anet(achieved_goal_list, a_net)
+        else:
+            self.discard_out_of_date(achieved_goal_list)
+        # total_timesteps = len(state_list)
+        # Fill inf in the future observation | achieved goal
+        new_elems = [StorageElement(state=state, achieved_goal=achieved_goal, score=score)
+                     for timestep, (state, achieved_goal, score)
+                     in enumerate(zip(state_list, achieved_goal_list, score_list))]
+        self.elems.extend(new_elems)
+        self.elems = list(set(self.elems))
+        self.update_tensors()
+
+    def update_tensors(self):
+        self.elems_state_tensor = torch.FloatTensor([elems.state for elems in self.elems]).to(device)
+        self.elems_achieved_goal_tensor = torch.FloatTensor([elems.achieved_goal for elems in self.elems]).to(device)
+
+    # update novelty of similar states existing in storage to the newly encountered one.
+    def discard_out_of_date(self, achieved_goal_list):
+        if len(self.elems) == 0:
+            return
+
+        achieved_goals = torch.FloatTensor(np.array(achieved_goal_list)).to(device)
+        dist = torch.cdist(self.elems_achieved_goal_tensor, achieved_goals)
+        close = dist < self.close_thr
+        keep = close.sum(dim=1) == 0
+        self.elems = list(compress(self.elems, keep))
+        self.update_tensors()
+
+    def discard_out_of_date_by_anet(self, achieved_goal_list, a_net):
+        assert a_net is not None
+        if len(self.elems) == 0:
+            return
+
+        with torch.no_grad():
+            achieved_goals = torch.FloatTensor(np.array(achieved_goal_list)).to(device)
+            dist1 = torch.cdist(a_net(achieved_goals), a_net(self.elems_achieved_goal_tensor)).T
+            dist2 = torch.cdist(a_net(self.elems_achieved_goal_tensor), a_net(achieved_goals))
+            dist = (dist1 + dist2)/2
+
+            close = dist < self.close_thr
+            keep = close.sum(dim=1) == 0
+            self.elems = list(compress(self.elems, keep))
+            self.update_tensors()
+
+    def get_elems(self):
+        return unravel_elems(self.elems[:self.top_k])
+
+    def get_states(self):
+        return self.elems_state_tensor[:self.top_k]
+
+    def get_landmarks(self):
+        return self.elems_achieved_goal_tensor[:self.top_k]
+
+    def squeeze_by_kth(self, k):
+        k = min(k, len(self.elems))
+        self.elems = sorted(self.elems, reverse=True)[:k]
+        self.update_tensors()
+        return self.elems[-1].score
+
+    def squeeze_by_thr(self, thr):
+        self.elems = sorted(self.elems, reverse=True)
+        k = next((i for i, elem in enumerate(self.elems) if elem.score < thr), len(self.elems))
+
+        self.elems = self.elems[:k]
+        self.update_tensors()
+        return unravel_elems(self.elems)
+
+    def sample_batch(self, batch_size):
+        sampled_elems = random.choices(population=self.elems, k=batch_size)
+        return unravel_elems(sampled_elems)
+
+    def save_log(self, timesteps, log_file):
+        elems = self.get_elems()
+        output_df = pd.DataFrame((timesteps, score, state) for state, score in zip(elems[0], elems[1]))
+        output_df.to_csv(log_file, mode='a', header=False)
+
+    def sample_by_novelty_weight(self):
+        raise NotImplementedError

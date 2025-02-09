@@ -25,7 +25,7 @@ if __name__ == "__main__":
     # environment
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
-    parser.add_argument("--algo", default="hrac", type=str)
+    parser.add_argument("--algo", default="hrac", type=str) # ites_hrac, ites_higl, hrac, higl
     parser.add_argument("--seed", default=2, type=int)
     parser.add_argument("--domain_name", type=str, default="SafetyMaze", help="Name of the domain")
     ## safety ant maze
@@ -55,6 +55,35 @@ if __name__ == "__main__":
     parser.add_argument("--r_batch_size", default=64, type=int)
     parser.add_argument("--r_hidden_dim", default=128, type=int)
     parser.add_argument("--r_embedding_dim", default=32, type=int)
+
+
+    # HIGL
+    parser.add_argument("--landmark_loss_coeff", default=20., type=float)
+    parser.add_argument("--delta", type=float, default=2)
+    parser.add_argument("--adj_factor", default=0.5, type=float)
+
+    # HIGL: Planner, Coverage
+    parser.add_argument("--landmark_sampling", type=str, choices=["fps", "none"])
+    parser.add_argument('--clip_v', type=float, default=-38., help="clip bound for the planner")
+    parser.add_argument("--n_landmark_coverage", type=int, default=20)
+    parser.add_argument("--initial_sample", type=int, default=1000)
+    parser.add_argument("--goal_thr", type=float, default=-10.)
+    parser.add_argument("--planner_start_step", type=int, default=60000)
+
+    # HIGL: Novelty
+    parser.add_argument("--novelty_algo", type=str, default="none", choices=["rnd", "none"])
+    parser.add_argument("--use_novelty_landmark", action="store_true")
+    parser.add_argument("--close_thr", type=float, default=0.2)
+    parser.add_argument("--n_landmark_novelty", type=int, default=20)
+    parser.add_argument("--rnd_output_dim", type=int, default=128)
+    parser.add_argument("--rnd_lr", type=float, default=1e-3)
+    parser.add_argument("--rnd_batch_size", default=128, type=int)
+    parser.add_argument("--use_ag_as_input", action="store_true")
+
+    # Ablation
+    parser.add_argument("--no_pseudo_landmark", action="store_true")
+    parser.add_argument("--discard_by_anet", action="store_true")
+    parser.add_argument("--automatic_delta_pseudo", action="store_true")
 
     # Manager Parameters
     parser.add_argument("--subgoal_lower_x", default=5.0, type=float)
@@ -151,6 +180,7 @@ if __name__ == "__main__":
     # Run the algorithm
     args = parser.parse_args()
 
+    assert args.algo in ["ites_hrac", "ites_higl", "hrac", "higl"]
     assert args.controller_algo in ["td3_img_safe_lag", "td3_img_safe", "td3_lag", "td3", "sac_lag", "sac"]
 
     if "img_safe" in args.controller_algo:
