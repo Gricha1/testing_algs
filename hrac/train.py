@@ -672,6 +672,10 @@ def run_hrac(args):
             n_landmark_cov=args.n_landmark_coverage,
             planner_initial_sample=args.initial_sample,
             planner_goal_thr=args.goal_thr,
+            no_pseudo_landmark=args.no_pseudo_landmark,
+            automatic_delta_pseudo=args.automatic_delta_pseudo,
+            delta=args.delta,
+            landmark_loss_coeff=args.landmark_loss_coeff,
         )
     else:
         manager_policy = None

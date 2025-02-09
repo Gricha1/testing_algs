@@ -60,7 +60,12 @@ class Manager(object):
                  planner_clip_v=None,
                  n_landmark_cov=None,
                  planner_initial_sample=None,
-                 planner_goal_thr=None):
+                 planner_goal_thr=None, 
+                 no_pseudo_landmark=False,
+                 automatic_delta_pseudo=False,
+                 delta=2.0,
+                 landmark_loss_coeff=0.,
+                 ):
         
         self.algo = algo
         self.scale = scale
@@ -81,7 +86,6 @@ class Manager(object):
         self.action_norm_reg = 0
 
         self.criterion = nn.SmoothL1Loss()
-        # self.criterion = nn.MSELoss()
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.candidate_goals = candidate_goals
@@ -98,6 +102,15 @@ class Manager(object):
         self.coef_safety_modelbased = coef_safety_modelbased
         self.coef_safety_modelfree = coef_safety_modelfree
 
+        # HIGL
+        self.landmark_loss_coeff = landmark_loss_coeff
+        self.delta = delta
+        self.no_pseudo_landmark = no_pseudo_landmark
+        self.automatic_delta_pseudo = automatic_delta_pseudo
+        if self.automatic_delta_pseudo:
+            self.delta = 0.
+
+        # HIGL Planner
         self.planner = None
         self.planner_start_step = planner_start_step
         self.planner_cov_sampling = planner_cov_sampling
@@ -112,6 +125,13 @@ class Manager(object):
                                n_landmark_cov=self.n_landmark_cov,
                                initial_sample=self.planner_initial_sample,
                                goal_thr=self.planner_goal_thr)
+
+    def set_delta(self, data, alpha=0.9):
+        assert self.automatic_delta_pseudo
+        if self.delta == 0:
+            self.delta = data
+        else:
+            self.delta = alpha * data + (1 - alpha) * self.delta
 
     def set_eval(self):
         self.actor.set_eval()
@@ -132,7 +152,18 @@ class Manager(object):
 
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
-            
+    
+    def get_pseudo_landmark(self, ag, planned_ld):
+        direction = planned_ld - ag
+        norm_direction = F.normalize(direction)
+        scaled_norm_direction = norm_direction * self.delta
+        pseudo_landmarks = ag.clone()
+        pseudo_landmarks[~torch.isnan(scaled_norm_direction)] = pseudo_landmarks[~torch.isnan(scaled_norm_direction)] +\
+                                                            scaled_norm_direction[~torch.isnan(scaled_norm_direction)]
+        
+        scaled_norm_direction[scaled_norm_direction != scaled_norm_direction] = 0
+        return pseudo_landmarks, scaled_norm_direction.mean(dim=0)
+    
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
         actions = self.actor(state, goal)
@@ -241,7 +272,8 @@ class Manager(object):
     def train(self, controller_policy, replay_buffer, controller_replay_buffer, cost_model, 
               iterations, batch_size=100, discount=0.99,
               tau=0.005, a_net=None, r_margin=None, total_timesteps=None, novelty_pq=None):
-        avg_act_loss, avg_crit_loss = 0., 0.
+        avg_act_loss, avg_crit_loss, avg_ld_loss = 0., 0., 0.
+        avg_scaled_norm_direction = get_tensor(np.array([0.] * self.action_dim)).squeeze()
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
@@ -324,12 +356,11 @@ class Manager(object):
                         ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
                         self.set_delta(ag2sel)
 
-                actor_loss, goal_loss, ld_loss, scaled_norm_direction = self.actor_loss(state, achieved_goal, goal,
+                actor_loss, goal_loss, safety_subgoals_loss, ld_loss, scaled_norm_direction = self.actor_loss(state, achieved_goal, goal,
                                                                                         a_net, r_margin, cost_model,
                                                                                         selected_landmark,
                                                                                         self.no_pseudo_landmark)
                 actor_loss = actor_loss + self.landmark_loss_coeff * ld_loss
-                avg_goal_loss += goal_loss
                 avg_ld_loss += ld_loss
                 avg_scaled_norm_direction += scaled_norm_direction
             else:
@@ -343,11 +374,6 @@ class Manager(object):
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
-
-            # test
-            #actor_loss.retain_grad() 
-            #goal_loss.retain_grad() 
-            #safety_subgoals_loss.retain_grad() 
 
             actor_loss.backward()
 
