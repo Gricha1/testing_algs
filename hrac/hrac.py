@@ -68,6 +68,8 @@ class Manager(object):
                  ):
         
         self.algo = algo
+        self.device = device
+
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
@@ -175,8 +177,6 @@ class Manager(object):
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(achieved_goal), a_net(gen_subgoal)) - r_margin, min=0.).mean()
-        #if selected_landmark is None:
-        #    return eval + norm, goal_loss, None, scaled_norm_direction  # HRAC
         
         ld_loss = None
         if not selected_landmark is None:
@@ -528,9 +528,12 @@ class Controller(object):
                  safe_threshold=None,
                  algo="td3",
                  sac_alpha=None,
-                 lagrangian_data={}
+                 lagrangian_data={},
+                 func_achieved_goal_from_state=None,
 
     ):
+        self.device = device
+
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
@@ -545,6 +548,7 @@ class Controller(object):
 
         self.sac_alpha = sac_alpha
 
+        self.achieved_goal_from_state = func_achieved_goal_from_state
         self.controller_safety_coef = controller_safety_coef
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
@@ -695,10 +699,9 @@ class Controller(object):
                     manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
                 safety = safety_cost(manager_absolute_goal)
                 safeties.append(safety)
-            assert 1 == 0, "subgoal transition with input state"
-            manager_proposed_goal = controller_policy.subgoal_transition(img_state, 
+            manager_proposed_goal = controller_policy.subgoal_transition(self.achieved_goal_from_state(img_state), 
                                                                          manager_proposed_goal, 
-                                                                         next_img_state)
+                                                                         self.achieved_goal_from_state(next_img_state))
             h += 1
         if not all_steps_safety:
             agent_pose = next_img_state[:, :cost_model.state_dim]
@@ -912,6 +915,22 @@ class Controller(object):
             self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
 
+    def pairwise_value(self, obs, ag, goal):
+        assert ag.shape[0] == goal.shape[0]
+        with torch.no_grad():
+            if not self.absolute_goal:
+                relative_goal = goal - ag
+                cleaned_obs = self.clean_obs(obs)
+                actions = self.actor(cleaned_obs, relative_goal)
+                dist1, dist2 = self.critic(cleaned_obs, relative_goal, actions)
+                dist = torch.min(dist1, dist2)
+                return dist.squeeze(-1)
+            else:
+                cleaned_obs = self.clean_obs(obs)
+                actions = self.actor(cleaned_obs, goal)
+                dist1, dist2 = self.critic(cleaned_obs, goal, actions)
+                dist = torch.min(dist1, dist2)
+                return dist.squeeze(-1)
 
 class RandomNetworkDistillation(object):
     def __init__(self, input_dim, output_dim, lr, use_ag_as_input=False):

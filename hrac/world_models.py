@@ -385,9 +385,9 @@ class PredictEnv:
 
     def train_world_model(self, replay_buffer, batch_size=256):
         if replay_buffer.cost_memmory:
-            x, y, _, u, _, c, _, _, _ = replay_buffer.sample(len(replay_buffer))
+            x, y, _, _, _, u, _, c, _, _, _ = replay_buffer.sample(len(replay_buffer))
         else:
-            x, y, _, u, _, _, _, _ = replay_buffer.sample(len(replay_buffer))
+            x, y, _, _, _, u, _, _, _, _ = replay_buffer.sample(len(replay_buffer))
         state = get_tensor(x, to_device=False)
         action = get_tensor(u, to_device=False)
         next_state = get_tensor(y, to_device=False)

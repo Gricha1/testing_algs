@@ -244,8 +244,10 @@ class CustomVideoRendered:
                     imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
                     self.render_info["ax_states"].text(env_max_x - 34.5, env_max_y - 2, f"Is:{int(imagine_subgoal_safety*100)/100}")
                 if env_name == "SafePusher":
-                    self.render_info["ax_states"].text(env_max_x - 7.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
-                    self.render_info["ax_states"].text(env_max_x - 9.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
+                    reward = debug_info["reward_t"]
+                    self.render_info["ax_states"].text(env_max_x - 0.8, env_max_y - 0.2, f"r:{int(reward*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 0.5, f"Cm:{int(acc_cost*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 1.0, env_max_y - 0.5, f"Rm:{int(acc_reward*10)/10}")
                 else:
                     self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
                     self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")

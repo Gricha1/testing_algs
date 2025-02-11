@@ -127,6 +127,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             while not done:
                 if not args.train_only_td3 and step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
+                    # test
+                    #print("goal:", goal)
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, 0.0, 0.2, -0.275])
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, -0.45, -0.05, -0.275])
+                    #test_goal = goal
+                    #subgoal = test_goal - achieved_goal
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
@@ -201,6 +207,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     elif env_name == "SafePusher":
                         debug_info["safety_boundary"] = safety_boundary
                     debug_info["acc_reward"] = episode_reward
+                    debug_info["reward_t"] = reward
                     debug_info["acc_cost"] = episode_cost
                     debug_info["acc_controller_reward"] = avg_controller_rew
                     debug_info["t"] = step_count
@@ -514,16 +521,23 @@ def run_hrac(args):
                             "controller_safe_model": False,
                             }
             low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
+            #low = np.array([-2.0, -2.0, -2.0])
+            def func_achieved_goal_from_state(state):
+                return None
         else:
             #low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
             #            -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
             low = np.array((-10, -10))
+            def func_achieved_goal_from_state(state):
+                return None
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
         controller_goal_dim = goal_dim
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
         low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
+        def func_achieved_goal_from_state(state):
+            return None
         controller_goal_dim = subgoal_dim
     elif args.domain_name == "Safexp":
         assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
@@ -566,6 +580,8 @@ def run_hrac(args):
         # test
         # subgoal scale, only low[:2] is matter
         low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y))
+        def func_achieved_goal_from_state(state):
+            return None
         controller_goal_dim = goal_dim
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
@@ -595,7 +611,7 @@ def run_hrac(args):
     print("controller_goal_dim:", controller_goal_dim)
     print("*******")
     print()
-    assert controller_goal_dim == len(man_scale)
+    assert controller_goal_dim == len(man_scale), f"controll: {controller_goal_dim}, man_scale: {len(man_scale)}, "
 
     # Set logger(Wandb logger, SummaryWriter logger) and seeds
     if not args.not_use_wandb:
@@ -695,6 +711,7 @@ def run_hrac(args):
         safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
     elif "lag" in args.controller_algo:
         safe_threshold = args.cost_budget
+
     controller_policy = hrac.Controller(
         state_dim=state_dim,
         goal_dim=controller_goal_dim,
@@ -715,7 +732,8 @@ def run_hrac(args):
         safe_threshold = safe_threshold,
         algo=args.controller_algo,
         sac_alpha=args.sac_alpha,
-        lagrangian_data=lagrangian_data
+        lagrangian_data=lagrangian_data,
+        func_achieved_goal_from_state=func_achieved_goal_from_state,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -908,6 +926,7 @@ def run_hrac(args):
                         obs = env.reset()
                         state = obs["observation"]
                         goal = obs["desired_goal"]
+                        achieved_goal = obs["achieved_goal"]
                         done = False
                         if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                             if len(cost_model_buffer.trajectory) != 0:
@@ -917,13 +936,16 @@ def run_hrac(args):
                     next_tup, manager_reward, done, info = env.step(action)   
                     next_state = next_tup["observation"]
                     next_goal = next_tup["desired_goal"]
+                    next_achieved_goal = next_tup["achieved_goal"]
                     if args.world_model:
                         if world_model_buffer.cost_memmory:
                             world_model_buffer.add(
-                            (state, next_state, None, action, None, info["safety_cost"], None, [], [])) 
+                                        (state, next_state, achieved_goal, next_achieved_goal, 
+                                         None, action, None, info["safety_cost"], None, [], [])) 
                         else:
                             world_model_buffer.add(
-                                (state, next_state, None, action, None, None, [], [])) 
+                                (state, next_state, achieved_goal, next_achieved_goal, 
+                                 None, action, None, None, [], [])) 
                     if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                         cost_model_buffer.append(next_state, info["safety_cost"])
                     state = next_state
@@ -1122,8 +1144,10 @@ def run_hrac(args):
                                 predict_env.save("./models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
-                        n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net, traj_buffer,
-                            optimizer_r, controller_goal_dim, device, args, exp_num)
+                        n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, 
+                                                                      state_dict, a_net, traj_buffer,
+                                                                      optimizer_r, controller_goal_dim, 
+                                                                      device, args, exp_num)
                         
                         writer.add_scalar("data/a_net_loss", a_loss, total_timesteps)
 
@@ -1238,10 +1262,10 @@ def run_hrac(args):
             if args.world_model:
                 if world_model_buffer.cost_memmory:
                     world_model_buffer.add(
-                        (state, next_state, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
+                        (state, next_state, achieved_goal, next_achieved_goal, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
                 else:
                     world_model_buffer.add(
-                        (state, next_state, controller_goal, action, controller_reward, float(ctrl_done), [], []))
+                        (state, next_state, achieved_goal, next_achieved_goal, controller_goal, action, controller_reward, float(ctrl_done), [], []))
             if controller_buffer.cost_memmory:
                 controller_buffer.add(
                     (state, next_state, achieved_goal, next_achieved_goal, controller_goal, action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))

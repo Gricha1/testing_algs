@@ -56,14 +56,14 @@ if __name__ == "__main__":
     parser.add_argument("--r_hidden_dim", default=128, type=int)
     parser.add_argument("--r_embedding_dim", default=32, type=int)
 
-
     # HIGL
     parser.add_argument("--landmark_loss_coeff", default=20., type=float)
     parser.add_argument("--delta", type=float, default=2)
     parser.add_argument("--adj_factor", default=0.5, type=float)
 
     # HIGL: Planner, Coverage
-    parser.add_argument("--landmark_sampling", type=str, choices=["fps", "none"])
+    #parser.add_argument("--landmark_sampling", type=str, choices=["fps", "none"])
+    parser.add_argument("--landmark_sampling", default="fps", type=str)
     parser.add_argument('--clip_v', type=float, default=-38., help="clip bound for the planner")
     parser.add_argument("--n_landmark_coverage", type=int, default=20)
     parser.add_argument("--initial_sample", type=int, default=1000)
