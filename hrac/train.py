@@ -65,7 +65,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 if "SafeAntMaze" in env_name:
                     g = safe_dataset[0]
                     g_np = np.array(g, dtype=np.float32)
-                    x = np.zeros((len(x), env.state_dim))
+                    x = np.zeros((len(g), env.state_dim))
+                    x_np = np.array(x, dtype=np.float32)
                     true = safe_dataset[1]
                 elif env_name == "SafeGym":
                     g = safe_dataset[0]
