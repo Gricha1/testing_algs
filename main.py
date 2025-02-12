@@ -32,11 +32,7 @@ if __name__ == "__main__":
     parser.add_argument("--random_start_pose", action="store_true", default=False)
     parser.add_argument("--env_name", default="SafeAntMazeC", type=str)
     ## safety gym
-    parser.add_argument("--image_size", type=int, default=2)
-    parser.add_argument("--vector_env", default=False, action="store_true")
-    parser.add_argument("--action_repeat", type=int, default=2)
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
-    parser.add_argument("--goal_conditioned", action="store_true", default=False)
     parser.add_argument("--pseudo_lidar", action="store_true", default=False)
     ## safety bullet
     parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
@@ -86,8 +82,6 @@ if __name__ == "__main__":
     parser.add_argument("--automatic_delta_pseudo", action="store_true")
 
     # Manager Parameters
-    parser.add_argument("--subgoal_lower_x", default=5.0, type=float)
-    parser.add_argument("--subgoal_lower_y", default=5.0, type=float)
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)

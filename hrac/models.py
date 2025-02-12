@@ -128,13 +128,13 @@ class SafeCritic(nn.Module):
 
 
 class ControllerSafeModel(nn.Module):
-    def __init__(self, state_dim, hidden_dim):
+    def __init__(self, goal_dim, state_dim, hidden_dim):
         super().__init__()
 
-        self.critic = SafeCritic(state_dim, hidden_dim=hidden_dim)
+        self.critic = SafeCritic(goal_dim + state_dim, hidden_dim=hidden_dim)
     
-    def forward(self, x):
-        return self.critic(x)
+    def forward(self, g, x):
+        return self.critic(torch.cat([g, x], 1))
 
 class ControllerActor(nn.Module):
     def __init__(self, state_dim, goal_dim, action_dim, hidden_size, scale=1, sac=False):

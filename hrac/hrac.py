@@ -194,7 +194,12 @@ class Manager(object):
         if self.modelfree_safety:
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
-            manager_absolute_goal += copy_state[:, :actions.shape[1]]
+            if not self.absolute_goal:
+                manager_absolute_goal += copy_state[:, :actions.shape[1]]
+            if cost_model.frame_stack_num > 1:
+                for i in range(cost_model.frame_stack_num - 1):
+                    copy_state = torch.cat((copy_state, copy_state), dim=1)
+            """
             # test copy states
             if cost_model.frame_stack_num > 1:
                 agent_pose = copy_state[:, :cost_model.state_dim]
@@ -217,7 +222,8 @@ class Manager(object):
                 manager_absolute_goal = agent_pose
             else:
                 manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-            safety_model_free_loss = cost_model.safe_model(manager_absolute_goal)
+            """
+            safety_model_free_loss = cost_model.safe_model(manager_absolute_goal, copy_state)
             safety_model_free_loss = safety_model_free_loss.mean()
         safety_loss = self.coef_safety_modelfree * safety_model_free_loss 
 
@@ -429,27 +435,35 @@ class Manager(object):
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
                 
 class CostModel(object):
+    """
+        phi: G x S -> [0, 1]
+    """
     def __init__(self, state_dim, goal_dim, lidar_observation, 
                        frame_stack_num, 
                        safe_model_loss_coef, lr, cm_hidden_size,
                        regression_cost_model=False,
-                       cost_memmory=False):
+                       cost_memmory=False,
+                       phi=None):
         self.lidar_observation = lidar_observation
         self.safe_model_loss_coef = safe_model_loss_coef        
         self.frame_stack_num = frame_stack_num
+        self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.cost_memmory = cost_memmory
-        if self.lidar_observation:
-            self.state_dim = 2
-            self.agent_obst_len = 16       
-            self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
-        else:
-            self.state_dim = state_dim
-            self.agent_obst_len = 0
-            if self.cost_memmory:
-                self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
-            else:
-                self.safe_model = ControllerSafeModel(self.goal_dim + self.state_dim, cm_hidden_size).to(device)
+        self.phi = phi
+        #if self.lidar_observation:
+        #    self.state_dim = 2
+        #    self.agent_obst_len = 16       
+        #    self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
+        #else:
+        #    self.state_dim = state_dim
+        #    self.agent_obst_len = 0
+        #    if self.cost_memmory:
+        #        self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
+        #    else:
+        self.safe_model = ControllerSafeModel(self.goal_dim, 
+                                              self.state_dim * self.frame_stack_num, 
+                                              cm_hidden_size).to(device)
         
         if regression_cost_model:
             self.safe_model_criterion = nn.MSELoss()
@@ -469,8 +483,10 @@ class CostModel(object):
         debug_info["safe_model_mean_pred"] = []
         for _ in range(cost_model_iterations):
             if replay_buffer.name == "cost_trajectory_buffer":
-                x, c = replay_buffer.sample(cost_model_batch_size)
-                state = get_tensor(x, to_device=False) # cost for the next_state
+                g, x, c = replay_buffer.sample(cost_model_batch_size)
+                goal = get_tensor(g, to_device=False)
+                goal_device = goal.to(device)
+                state = get_tensor(x, to_device=False)
                 state_device = state.to(device)
                 cost = get_tensor(c, to_device=False)
                 cost_device = cost.to(device)
@@ -478,6 +494,8 @@ class CostModel(object):
                 x, y, x_ag, y_ag, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
                 if not self.cost_memmory:
                     y = np.concatenate((y[:, :self.goal_dim], y), axis=1)
+                goal = get_tensor(x_ag, to_device=False) # cost for the next_state
+                goal_device = goal.to(device)
                 state = get_tensor(y, to_device=False) # cost for the next_state
                 state_device = state.to(device)
                 cost = get_tensor(c, to_device=False)
@@ -485,24 +503,17 @@ class CostModel(object):
             else:
                 assert 1 == 0
 
-            safe_model_loss, true, pred = self.train_batch_cost_model(state_device, cost_device)
+            safe_model_loss, true, pred = self.train_batch_cost_model(goal_device, state_device, cost_device)
             debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
             debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
             debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
         return debug_info
     
-    def train_batch_cost_model(self, init_state, cost):
-        pred = self.safe_model(init_state)
-        numpy_b_xy = init_state.cpu().detach().numpy()[:, :2]
-        if not(cost is None):
-            true = cost
-        else:
-            true = torch.tensor(self.cost_function(numpy_b_xy), dtype=torch.float).to(device).unsqueeze(1)
-
-        # Compute safet_model loss
+    def train_batch_cost_model(self, goal, state, cost):
+        pred = self.safe_model(goal, state)
+        true = cost
         safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)
-
-        # Optimize the safe_model
+        
         self.safe_model_optimizer.zero_grad()
         safe_model_loss.backward()
         self.safe_model_optimizer.step()
@@ -529,7 +540,7 @@ class Controller(object):
                  algo="td3",
                  sac_alpha=None,
                  lagrangian_data={},
-                 func_achieved_goal_from_state=None,
+                 phi=None,
 
     ):
         self.device = device
@@ -548,7 +559,7 @@ class Controller(object):
 
         self.sac_alpha = sac_alpha
 
-        self.achieved_goal_from_state = func_achieved_goal_from_state
+        self.phi = phi
         self.controller_safety_coef = controller_safety_coef
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
@@ -669,9 +680,10 @@ class Controller(object):
             img_states.append(img_state)
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
             next_img_state = predict_env.step(img_state, ctrl_actions, 
-                                                deterministic=True, 
-                                                torch_deviced=True)
+                                              deterministic=True, 
+                                              torch_deviced=True)
             if all_steps_safety:
+                """
                 if cost_model.frame_stack_num > 1:
                     part_of_state = []
                     agent_poses = [img_state_[:, :cost_model.state_dim] for img_state_ in img_states[h-cost_model.frame_stack_num+1:h+1]]
@@ -697,24 +709,25 @@ class Controller(object):
                         part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
                     manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
                     manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                safety = safety_cost(manager_absolute_goal)
+                """
+                safety = safety_cost(self.phi(next_img_state), next_img_state)
                 safeties.append(safety)
-            manager_proposed_goal = controller_policy.subgoal_transition(self.achieved_goal_from_state(img_state), 
+            manager_proposed_goal = controller_policy.subgoal_transition(self.phi(img_state), 
                                                                          manager_proposed_goal, 
-                                                                         self.achieved_goal_from_state(next_img_state))
+                                                                         self.phi(next_img_state))
             h += 1
         if not all_steps_safety:
-            agent_pose = next_img_state[:, :cost_model.state_dim]
-            part_of_state = agent_pose
-            if cost_model.agent_obst_len != 0:
-                obstacle_data = next_img_state[:, -cost_model.agent_obst_len:]
-                part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-            if cost_model.cost_memmory:
-                manager_absolute_goal = agent_pose
-            else:
-                manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
-                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-            safety = safety_cost(manager_absolute_goal)
+            #agent_pose = next_img_state[:, :cost_model.state_dim]
+            #part_of_state = agent_pose
+            #if cost_model.agent_obst_len != 0:
+            #    obstacle_data = next_img_state[:, -cost_model.agent_obst_len:]
+            #    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
+            #if cost_model.cost_memmory:
+            #    manager_absolute_goal = agent_pose
+            #else:
+            #    manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
+            #    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
+            safety = safety_cost(self.phi(next_img_state), next_img_state)
         else:
             safety = 0
             for el in safeties:

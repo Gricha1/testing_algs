@@ -101,54 +101,64 @@ class ReplayBuffer(object):
     
 
 class CostModelTrajectoryBuffer(object):
+    """
+        cost model trajectory buffer for 
+        solving inbalanced data problem(too much safe states in SafetyGym)
+    """
 
     def __init__(self, maxsize, state_dim, goal_dim, lidar_observation, frame_stack_num=1):
         self.maxsize = maxsize
         self.frame_stack_num = frame_stack_num
         self.next_idx = 0
         self.trajectory = []
-        self.storage = [[] for _ in range(2)]
+        self.storage = [[] for _ in range(3)]
         self.name = "cost_trajectory_buffer"
         self.goal_dim = goal_dim
-        if lidar_observation:
-            self.state_dim = 2
-            self.agent_obst_len = 16
-        else:
-            self.state_dim = state_dim
-            self.agent_obst_len = 0
+        #if lidar_observation:
+        #    self.state_dim = 2
+        #    self.agent_obst_len = 16
+        #else:
+        #    self.state_dim = state_dim
+        #    self.agent_obst_len = 0
 
     def __len__(self):
         return len(self.storage[0])
     
     def clear(self):
-        self.storage = [[] for _ in range(2)]    
+        self.storage = [[] for _ in range(3)]    
         self.next_idx = 0
 
     def create_new_trajectory(self):
         del self.trajectory
         self.trajectory = []
 
-    def append(self, s, cost):
-        self.trajectory.append((s, cost))
+    def append(self, g, s, cost):
+        self.trajectory.append((g, s, cost))
 
     def add_trajectory_to_buffer(self):
-        states = []
+        state_goal_pairs = []
         costs = []
 
         current_trajectory = self.trajectory
-        unsafe_state = []
-        safe_state = []
+        unsafes = []
+        safes = []
         for i in range(len(current_trajectory)):
             for j in range(len(current_trajectory)):
-                if self.frame_stack_num > 1:
-                    frame_stack_states_i = [sc_pair[0] for sc_pair in current_trajectory[i-self.frame_stack_num+1:i+1]]
-                else:
-                    state_i = current_trajectory[i][0]
-                _ = current_trajectory[i][1]
-                state_j = current_trajectory[j][0]
-                cost_j = current_trajectory[j][1]
 
-                manager_absolute_goal = state_j[:self.goal_dim]
+                if self.frame_stack_num > 1:
+                    assert 1 == 0
+                #if self.frame_stack_num > 1:
+                #    frame_stack_states_i = [sc_pair[0] for sc_pair in current_trajectory[i-self.frame_stack_num+1:i+1]]
+                #else:
+                _ = current_trajectory[i][0]
+                state_i = current_trajectory[i][1]
+                _ = current_trajectory[i][1]
+                goal_j = current_trajectory[j][0]
+                _ = current_trajectory[j][1]
+                cost_j = current_trajectory[j][2]
+
+                #manager_absolute_goal = state_j[:self.goal_dim]
+                """
                 part_of_state = []
                 if self.frame_stack_num > 1:
                     agent_poses = [state_i[:self.state_dim] for state_i in frame_stack_states_i]
@@ -175,26 +185,27 @@ class CostModelTrajectoryBuffer(object):
                 state = []
                 state.extend(manager_absolute_goal)
                 state.extend(part_of_state)
+                """
                 if cost_j >= 1: # test could be [0, 1, 2]                    
-                    unsafe_state.append(state)
+                    unsafes.append((goal_j, state_i))
                 else:
-                    safe_state.append(state)
+                    safes.append((goal_j, state_i))
 
         # get equal count of safe & unsafe states
         # add = trajectory_len samples to buffer
-        min_len = min(len(unsafe_state), len(safe_state))
+        min_len = min(len(unsafes), len(safes))
         samples_to_add = len(current_trajectory)
         samples_to_add = min(samples_to_add, min_len) // 2
-        unsafe_state = random.sample(unsafe_state, samples_to_add)
-        safe_state = random.sample(safe_state, samples_to_add)
+        unsafes = random.sample(unsafes, samples_to_add)
+        safes = random.sample(safes, samples_to_add)
 
-        states.extend(unsafe_state)
-        states.extend(safe_state)
-        costs.extend([1 for i in range(len(unsafe_state))])
-        costs.extend([0 for i in range(len(safe_state))])
+        state_goal_pairs.extend(unsafes)
+        state_goal_pairs.extend(safes)
+        costs.extend([1 for i in range(len(unsafes))])
+        costs.extend([0 for i in range(len(safes))])
 
-        for state, cost in zip(states, costs):
-            self.add((state, cost))
+        for (goal, state), cost in zip(state_goal_pairs, costs):
+            self.add((goal, state, cost))
         
 
     def add(self, data):
@@ -213,14 +224,15 @@ class CostModelTrajectoryBuffer(object):
         else:
             ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
 
-        x, c  = [], []
+        g, x, c  = [], [], []
 
         for i in ind: 
-            X, C  = (array[i] for array in self.storage)
+            G, X, C  = (array[i] for array in self.storage)
+            g.append(np.array(G, copy=False))
             x.append(np.array(X, copy=False))
-            c.append(np.array(C, copy=False))    
+            c.append(np.array(C, copy=False))
         
-        return np.array(x), np.array(c).reshape(-1, 1)
+        return np.array(g), np.array(x), np.array(c).reshape(-1, 1)
 
 class TrajectoryBuffer(object):
 

@@ -60,31 +60,26 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             elif env_name == "SafePusher":
                 safety_boundary = env.get_safety_bounds()
             elif env_name == "SafeGym":
-                if args.cost_model:
-                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model and not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
-                x = safe_dataset[0]
-                true = safe_dataset[1]
-                x_np = np.array(x, dtype=np.float32)
-                if cost_model.cost_memmory:
-                    x_with_zeros = np.concatenate((x_np,
-                                                   np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
-                                                   axis=1)
-                #if "SafeAntMaze" in env_name:
-                #    x_with_zeros = np.concatenate((x_np,
-                #                                   x_np,
-                #                                   np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
-                #                                   axis=1)
-                else:
-                    x_with_zeros = x_np
-                    if "SafeAntMaze" in env_name:
-                            x_with_zeros = np.concatenate((x_np,
-                                                           x_np,
-                                                           np.zeros((len(x), env.state_dim-2), dtype=np.float32)), 
-                                                           axis=1)
-                x_tensor = torch.tensor(x_with_zeros)
+                if "SafeAntMaze" in env_name:
+                    g = safe_dataset[0]
+                    g_np = np.array(g, dtype=np.float32)
+                    x = np.zeros((len(x), env.state_dim))
+                    true = safe_dataset[1]
+                elif env_name == "SafeGym":
+                    g = safe_dataset[0]
+                    g_np = np.array(g, dtype=np.float32)
+                    x = safe_dataset[1]
+                    x_np = np.array(x, dtype=np.float32)
+                    true = safe_dataset[2]
+
+                g_tensor = torch.tensor(g_np, dtype=torch.float32)
+                g_tensor = g_tensor.to(device)
+                x_tensor = torch.tensor(x_np, dtype=torch.float32)
                 x_tensor = x_tensor.to(device)
-                pred = cost_model.safe_model(x_tensor)
+
+                pred = cost_model.safe_model(g_tensor, x_tensor)
                 prev_probs = pred.squeeze().tolist()
                 val_safe_model_roc = roc_auc_score(true, prev_probs)
                 pred = (pred > 0.5).int().squeeze().tolist()
@@ -452,7 +447,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
     print("train anet")
     for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
-            adj_factor = args.adj_factor if args.algo == "higl" else 1
+            adj_factor = args.adj_factor if (args.algo == "higl" or args.algo == "ites_higl") else 1
             for j in range(1, min(int(args.manager_propose_freq*adj_factor), len(traj) - i)):                
                 s_i = traj[i]
                 s_i_j = traj[i+j]
@@ -522,30 +517,32 @@ def run_hrac(args):
                             }
             low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
             #low = np.array([-2.0, -2.0, -2.0])
-            def func_achieved_goal_from_state(state):
-                return None
+            def phi(state):
+                # manipulator_pose = [-6:-3], obj_pose=[-3:]
+                return torch.cat((state[:, -3:], state[:, -6:-3]), dim=1)
         else:
-            #low = np.array((-10, -10, -0.5, -1, -1, -1, -1,
-            #            -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
             low = np.array((-10, -10))
-            def func_achieved_goal_from_state(state):
-                return None
+            def phi(state):
+                # ant_xy = [:2]
+                return state[:, :2]
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
         controller_goal_dim = goal_dim
+
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
-        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y, -0.5, -1, -1, -1, -1,
+        low = np.array((-5.0, -5.0, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3))
-        def func_achieved_goal_from_state(state):
+        def phi(state):
+            assert 1 == 0
             return None
         controller_goal_dim = subgoal_dim
+
     elif args.domain_name == "Safexp":
-        assert not args.goal_conditioned or (args.goal_conditioned and args.vector_env), "goal conditioned implemented only for vec obs"
         env = make_safety(f'{args.domain_name}{"-" if len(args.domain_name) > 0 else ""}{args.task_name}-v0', 
-                            image_size=args.image_size, 
-                            use_pixels=not args.vector_env, 
-                            action_repeat=args.action_repeat,
-                            goal_conditioned=args.goal_conditioned,
+                            image_size=2, 
+                            use_pixels=False, 
+                            action_repeat=2,
+                            goal_conditioned=True,
                             pseudo_lidar=args.pseudo_lidar,
                             sparce_reward=args.sparce_reward)
         state_dim = env.observation_space["observation"].shape[0]
@@ -558,13 +555,15 @@ def run_hrac(args):
             if args.validate:
                 cost_dataset_seeds = [213]
             else:
-                cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
+                #cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
+                cost_dataset_seeds = [34, 943]
             safe_dataset = []
             for seed_ in cost_dataset_seeds:
                 env.seed(seed_)
                 print("get safedataset safetygym!!!", f"seed={seed_}")
                 start_time = time.time()
-                safe_dataset.extend(get_safetydataset_as_random_experience(env, frame_stack_num=args.cm_frame_stack_num))
+                safe_dataset.extend(get_safetydataset_as_random_experience(env, 
+                                                                           frame_stack_num=args.cm_frame_stack_num))
                 end_time = time.time()
                 print("time for safe dataset:", end_time-start_time)
             env.safe_dataset = safe_dataset
@@ -577,11 +576,10 @@ def run_hrac(args):
                          }
         renderer = get_renderer(env, args, renderer_args)
         env.seed(args.seed)
-        # test
-        # subgoal scale, only low[:2] is matter
-        low = np.array((-args.subgoal_lower_x, -args.subgoal_lower_y))
-        def func_achieved_goal_from_state(state):
-            return None
+        low = np.array((-5.0, -5.0))
+        def phi(state):
+            # ant_xy = [:2]
+            return state[:, :2]
         controller_goal_dim = goal_dim
     else:
         assert 1 == 0, "there is no {args.domain_name} domain of envs"
@@ -733,7 +731,7 @@ def run_hrac(args):
         algo=args.controller_algo,
         sac_alpha=args.sac_alpha,
         lagrangian_data=lagrangian_data,
-        func_achieved_goal_from_state=func_achieved_goal_from_state,
+        phi=phi,
     )
 
     calculate_controller_reward = get_reward_function(
@@ -819,7 +817,8 @@ def run_hrac(args):
                                     lr=args.cm_lr,
                                     cm_hidden_size=args.cm_hidden_size,
                                     regression_cost_model=args.regression_cost_model,
-                                    cost_memmory=args.cost_memmory)
+                                    cost_memmory=args.cost_memmory,
+                                    phi=phi)
         if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size,
                                                                 state_dim=state_dim,
@@ -947,7 +946,7 @@ def run_hrac(args):
                                 (state, next_state, achieved_goal, next_achieved_goal, 
                                  None, action, None, None, [], [])) 
                     if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
-                        cost_model_buffer.append(next_state, info["safety_cost"])
+                        cost_model_buffer.append(achieved_goal, next_state, info["safety_cost"])
                     state = next_state
                     goal = next_goal
                     achieved_goal = next_achieved_goal
@@ -1257,7 +1256,7 @@ def run_hrac(args):
 
 
             if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
-                cost_model_buffer.append(next_state, info["safety_cost"])
+                cost_model_buffer.append(next_achieved_goal, next_state, info["safety_cost"])
 
             if args.world_model:
                 if world_model_buffer.cost_memmory:
