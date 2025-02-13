@@ -594,7 +594,7 @@ class Controller(object):
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
         
-        if self.algo in ["td3_lag", "sac_lag"]:
+        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
             self.cost_critic = ControllerCritic(
                 state_dim, goal_dim, action_dim, hidden_size
             ).to(device)
@@ -668,6 +668,9 @@ class Controller(object):
 
         safety_cost = cost_model.safe_model
 
+        if self.algo in ["td3_img_safe_c_cost"]:
+            safeties_c_cost = []
+
         h = 0
         if all_steps_safety:
             safeties = []    
@@ -682,6 +685,9 @@ class Controller(object):
             next_img_state = predict_env.step(img_state, ctrl_actions, 
                                               deterministic=True, 
                                               torch_deviced=True)
+            if self.algo in ["td3_img_safe_c_cost"]:
+                safety_c_cost = self.cost_critic.Q1(img_state, manager_proposed_goal, ctrl_actions).mean()
+                safeties_c_cost.append(safety_c_cost)
             if all_steps_safety:
                 """
                 if cost_model.frame_stack_num > 1:
@@ -731,9 +737,15 @@ class Controller(object):
         else:
             safety = 0
             for el in safeties:
-                safety += el
+                safety = safety + el
             if train:
                 safety /= self.img_horizon
+
+        if self.algo in ["td3_img_safe_c_cost"]:
+            c_cost_safety = 0
+            for el in safeties_c_cost:
+                c_cost_safety = c_cost_safety + el            
+            safety = safety + c_cost_safety
 
         if return_img_states:
             return safety, img_states
@@ -755,7 +767,6 @@ class Controller(object):
             actor_loss = (
                 actor_loss + safety_loss * self._cost_penalty
             ) / (1 + self._cost_penalty)
-
         elif "img_safe" in self.algo:
             safety_loss = self.state_safety_on_horizon(init_state, sg, 
                                                         controller_policy=self, 
@@ -803,11 +814,11 @@ class Controller(object):
     def train(self, replay_buffer, cost_model, predict_env, iterations, 
               batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
-        if self.algo in ["td3_lag", "sac_lag"]:
+        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
             avg_cost_loss = 0.
         debug_info = {}
         for _ in range(iterations):      
-            if self.algo in ["td3_lag", "sac_lag"]:        
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:        
                 x, y, x_ag, y_ag, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
             else:
                 x, y, x_ag, y_ag, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
@@ -819,7 +830,7 @@ class Controller(object):
             done = get_tensor(1 - d)
             reward = get_tensor(r)
             next_state = self.clean_obs(get_tensor(y)) 
-            if self.algo in ["td3_lag", "sac_lag"]: 
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]: 
                 cost = get_tensor(c)
             noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
             if "td3" in self.algo:
@@ -850,7 +861,7 @@ class Controller(object):
             self.critic_optimizer.step()
 
             cost_critic_loss = 0
-            if self.algo in ["td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
                 # Cost critic
                 target_C1, target_C2 = self.cost_critic_target(
                     next_state, next_g, next_action
@@ -885,13 +896,13 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
-            if self.algo in ["td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
                 avg_cost_loss += cost_critic_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-            if self.algo in ["td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
                 for param, target_param in zip(
                     self.cost_critic.parameters(),
                     self.cost_critic_target.parameters()
@@ -906,7 +917,7 @@ class Controller(object):
             if "lag" in self.algo and ep_cost is not None:
                 self.pid_update(ep_cost)
 
-        if self.algo in ["td3_lag", "sac_lag"]:
+        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
             debug_info["controller_critic_loss"] = avg_cost_loss / iterations
 
         if "lag" in self.algo and ep_cost is not None:

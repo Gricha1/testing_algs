@@ -749,8 +749,8 @@ def run_hrac(args):
     if not args.train_only_td3:
         manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, 
-                                           cost_memmory=(args.controller_algo=="td3_lag" \
-                                                            or args.controller_algo=="sac_lag"))
+                                           cost_memmory=(args.controller_algo 
+                                                         in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]))
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 

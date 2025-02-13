@@ -175,7 +175,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     assert args.algo in ["ites_hrac", "ites_higl", "hrac", "higl"]
-    assert args.controller_algo in ["td3_img_safe_lag", "td3_img_safe", "td3_lag", "td3", "sac_lag", "sac"]
+    assert args.controller_algo in ["td3_img_safe_c_cost", "td3_img_safe_lag", "td3_img_safe", 
+                                    "td3_lag", "td3", "sac_lag", "sac"]
 
     if "img_safe" in args.controller_algo:
         assert args.world_model and args.cost_model
