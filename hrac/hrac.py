@@ -74,6 +74,7 @@ class Manager(object):
         self.args = args
 
         self.scale = scale
+        self.torch_scale = torch.tensor(self.scale).type('torch.FloatTensor').to(device)
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
                                   scale=scale, absolute_goal=absolute_goal).to(device)
         self.actor_target = ManagerActor(state_dim, goal_dim, action_dim,
@@ -177,9 +178,10 @@ class Manager(object):
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
         actions = self.actor(state, goal)
         if self.args.noise_man_training:
-            actions = self.subgoal_noise.perturb_action(actions,
-                                                        min_action=-self.scale, 
-                                                        max_action=self.scale)
+            actions = torch.clamp(actions + torch.normal(mean=0, 
+                                                std=self.args.man_safe_noise_sigma, 
+                                  size=actions.shape).type('torch.FloatTensor').to(device), 
+                                  min=-self.torch_scale, max=self.torch_scale)
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
 
