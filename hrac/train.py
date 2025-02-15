@@ -675,7 +675,6 @@ def run_hrac(args):
             scale=man_scale,
             goal_loss_coeff=args.goal_loss_coeff,
             absolute_goal=args.absolute_goal,        
-            modelfree_safety=args.modelfree_safety,
             coef_safety_modelbased=args.coef_safety_modelbased,
             coef_safety_modelfree=args.coef_safety_modelfree,
             testing_mean_wm=args.testing_mean_wm,
@@ -692,6 +691,7 @@ def run_hrac(args):
             automatic_delta_pseudo=args.automatic_delta_pseudo,
             delta=args.delta,
             landmark_loss_coeff=args.landmark_loss_coeff,
+            hidden_size=args.man_hidden_size,
             args=args
         )
     else:
@@ -750,7 +750,8 @@ def run_hrac(args):
         ctrl_noise = utils.NormalNoise(sigma=args.ctrl_noise_sigma)
 
     if not args.train_only_td3:
-        manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size)
+        manager_buffer = utils.ReplayBuffer(maxsize=args.man_buffer_size,
+                                            cost_memmory="high_lag" in args.manager_algo)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, 
                                            cost_memmory=(args.controller_algo 
                                                          in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]))
@@ -988,7 +989,7 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
-        if "lag" in args.controller_algo:
+        if "lag" in args.controller_algo or "high_lag" in args.manager_algo:
             pid_costs = deque(maxlen=10)
 
         ep_obs_seq = None
@@ -1068,7 +1069,6 @@ def run_hrac(args):
                                      episode_safety_subgoal_rate_, 
                                      ep_manager_reward, total_timesteps,
                                      pid_costs=pid_costs if "lag" in args.controller_algo else None)
-
                     ## Train manager
                     if not args.train_only_td3 and timesteps_since_manager >= args.train_manager_freq:
                         timesteps_since_manager = 0
@@ -1086,7 +1086,8 @@ def run_hrac(args):
                                                                  tau=args.man_soft_sync_rate,
                                                                  a_net=a_net, r_margin=r_margin,
                                                                  total_timesteps=total_timesteps,
-                                                                 novelty_pq=novelty_pq)
+                                                                 novelty_pq=novelty_pq,
+                                                                 ep_cost=np.mean(pid_costs))
                         
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
@@ -1205,7 +1206,10 @@ def run_hrac(args):
                             max_action=man_scale)
 
                     timesteps_since_subgoal = 0
-                    manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
+                    if manager_buffer.cost_memmory:
+                        manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, 0, [state], []]
+                    else:
+                        manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
 
             if args.train_only_td3:
                 controller_goal = goal - achieved_goal
@@ -1226,6 +1230,8 @@ def run_hrac(args):
 
             if not args.train_only_td3:
                 manager_transition[6] += manager_reward * args.man_rew_scale
+                if manager_buffer.cost_memmory:
+                    manager_transition[8] += cost
                 manager_transition[-1].append(action)
             ep_manager_reward += manager_reward * args.man_rew_scale
 
@@ -1287,10 +1293,13 @@ def run_hrac(args):
                 timesteps_since_manager += 1
                 timesteps_since_subgoal += 1
             if done:
-                if "td3_img_safe_lag" == args.controller_algo:
-                    pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
-                elif "lag" in args.controller_algo:
+                if "high_lag" in args.manager_algo: 
                     pid_costs.append(episode_cost)
+                else:
+                    if "td3_img_safe_lag" == args.controller_algo:
+                        pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
+                    elif "lag" in args.controller_algo:
+                        pid_costs.append(episode_cost)
 
             if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
                 controller_policy.controller_safety_coef = args.controller_curriculum_safety_coef
@@ -1334,7 +1343,10 @@ def run_hrac(args):
                         max_action=man_scale)
 
                 timesteps_since_subgoal = 0
-                manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
+                if manager_buffer.cost_memmory:
+                    manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, 0, [state], []]
+                else:    
+                    manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
 
         ## Final evaluation
         avg_ep_rew, avg_ep_cost, avg_controller_rew, avg_steps, avg_env_finish, validation_date = evaluate_policy(

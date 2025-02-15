@@ -51,7 +51,7 @@ class Manager(object):
                  critic_lr, candidate_goals, correction=True,
                  scale=10, actions_norm_reg=0, policy_noise=0.2,
                  noise_clip=0.5, goal_loss_coeff=0, absolute_goal=False, 
-                 modelfree_safety=False, testing_mean_wm=False,
+                 testing_mean_wm=False,
                  subgoal_grad_clip=0,
                  coef_safety_modelbased=1.0,
                  coef_safety_modelfree=1.0,
@@ -66,6 +66,7 @@ class Manager(object):
                  automatic_delta_pseudo=False,
                  delta=2.0,
                  landmark_loss_coeff=0.,
+                 hidden_size=300,
                  args=None
                  ):
         
@@ -101,16 +102,40 @@ class Manager(object):
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
 
-
-        if self.args.noise_man_training:
-            self.subgoal_noise = utils.NormalNoise(sigma=args.man_noise_sigma)
-
         # Safety
         self.lidar_observation = lidar_observation   
-        self.modelfree_safety = modelfree_safety
         self.subgoal_grad_clip = subgoal_grad_clip
         self.coef_safety_modelbased = coef_safety_modelbased
         self.coef_safety_modelfree = coef_safety_modelfree
+        if "high_lag" in self.args.manager_algo:
+            self._cost_penalty = 0.0
+            self.cost_critic = ControllerCritic(
+                state_dim, goal_dim, action_dim, hidden_size
+            ).to(device)
+            self.cost_critic_target = ControllerCritic(
+                state_dim, goal_dim, action_dim, hidden_size
+            ).to(device)
+            self.cost_critic_target.load_state_dict(
+                self.cost_critic.state_dict()
+            )
+            self.cost_critic_optimizer = torch.optim.Adam(
+                self.cost_critic.parameters(), lr=critic_lr, weight_decay=0.0001
+            )
+            self.cost_criterion = nn.SmoothL1Loss() 
+        if "high_lag" in self.args.manager_algo:
+            self.safe_threshold = torch.tensor(args.cost_budget)
+            self._pid_kp = args.ctrl_pid_kp
+            self._pid_ki = args.ctrl_pid_ki
+            self._pid_kd = args.ctrl_pid_kd
+            self._pid_d_delay = args.ctrl_pid_d_delay
+            self._pid_delta_p_ema_alpha = args.ctrl_pid_delta_p_ema_alpha
+            self._pid_delta_d_ema_alpha = args.ctrl_pid_delta_d_ema_alpha
+            self._pid_i = args.ctrl_lagrangian_multiplier_init
+            self._cost_ds = deque(maxlen=self._pid_d_delay)
+            self._cost_ds.append(0.0)
+            self._delta_p = 0.0
+            self._cost_d = 0.0
+            self._cost_penalty = 0.0
 
         # HIGL
         self.landmark_loss_coeff = landmark_loss_coeff
@@ -174,6 +199,20 @@ class Manager(object):
         scaled_norm_direction[scaled_norm_direction != scaled_norm_direction] = 0
         return pseudo_landmarks, scaled_norm_direction.mean(dim=0)
     
+    def pid_update(self, ep_cost_avg):
+        delta = float(ep_cost_avg - self.safe_threshold)
+        self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
+        a_p = self._pid_delta_p_ema_alpha
+        self._delta_p *= a_p
+        self._delta_p += (1 - a_p) * delta
+        a_d = self._pid_delta_d_ema_alpha
+        self._cost_d *= a_d
+        self._cost_d += (1 - a_d) * float(ep_cost_avg)
+        pid_d = max(0.0, self._cost_d - self._cost_ds[0])
+        pid_o = self._pid_kp * self._delta_p + self._pid_i + self._pid_kd * pid_d
+        self._cost_penalty = max(0.0, pid_o)
+        self._cost_ds.append(self._cost_d)
+
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
         actions = self.actor(state, goal)
@@ -184,6 +223,7 @@ class Manager(object):
                                   min=-self.torch_scale, max=self.torch_scale)
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
+        actor_loss = eval + norm
 
         scaled_norm_direction = var(torch.FloatTensor([0.] * self.action_dim))
         gen_subgoal = actions if self.absolute_goal else achieved_goal + actions
@@ -203,8 +243,8 @@ class Manager(object):
             
         # ITES
         safety_loss = None
-        safety_model_free_loss = 0
-        if self.modelfree_safety:
+        safety_subgoal_cls_loss = 0
+        if "safe_cls" in self.args.manager_algo:
             copy_state = state.detach()
             manager_absolute_goal = actions.clone()
             if not self.absolute_goal:
@@ -236,11 +276,17 @@ class Manager(object):
             else:
                 manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             """
-            safety_model_free_loss = cost_model.safe_model(manager_absolute_goal, copy_state)
-            safety_model_free_loss = safety_model_free_loss.mean()
-        safety_loss = self.coef_safety_modelfree * safety_model_free_loss 
-
-        return eval + norm, goal_loss, safety_loss, ld_loss, scaled_norm_direction
+            safety_subgoal_cls_loss = cost_model.safe_model(manager_absolute_goal, copy_state)
+            safety_subgoal_cls_loss = safety_subgoal_cls_loss.mean()
+            safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
+        if "high_lag" in self.args.manager_algo:
+            safety_loss = self.cost_critic.Q1(state, goal, actions).mean()
+            actor_loss = (
+                    actor_loss + safety_loss * self._cost_penalty
+                ) / (1 + self._cost_penalty)
+        if "safe_cls" in self.args.manager_algo:
+            actor_loss = actor_loss + safety_subgoal_cls_loss
+        return actor_loss, goal_loss, safety_subgoal_cls_loss + safety_loss, ld_loss, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -290,13 +336,13 @@ class Manager(object):
 
     def train(self, controller_policy, replay_buffer, controller_replay_buffer, cost_model, 
               iterations, batch_size=100, discount=0.99,
-              tau=0.005, a_net=None, r_margin=None, total_timesteps=None, novelty_pq=None):
+              tau=0.005, a_net=None, r_margin=None, total_timesteps=None, novelty_pq=None, ep_cost=None):
         avg_act_loss, avg_crit_loss, avg_ld_loss = 0., 0., 0.
         avg_scaled_norm_direction = get_tensor(np.array([0.] * self.action_dim)).squeeze()
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
         if a_net is not None:
             avg_goal_loss = 0.
-        if self.modelfree_safety:
+        if "safe_cls" in self.args.manager_algo:
             avg_safety_subgoals_loss = 0.
         else:
             avg_safety_subgoals_loss = None
@@ -305,8 +351,10 @@ class Manager(object):
             self.init_planner()
 
         for it in range(iterations):
-            # Sample replay buffer
-            x, y, x_ag, y_ag, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
+            if "high_lag" in self.args.manager_algo:        
+                x, y, x_ag, y_ag, g, sgorig, r, d, c, xobs_seq, a_seq = replay_buffer.sample(batch_size)
+            else:
+                x, y, x_ag, y_ag, g, sgorig, r, d, xobs_seq, a_seq = replay_buffer.sample(batch_size)
             batch_size = min(batch_size, x.shape[0])
 
             if self.correction and not self.absolute_goal:
@@ -324,6 +372,8 @@ class Manager(object):
             subgoal = get_tensor(sg)
 
             reward = get_tensor(r)
+            if "high_lag" in self.args.manager_algo:
+                cost = get_tensor(c)
             done = get_tensor(1 - d)
 
             noise = torch.FloatTensor(sgorig).data.normal_(0, self.policy_noise).to(device)
@@ -350,6 +400,29 @@ class Manager(object):
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
             self.critic_optimizer.step()
+
+            cost_critic_loss = 0
+            if "safe_cls" in self.args.manager_algo:
+                # Cost critic
+                target_C1, target_C2 = self.cost_critic_target(
+                    next_state, goal, next_action
+                )
+                target_C = torch.max(target_C1, target_C2)
+                target_C = cost + (done * discount * target_C)
+                target_C_no_grad = target_C.detach()
+
+                # Get current C estimate
+                current_C1, current_C2 = self.cost_critic(state, goal, subgoal)
+
+                # Compute cost critic loss
+                cost_critic_loss = self.cost_criterion(
+                    current_C1, target_C_no_grad
+                ) + self.cost_criterion(current_C2, target_C_no_grad)
+
+                # Optimize the cost critic
+                self.cost_critic_optimizer.zero_grad()
+                cost_critic_loss.backward()
+                self.cost_critic_optimizer.step()
 
             # Compute actor loss
             if self.algo == "hrac":
@@ -385,34 +458,27 @@ class Manager(object):
             else:
                 raise NotImplementedError
 
-                
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
-            if self.modelfree_safety:
-                actor_loss = actor_loss + safety_subgoals_loss
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
-
             actor_loss.backward()
-
             if self.subgoal_grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 
                                       max_norm=self.subgoal_grad_clip)
-
             with torch.no_grad():
                 manager_actor_grad_norm = (
                     sum(p.grad.data.norm(2).item() ** 2 for p in self.actor.parameters() if p.grad is not None) ** 0.5
                 )
                 debug_maganer_info["sum_manager_actor_grad_norm"] += manager_actor_grad_norm                
-
             self.actor_optimizer.step()
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
             if a_net is not None:
                 avg_goal_loss += goal_loss
-            if self.modelfree_safety:
+            if "safe_cls" in self.args.manager_algo:
                 avg_safety_subgoals_loss += safety_subgoals_loss
 
             # Update the frozen target models
@@ -424,8 +490,14 @@ class Manager(object):
                                            self.actor_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
 
+            if "high_lag" in self.args.manager_algo:
+                self.pid_update(ep_cost)
+
+        if "high_lag" in self.args.manager_algo:
+            debug_maganer_info["man_lagrangian"] = self._cost_penalty
+
         debug_maganer_info["sum_manager_actor_grad_norm"] /= iterations
-        if self.modelfree_safety:
+        if "safe_cls" in self.args.manager_algo:
             avg_safety_subgoals_loss = avg_safety_subgoals_loss / iterations
         return avg_act_loss / iterations, avg_crit_loss / iterations, avg_goal_loss / iterations, avg_safety_subgoals_loss, debug_maganer_info
 
