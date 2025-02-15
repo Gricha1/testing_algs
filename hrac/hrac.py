@@ -136,6 +136,8 @@ class Manager(object):
             self._delta_p = 0.0
             self._cost_d = 0.0
             self._cost_penalty = 0.0
+        elif "low_lag" in self.args.manager_algo:
+            self._cost_penalty = 0.0
 
         # HIGL
         self.landmark_loss_coeff = landmark_loss_coeff
@@ -214,7 +216,7 @@ class Manager(object):
         self._cost_ds.append(self._cost_d)
 
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
-                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
+                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False, controller_policy=None):
         actions = self.actor(state, goal)
         if self.args.noise_man_training:
             actions = torch.clamp(actions + torch.normal(mean=0, 
@@ -281,6 +283,11 @@ class Manager(object):
             safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
         if "high_lag" in self.args.manager_algo:
             safety_loss = self.cost_critic.Q1(state, goal, actions).mean()
+            actor_loss = (
+                    actor_loss + safety_loss * self._cost_penalty
+                ) / (1 + self._cost_penalty)
+        if "low_lag" in self.args.manager_algo:
+            safety_loss = controller_policy.cost_critic.Q1(state, goal, actions).mean()
             actor_loss = (
                     actor_loss + safety_loss * self._cost_penalty
                 ) / (1 + self._cost_penalty)
@@ -402,7 +409,7 @@ class Manager(object):
             self.critic_optimizer.step()
 
             cost_critic_loss = 0
-            if "safe_cls" in self.args.manager_algo:
+            if "td3_adj_safe_cls_high_lag" in self.args.manager_algo:
                 # Cost critic
                 target_C1, target_C2 = self.cost_critic_target(
                     next_state, goal, next_action
@@ -429,7 +436,8 @@ class Manager(object):
                 assert a_net is not None
 
                 actor_loss, goal_loss, safety_subgoals_loss, _, _ = \
-                    self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, selected_landmark=None)
+                    self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, 
+                                    selected_landmark=None, controller_policy=controller_policy)
                 
             elif self.algo == "higl":
                 assert a_net is not None
@@ -451,7 +459,8 @@ class Manager(object):
                 actor_loss, goal_loss, safety_subgoals_loss, ld_loss, scaled_norm_direction = self.actor_loss(state, achieved_goal, goal,
                                                                                         a_net, r_margin, cost_model,
                                                                                         selected_landmark,
-                                                                                        self.no_pseudo_landmark)
+                                                                                        self.no_pseudo_landmark,
+                                                                                        controller_policy=controller_policy)
                 actor_loss = actor_loss + self.landmark_loss_coeff * ld_loss
                 avg_ld_loss += ld_loss
                 avg_scaled_norm_direction += scaled_norm_direction
@@ -485,6 +494,14 @@ class Manager(object):
             for param, target_param in zip(self.critic.parameters(),
                                            self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+            if "high_lag" in self.args.manager_algo:
+                for param, target_param in zip(
+                    self.cost_critic.parameters(),
+                    self.cost_critic_target.parameters()
+                ):
+                    target_param.data.copy_(
+                        tau * param.data + (1 - tau) * target_param.data
+                    )
 
             for param, target_param in zip(self.actor.parameters(),
                                            self.actor_target.parameters()):
@@ -682,7 +699,7 @@ class Controller(object):
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
             lr=critic_lr, weight_decay=0.0001)
         
-        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
+        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
             self.cost_critic = ControllerCritic(
                 state_dim, goal_dim, action_dim, hidden_size
             ).to(device)
@@ -908,11 +925,11 @@ class Controller(object):
     def train(self, replay_buffer, cost_model, predict_env, iterations, 
               batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
-        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
+        if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
             avg_cost_loss = 0.
         debug_info = {}
         for _ in range(iterations):      
-            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:        
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:        
                 x, y, x_ag, y_ag, sg, u, r, d, c, _, _ = replay_buffer.sample(batch_size)
             else:
                 x, y, x_ag, y_ag, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
@@ -924,7 +941,7 @@ class Controller(object):
             done = get_tensor(1 - d)
             reward = get_tensor(r)
             next_state = self.clean_obs(get_tensor(y)) 
-            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]: 
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo: 
                 cost = get_tensor(c)
             noise = torch.FloatTensor(u).data.normal_(0, self.policy_noise).to(device)
             if "td3" in self.algo:
@@ -955,7 +972,7 @@ class Controller(object):
             self.critic_optimizer.step()
 
             cost_critic_loss = 0
-            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
                 # Cost critic
                 target_C1, target_C2 = self.cost_critic_target(
                     next_state, next_g, next_action
@@ -990,13 +1007,13 @@ class Controller(object):
 
             avg_act_loss += actor_loss
             avg_crit_loss += critic_loss
-            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
                 avg_cost_loss += cost_critic_loss
             
             # Update the target models
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
+            if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
                 for param, target_param in zip(
                     self.cost_critic.parameters(),
                     self.cost_critic_target.parameters()
