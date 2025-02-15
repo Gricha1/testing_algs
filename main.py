@@ -132,6 +132,8 @@ if __name__ == "__main__":
     parser.add_argument("--cost_model_trajectory_buffer", action='store_true', default=False) # to avoid wm explosion in beggining
 
     # Safety Controller Parameters
+    parser.add_argument("--noise_ctr_training", default=False, action="store_true")
+    parser.add_argument("--ctr_safe_noise_sigma", default=1., type=float)
     parser.add_argument("--controller_curriculumn", action='store_true', default=False)
     parser.add_argument("--controller_curriculum_start_step", default=600_000, type=int)
     parser.add_argument("--controller_curriculum_safety_coef", default=4000., type=float)

@@ -554,9 +554,12 @@ class Controller(object):
                  sac_alpha=None,
                  lagrangian_data={},
                  phi=None,
+                 args=None,
 
     ):
         self.device = device
+        self.args = args
+        self.torch_scale = torch.tensor(max_action).type('torch.FloatTensor').to(device)
 
         self.state_dim = state_dim
         self.goal_dim = goal_dim
@@ -695,6 +698,12 @@ class Controller(object):
             img_state = next_img_state
             img_states.append(img_state)
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(img_state), manager_proposed_goal) 
+            if self.args.noise_ctr_training:
+                ctrl_actions = torch.clamp(ctrl_actions + torch.normal(mean=0, 
+                                                    std=self.args.ctr_safe_noise_sigma, 
+                                           size=actions.shape).type('torch.FloatTensor').to(device), 
+                                           min=-self.torch_scale, max=self.torch_scale)
+
             next_img_state = predict_env.step(img_state, ctrl_actions, 
                                               deterministic=True, 
                                               torch_deviced=True)

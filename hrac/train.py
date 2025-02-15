@@ -735,6 +735,7 @@ def run_hrac(args):
         sac_alpha=args.sac_alpha,
         lagrangian_data=lagrangian_data,
         phi=phi,
+        args=args
     )
 
     calculate_controller_reward = get_reward_function(
