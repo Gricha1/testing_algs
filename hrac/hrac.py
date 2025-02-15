@@ -12,6 +12,7 @@ from hrac.models import ControllerActor, ControllerCritic, \
 
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv
 from planner.goal_plan import Planner
+import hrac.utils as utils
 
 """
 HIRO part adapted from
@@ -65,10 +66,12 @@ class Manager(object):
                  automatic_delta_pseudo=False,
                  delta=2.0,
                  landmark_loss_coeff=0.,
+                 args=None
                  ):
         
         self.algo = algo
         self.device = device
+        self.args = args
 
         self.scale = scale
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
@@ -96,6 +99,10 @@ class Manager(object):
         self.noise_clip = noise_clip
         self.goal_loss_coeff = goal_loss_coeff
         self.absolute_goal = absolute_goal
+
+
+        if self.args.noise_man_training:
+            self.subgoal_noise = utils.NormalNoise(sigma=args.man_noise_sigma)
 
         # Safety
         self.lidar_observation = lidar_observation   
@@ -169,6 +176,10 @@ class Manager(object):
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False):
         actions = self.actor(state, goal)
+        if self.args.noise_man_training:
+            actions = self.subgoal_noise.perturb_action(actions,
+                                                        min_action=-self.scale, 
+                                                        max_action=self.scale)
         eval = -self.critic.Q1(state, goal, actions).mean()
         norm = torch.norm(actions)*self.action_norm_reg
 

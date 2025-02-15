@@ -55,40 +55,41 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
             avg_episode_real_subgoal_safety = 0
-            if "SafeAntMaze" in env_name:
-                safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
-            elif env_name == "SafePusher":
-                safety_boundary = env.get_safety_bounds()
-            elif env_name == "SafeGym":
-                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
-            if args.cost_model and not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
+            if args.cost_model:
                 if "SafeAntMaze" in env_name:
-                    g = safe_dataset[0]
-                    g_np = np.array(g, dtype=np.float32)
-                    x = np.zeros((len(g), env.state_dim))
-                    x_np = np.array(x, dtype=np.float32)
-                    true = safe_dataset[1]
+                    safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
+                elif env_name == "SafePusher":
+                    safety_boundary = env.get_safety_bounds()
                 elif env_name == "SafeGym":
-                    g = safe_dataset[0]
-                    g_np = np.array(g, dtype=np.float32)
-                    x = safe_dataset[1]
-                    x_np = np.array(x, dtype=np.float32)
-                    true = safe_dataset[2]
+                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                if not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
+                    if "SafeAntMaze" in env_name:
+                        g = safe_dataset[0]
+                        g_np = np.array(g, dtype=np.float32)
+                        x = np.zeros((len(g), env.state_dim))
+                        x_np = np.array(x, dtype=np.float32)
+                        true = safe_dataset[1]
+                    elif env_name == "SafeGym":
+                        g = safe_dataset[0]
+                        g_np = np.array(g, dtype=np.float32)
+                        x = safe_dataset[1]
+                        x_np = np.array(x, dtype=np.float32)
+                        true = safe_dataset[2]
 
-                g_tensor = torch.tensor(g_np, dtype=torch.float32)
-                g_tensor = g_tensor.to(device)
-                x_tensor = torch.tensor(x_np, dtype=torch.float32)
-                x_tensor = x_tensor.to(device)
+                    g_tensor = torch.tensor(g_np, dtype=torch.float32)
+                    g_tensor = g_tensor.to(device)
+                    x_tensor = torch.tensor(x_np, dtype=torch.float32)
+                    x_tensor = x_tensor.to(device)
 
-                pred = cost_model.safe_model(g_tensor, x_tensor)
-                prev_probs = pred.squeeze().tolist()
-                val_safe_model_roc = roc_auc_score(true, prev_probs)
-                pred = (pred > 0.5).int().squeeze().tolist()
-                val_safe_model_f1 = f1_score(true, pred)
-                validation_date["safe_model_true_mean"] = np.mean(true)
-                validation_date["safe_model_pred_mean"] = np.mean(pred)
-                validation_date["safe_model_f1"] = val_safe_model_f1
-                validation_date["safe_model_roc"] = val_safe_model_roc
+                    pred = cost_model.safe_model(g_tensor, x_tensor)
+                    prev_probs = pred.squeeze().tolist()
+                    val_safe_model_roc = roc_auc_score(true, prev_probs)
+                    pred = (pred > 0.5).int().squeeze().tolist()
+                    val_safe_model_f1 = f1_score(true, pred)
+                    validation_date["safe_model_true_mean"] = np.mean(true)
+                    validation_date["safe_model_pred_mean"] = np.mean(pred)
+                    validation_date["safe_model_f1"] = val_safe_model_f1
+                    validation_date["safe_model_roc"] = val_safe_model_roc
 
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
@@ -691,6 +692,7 @@ def run_hrac(args):
             automatic_delta_pseudo=args.automatic_delta_pseudo,
             delta=args.delta,
             landmark_loss_coeff=args.landmark_loss_coeff,
+            args=args
         )
     else:
         manager_policy = None

@@ -82,6 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--automatic_delta_pseudo", action="store_true")
 
     # Manager Parameters
+    parser.add_argument("--noise_man_training", default=False, action="store_true")
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)

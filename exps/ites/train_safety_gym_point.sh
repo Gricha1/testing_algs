@@ -24,7 +24,7 @@ python main.py --domain_name Safexp \
                --cost_model_batch_size 512 \
                --modelfree_safety \
                --coef_safety_modelfree 10.0 \
-               --controller_algo "td3_img_safe_lag" \
+               --controller_algo "td3_img_safe" \
                --img_horizon 10 \
                --controller_safety_coef 0.001 \
                --max_timesteps 4000000 \
