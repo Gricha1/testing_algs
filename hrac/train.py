@@ -54,14 +54,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             avg_cost = 0.
             avg_episode_safety_subgoal_rate = 0
             avg_episode_imagine_subgoal_safety = 0
-            avg_episode_real_subgoal_safety = 0
+            avg_episode_real_subgoal_safety = 0            
+            if "SafeAntMaze" in env_name:
+                safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            elif env_name == "SafePusher":
+                safety_boundary = env.get_safety_bounds()
+            elif env_name == "SafeGym":
+                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
-                if "SafeAntMaze" in env_name:
-                    safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
-                elif env_name == "SafePusher":
-                    safety_boundary = env.get_safety_bounds()
-                elif env_name == "SafeGym":
-                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
                 if not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
                     if "SafeAntMaze" in env_name:
                         g = safe_dataset[0]
@@ -127,9 +127,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     # test
                     #print("goal:", goal)
                     #test_goal = np.asarray([0.45, -0.05, -0.323, 0.0, 0.2, -0.275])
+                    #test_goal = np.asarray([subgoal[0], subgoal[1], subgoal[2], 0.0, 0.2, -0.275])
                     #test_goal = np.asarray([0.45, -0.05, -0.323, -0.45, -0.05, -0.275])
+                    #test_goal = np.asarray([subgoal[0], subgoal[1], subgoal[2], -0.45, -0.05, -0.275])
+                    test_goal = np.asarray([-0.45, -0.05, -0.323, goal[3], goal[4], 0])
                     #test_goal = goal
-                    #subgoal = test_goal - achieved_goal
+                    subgoal = test_goal - achieved_goal
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
@@ -517,7 +520,14 @@ def run_hrac(args):
                             "plot_safety_boundary": True,
                             "controller_safe_model": False,
                             }
-            low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
+            if args.pusher_four_goal_dim:
+                low = np.array([-2.0, -2.0, -2.0, -2.0])
+            elif args.pusher_three_goal_dim:
+                low = np.array([-2.0, -2.0, -2.0])
+            elif args.pusher_two_goal_dim:
+                low = np.array([-2.0, -2.0])
+            else:
+                low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
             #low = np.array([-2.0, -2.0, -2.0])
             def phi(state):
                 # manipulator_pose = [-6:-3], obj_pose=[-3:]
@@ -995,7 +1005,8 @@ def run_hrac(args):
                                                 close_thr=args.close_thr,
                                                 discard_by_anet=args.discard_by_anet)
                 rnd_input_dim = state_dim if not args.use_ag_as_input else controller_goal_dim
-                RND = hrac.RandomNetworkDistillation(rnd_input_dim, args.rnd_output_dim, args.rnd_lr, args.use_ag_as_input)
+                RND = hrac.RandomNetworkDistillation(rnd_input_dim, args.rnd_output_dim, 
+                                                     args.rnd_lr, args.use_ag_as_input)
                 print("Novelty PQ is generated")
             else:
                 raise NotImplementedError
@@ -1080,7 +1091,8 @@ def run_hrac(args):
                                                                  a_net=a_net, r_margin=r_margin,
                                                                  total_timesteps=total_timesteps,
                                                                  novelty_pq=novelty_pq,
-                                                                 ep_cost=np.mean(pid_costs))
+                                                                 ep_cost=np.mean(pid_costs) if "high_lag" in args.manager_algo \
+                                                                        or "low_lag" in args.manager_algo else None)
                         if "low_lag" in args.manager_algo:
                             manager_policy._cost_penalty = controller_policy._cost_penalty
 

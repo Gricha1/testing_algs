@@ -245,7 +245,7 @@ class Manager(object):
             ld_loss = torch.clamp(F.pairwise_distance(a_net(batch_landmarks), a_net(gen_subgoal)) - r_margin, min=0.).mean()
             
         # ITES
-        safety_loss = None
+        safety_loss = 0
         safety_subgoal_cls_loss = 0
         if "safe_cls" in self.args.manager_algo:
             copy_state = state.detach()

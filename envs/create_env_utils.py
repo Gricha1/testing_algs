@@ -310,7 +310,7 @@ def create_env(args, renderer_args={}):
         register(
             id='Pusher-v0',
             entry_point='envs.create_fetch_env:create_fetch_env',
-            kwargs={'env_name': 'Pusher-v0'},
+            kwargs={'env_name': 'Pusher-v0', "args": args},
             max_episode_steps=100
         )
         import gym 

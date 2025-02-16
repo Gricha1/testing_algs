@@ -23,6 +23,12 @@ if __name__ == "__main__":
     parser.add_argument("--sparce_reward", action="store_true")
 
     # environment
+    ## pusher
+    parser.add_argument("--pusher_four_goal_dim", action="store_true", default=False)
+    parser.add_argument("--pusher_three_goal_dim", action="store_true", default=False)
+    parser.add_argument("--pusher_two_goal_dim", action="store_true", default=False)
+    parser.add_argument("--pusher_hard_task", action="store_true", default=False)
+
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000
     parser.add_argument("--algo", default="hrac", type=str) # ites_hrac, ites_higl, hrac, higl
