@@ -697,21 +697,14 @@ def run_hrac(args):
     else:
         manager_policy = None
 
-    lagrangian_data = {}
-    if "lag" in args.controller_algo:
-        lagrangian_data["pid_kp"] = args.ctrl_pid_kp
-        lagrangian_data["pid_ki"] = args.ctrl_pid_ki
-        lagrangian_data["pid_kd"] = args.ctrl_pid_kd
-        lagrangian_data["pid_d_delay"] = args.ctrl_pid_d_delay
-        lagrangian_data["pid_delta_p_ema_alpha"] = args.ctrl_pid_delta_p_ema_alpha
-        lagrangian_data["pid_delta_d_ema_alpha"] = args.ctrl_pid_delta_d_ema_alpha
-        lagrangian_data["lagrangian_multiplier_init"] = args.ctrl_lagrangian_multiplier_init
-
     safe_threshold = None
-    if "td3_img_safe_lag" == args.controller_algo:
-        safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
-    elif "lag" in args.controller_algo:
-        safe_threshold = args.cost_budget
+    if "low_lag" in args.manager_algo:
+        safe_threshold = (args.cost_budget / env.max_len) * float(args.manager_propose_freq)
+    else:
+        if "td3_img_safe_lag" == args.controller_algo:
+            safe_threshold = (args.cost_budget / env.max_len) * float(args.img_horizon)
+        elif "lag" in args.controller_algo:
+            safe_threshold = args.cost_budget
 
     controller_policy = hrac.Controller(
         state_dim=state_dim,
@@ -732,8 +725,7 @@ def run_hrac(args):
         img_horizon=args.img_horizon,
         safe_threshold = safe_threshold,
         algo=args.controller_algo,
-        sac_alpha=args.sac_alpha,
-        lagrangian_data=lagrangian_data,
+        sac_alpha=args.sac_alpha,        
         phi=phi,
         args=args
     )
@@ -754,7 +746,8 @@ def run_hrac(args):
                                             cost_memmory="high_lag" in args.manager_algo)
     controller_buffer = utils.ReplayBuffer(maxsize=args.ctrl_buffer_size, 
                                            cost_memmory=(args.controller_algo 
-                                                         in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]))
+                                                         in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] \
+                                                            or "low_lag" in args.manager_algo))
 
     ## Train TD3 controller
     def train_controller(controller_buffer, next_done, next_state, subgoal, episode_timesteps, 
@@ -989,7 +982,7 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
-        if "lag" in args.controller_algo or "high_lag" in args.manager_algo:
+        if "lag" in args.controller_algo or "high_lag" in args.manager_algo or "low_lag" in args.manager_algo:
             pid_costs = deque(maxlen=10)
 
         ep_obs_seq = None
@@ -1088,6 +1081,9 @@ def run_hrac(args):
                                                                  total_timesteps=total_timesteps,
                                                                  novelty_pq=novelty_pq,
                                                                  ep_cost=np.mean(pid_costs))
+                        if "low_lag" in args.manager_algo:
+                            manager_policy._cost_penalty = controller_policy._cost_penalty
+
                         
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
@@ -1295,6 +1291,8 @@ def run_hrac(args):
             if done:
                 if "high_lag" in args.manager_algo: 
                     pid_costs.append(episode_cost)
+                elif "low_lag" in args.manager_algo:
+                    pid_costs.append((episode_cost/env.max_len) * float(args.manager_propose_freq))
                 else:
                     if "td3_img_safe_lag" == args.controller_algo:
                         pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))

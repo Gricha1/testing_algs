@@ -216,7 +216,8 @@ class Manager(object):
         self._cost_ds.append(self._cost_d)
 
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
-                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False, controller_policy=None):
+                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False, 
+                   controller_policy=None):
         actions = self.actor(state, goal)
         if self.args.noise_man_training:
             actions = torch.clamp(actions + torch.normal(mean=0, 
@@ -286,8 +287,9 @@ class Manager(object):
             actor_loss = (
                     actor_loss + safety_loss * self._cost_penalty
                 ) / (1 + self._cost_penalty)
-        if "low_lag" in self.args.manager_algo:
-            safety_loss = controller_policy.cost_critic.Q1(state, goal, actions).mean()
+        if "low_lag" in self.args.manager_algo:            
+            ctrl_actions = controller_policy.actor(controller_policy.clean_obs(state), actions) 
+            safety_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
             actor_loss = (
                     actor_loss + safety_loss * self._cost_penalty
                 ) / (1 + self._cost_penalty)
@@ -641,7 +643,6 @@ class Controller(object):
                  safe_threshold=None,
                  algo="td3",
                  sac_alpha=None,
-                 lagrangian_data={},
                  phi=None,
                  args=None,
 
@@ -669,15 +670,15 @@ class Controller(object):
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
         self.cost_function = cost_function
-        if "lag" in self.algo:
+        if "lag" in self.algo or "low_lag" in self.args.manager_algo:
             self.safe_threshold = torch.tensor(safe_threshold)
-            self._pid_kp = lagrangian_data["pid_kp"]
-            self._pid_ki = lagrangian_data["pid_ki"]
-            self._pid_kd = lagrangian_data["pid_kd"]
-            self._pid_d_delay = lagrangian_data["pid_d_delay"]
-            self._pid_delta_p_ema_alpha = lagrangian_data["pid_delta_p_ema_alpha"]
-            self._pid_delta_d_ema_alpha = lagrangian_data["pid_delta_d_ema_alpha"]
-            self._pid_i = lagrangian_data["lagrangian_multiplier_init"]
+            self._pid_kp = args.ctrl_pid_kp
+            self._pid_ki = args.ctrl_pid_ki
+            self._pid_kd = args.ctrl_pid_kd
+            self._pid_d_delay = args.ctrl_pid_d_delay
+            self._pid_delta_p_ema_alpha = args.ctrl_pid_delta_p_ema_alpha
+            self._pid_delta_d_ema_alpha = args.ctrl_pid_delta_d_ema_alpha
+            self._pid_i = args.ctrl_lagrangian_multiplier_init
             self._cost_ds = deque(maxlen=self._pid_d_delay)
             self._cost_ds.append(0.0)
             self._delta_p = 0.0
