@@ -3,6 +3,7 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 import os
+import random
 
 import numpy as np
 from gym import utils
@@ -54,12 +55,33 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def reset_model(self):
         qpos = self.init_qpos
 
-        if not self.args.pusher_hard_task:
-            self.goal_pos = np.asarray([0, 0])
-            self.cylinder_pos = np.array([-0.25, 0.15]) + np.random.normal(0, 0.025, [2])
-        else:
+        if self.args.pusher_hard_task:
             self.goal_pos = np.asarray([-0.2, 0.3])
             self.cylinder_pos = np.array([-0.2, -1.1]) + np.random.normal(0, 0.025, [2])
+        elif self.args.pusher_random_obj_start_poses:
+            l_u = (-0.45, -0.05)
+            l_d = (-0.45, -0.4)
+            r_d = (0.6, -0.4)
+            r_u = (0.6, -0.05)
+
+            x_min = min(l_u[0], l_d[0], r_d[0], r_u[0])
+            x_max = max(l_u[0], l_d[0], r_d[0], r_u[0])
+            y_min = min(l_u[1], l_d[1], r_d[1], r_u[1])
+            y_max = max(l_u[1], l_d[1], r_d[1], r_u[1])
+
+            def generate_random_point():
+                x = random.uniform(x_min, x_max)
+                y = random.uniform(y_min, y_max)
+                return (y, x)
+
+            self.goal_pos = np.asarray(generate_random_point())
+            self.cylinder_pos = np.asarray(generate_random_point())
+
+            print("self.goal_pos:", self.goal_pos)
+            print("self.cylinder_pos:", self.cylinder_pos)
+        else:
+            self.goal_pos = np.asarray([0, 0])
+            self.cylinder_pos = np.array([-0.25, 0.15]) + np.random.normal(0, 0.025, [2])
 
         qpos[-4:-2] = self.cylinder_pos
         qpos[-2:] = self.goal_pos

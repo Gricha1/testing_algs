@@ -8,7 +8,8 @@ from gym.envs.registration import EnvSpec
 
 
 class GoalWrapper(Wrapper):
-    def __init__(self, env, env_name, args=None, reward_shaping='dense', seed=0, subgoal_repr='subspace', mask_goal_in_obs=False):
+    def __init__(self, env, env_name, args=None, reward_shaping='dense', seed=0, 
+                 subgoal_repr='subspace', mask_goal_in_obs=False):
         super(GoalWrapper, self).__init__(env)
         self.env_name = env_name
         ob_space = env.observation_space

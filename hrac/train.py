@@ -59,7 +59,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafePusher":
                 safety_boundary = env.get_safety_bounds()
-            elif env_name == "SafeGym":
+            elif env_name == "SafeGym" and args.cost_model:
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
                 if not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
@@ -127,12 +127,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     # test
                     #print("goal:", goal)
                     #test_goal = np.asarray([0.45, -0.05, -0.323, 0.0, 0.2, -0.275])
-                    #test_goal = np.asarray([subgoal[0], subgoal[1], subgoal[2], 0.0, 0.2, -0.275])
                     #test_goal = np.asarray([0.45, -0.05, -0.323, -0.45, -0.05, -0.275])
+
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, -0.45, -0.05, -0.275]) # l_u = -0.45, -0.05
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, -0.45, -0.4, -0.275]) # l_d = -0.45, -0.4
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, 0.6, -0.4, -0.275]) # r_d = 0.6, -0.4
+                    #test_goal = np.asarray([0.45, -0.05, -0.323, 0.6, -0.05, -0.275]) # r_u = 0.6, -0.0.5
+
+                    #test_goal = np.asarray([subgoal[0], subgoal[1], subgoal[2], 0.0, 0.2, -0.275])
                     #test_goal = np.asarray([subgoal[0], subgoal[1], subgoal[2], -0.45, -0.05, -0.275])
-                    test_goal = np.asarray([-0.45, -0.05, -0.323, goal[3], goal[4], 0])
+                    #test_goal = np.asarray([-0.45, -0.05, -0.323, goal[3], goal[4], 0])
                     #test_goal = goal
-                    subgoal = test_goal - achieved_goal
+                    #subgoal = test_goal - achieved_goal
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
@@ -200,7 +206,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info = {}
                     if "SafeAntMaze" in env_name:
                         debug_info["safety_boundary"] = safety_boundary
-                        debug_info["safe_dataset"] = safe_dataset
+                        if args.cost_model:
+                            debug_info["safe_dataset"] = safe_dataset
                         if args.world_model:
                             if not args.train_only_td3:
                                 debug_info["imagine_subgoal_safety"] = episode_imagine_subgoal_safety
@@ -253,13 +260,18 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["dist_a_net_s_g"] = 0
                     current_step_info = {}
                     if env_name == "SafePusher":
-                        current_step_info["robot_pos"] = np.array(achieved_goal[3:5])
+                        if args.pusher_four_goal_dim:
+                            current_step_info["robot_pos"] = np.array(achieved_goal[2:4])
+                        else:
+                            current_step_info["robot_pos"] = np.array(achieved_goal[3:5])
                     else:
                         current_step_info["robot_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
-                        current_step_info["obj_pos"] = np.array(achieved_goal[:2])
+                        if args.pusher_four_goal_dim:
+                            current_step_info["obj_pos"] = np.array(achieved_goal[:2])
+                        else:
+                            current_step_info["obj_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
-                        #current_step_info["goal_pos"] = np.array(achieved_goal[:2])
                         current_step_info["goal_pos"] = np.array(goal[:2])
                     elif env_name != "AntGather" and env_name != "AntMazeSparse":
                         current_step_info["goal_pos"] = np.array(goal[:2])
@@ -272,8 +284,12 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             if env_name == "SafePusher":
                                 current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                                 current_step_info["obj_pos"]
-                                current_step_info["second_goal_pos"] = np.array(subgoal[3:5]) + \
-                                                                current_step_info["robot_pos"]
+                                if args.pusher_four_goal_dim:
+                                        current_step_info["second_goal_pos"] = np.array(subgoal[2:4]) + \
+                                                                    current_step_info["robot_pos"]
+                                else:
+                                    current_step_info["second_goal_pos"] = np.array(subgoal[3:5]) + \
+                                                                    current_step_info["robot_pos"]
                             else:
                                 current_step_info["subgoal_pos"] = np.array(subgoal[:2]) + \
                                                             current_step_info["robot_pos"]
