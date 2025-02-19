@@ -1192,7 +1192,7 @@ def run_hrac(args):
                 achieved_goal = obs["achieved_goal"]
 
                 traj_buffer.create_new_trajectory()
-                traj_buffer.append(achieved_goal)
+                traj_buffer.append(achieved_goal.copy())
                 if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                     if len(cost_model_buffer.trajectory) != 0:
                         cost_model_buffer.add_trajectory_to_buffer()
@@ -1261,7 +1261,7 @@ def run_hrac(args):
 
             if not args.train_only_td3:
                 manager_transition[-2].append(next_state)
-            traj_buffer.append(next_achieved_goal)
+            traj_buffer.append(next_achieved_goal.copy())
 
             if args.train_only_td3:
                 controller_goal = goal - next_achieved_goal
