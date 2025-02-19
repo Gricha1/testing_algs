@@ -22,7 +22,7 @@ python main.py --domain_name Safexp \
                --cost_model \
                --cm_frame_stack_num 1 \
                --cost_model_batch_size 512 \
-               --modelfree_safety \
+               --manager_algo "td3_adj_safe_cls" \
                --coef_safety_modelfree 10.0 \
                --controller_algo "td3_img_safe" \
                --img_horizon 10 \
