@@ -1175,16 +1175,6 @@ def run_hrac(args):
                             if args.world_model:
                                 predict_env.save("./models", args.env_name, args.algo, exp_num)
 
-                    if traj_buffer.full():
-                        for traj in traj_buffer.get_trajectory():
-                            print("traj[0]", traj[0])
-                        
-                        for i in range(len(controller_buffer.storage)):
-                            for val in controller_buffer.storage[i][:200]:
-                                print(f"idx: {i}:", val)
-                            
-                        assert 1 == 0
-
 
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, 
                                                                       state_dict, a_net, traj_buffer,
