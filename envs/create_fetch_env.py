@@ -41,7 +41,7 @@ class GoalWrapper(Wrapper):
             'achieved_goal': achieved_goal_space,
         }))
 
-        self.distance_threshold = 0.25
+        self.distance_threshold = 0.1
         self.reward_shaping = reward_shaping
         self.mask_goal_in_obs = mask_goal_in_obs
 
