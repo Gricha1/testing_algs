@@ -33,17 +33,19 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             fail = False
         ob = self._get_obs()
         if self.args.pusher_four_goal_dim:
-            self.ac_goal_pos = np.concatenate((self.get_body_com("object")[:2], self.get_body_com("tips_arm")[:2]))
-            self.goal = np.concatenate((self.get_body_com("goal")[:2], self.get_body_com("object")[:2]))
+            self.ac_goal_pos = np.concatenate((self.get_body_com("object").copy()[:2], 
+                                               self.get_body_com("tips_arm").copy()[:2]))
+            self.goal = np.concatenate((self.get_body_com("goal").copy()[:2], 
+                                        self.get_body_com("object").copy()[:2]))
         elif self.args.pusher_three_goal_dim:
-            self.ac_goal_pos = self.get_body_com("object")
-            self.goal = self.get_body_com("goal")
+            self.ac_goal_pos = self.get_body_com("object").copy()
+            self.goal = self.get_body_com("goal").copy()
         elif self.args.pusher_two_goal_dim:
-            self.ac_goal_pos = self.get_body_com("object")[:2]
-            self.goal = self.get_body_com("goal")[:2]
+            self.ac_goal_pos = self.get_body_com("object").copy()[:2]
+            self.goal = self.get_body_com("goal").copy()[:2]
         else:
-            self.ac_goal_pos = np.concatenate((self.get_body_com("object"), self.get_body_com("tips_arm")))
-            self.goal = np.concatenate((self.get_body_com("goal"), self.get_body_com("object")))
+            self.ac_goal_pos = np.concatenate((self.get_body_com("object").copy(), self.get_body_com("tips_arm").copy()))
+            self.goal = np.concatenate((self.get_body_com("goal").copy(), self.get_body_com("object").copy()))
 
         return ob, - float(fail) + reward_ctrl, self.num_timesteps >= 100, {'is_success': not fail}
 
@@ -81,6 +83,10 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             self.goal_pos = np.asarray([0, 0])
             self.cylinder_pos = np.array([-0.25, 0.15]) + np.random.normal(0, 0.025, [2])
 
+        # testing
+        #self.goal_pos = np.asarray([0, -0.6])
+        #self.cylinder_pos = np.array([-0.25, 0])
+
         qpos[-4:-2] = self.cylinder_pos
         qpos[-2:] = self.goal_pos
         qvel = self.init_qvel + self.np_random.uniform(low=-0.005,
@@ -89,13 +95,15 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         self.set_state(qpos, qvel)
 
         if self.args.pusher_four_goal_dim:
-            self.goal = np.concatenate((self.get_body_com("goal")[:2], self.get_body_com("object")[:2]))
+            self.goal = np.concatenate((self.get_body_com("goal").copy()[:2], 
+                                        self.get_body_com("object").copy()[:2]))
         elif self.args.pusher_three_goal_dim:
-            self.goal = self.get_body_com("goal")
+            self.goal = self.get_body_com("goal").copy()
         elif self.args.pusher_two_goal_dim:
-            self.goal = self.get_body_com("goal")[:2]
+            self.goal = self.get_body_com("goal").copy()[:2]
         else:
-            self.goal = np.concatenate((self.get_body_com("goal"), self.get_body_com("object")))
+            self.goal = np.concatenate((self.get_body_com("goal").copy(), 
+                                        self.get_body_com("object").copy()))
 
         return self._get_obs()
 
@@ -103,8 +111,8 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         return np.concatenate([
             self.data.qpos.flat[:7],
             self.data.qvel.flat[:7],
-            self.get_body_com("tips_arm"),
-            self.get_body_com("object"),
+            self.get_body_com("tips_arm").copy(),
+            self.get_body_com("object").copy(),
         ])
 
     def reset(self):

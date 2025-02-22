@@ -262,12 +262,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if env_name == "SafePusher":
                         if args.pusher_four_goal_dim:
                             current_step_info["robot_pos"] = np.array(achieved_goal[2:4])
+                        elif args.pusher_three_goal_dim or args.pusher_two_goal_dim:
+                            current_step_info["robot_pos"] = np.array(state[14:16])
                         else:
                             current_step_info["robot_pos"] = np.array(achieved_goal[3:5])
                     else:
                         current_step_info["robot_pos"] = np.array(achieved_goal[:2])
                     if env_name == "SafePusher":
-                        if args.pusher_four_goal_dim:
+                        if args.pusher_four_goal_dim or args.pusher_three_goal_dim or args.pusher_two_goal_dim:
                             current_step_info["obj_pos"] = np.array(achieved_goal[:2])
                         else:
                             current_step_info["obj_pos"] = np.array(achieved_goal[:2])
@@ -287,6 +289,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                 if args.pusher_four_goal_dim:
                                         current_step_info["second_goal_pos"] = np.array(subgoal[2:4]) + \
                                                                     current_step_info["robot_pos"]
+                                elif args.pusher_three_goal_dim or args.pusher_two_goal_dim:
+                                    current_step_info["second_goal_pos"] = None
                                 else:
                                     current_step_info["second_goal_pos"] = np.array(subgoal[3:5]) + \
                                                                     current_step_info["robot_pos"]
@@ -1172,6 +1176,16 @@ def run_hrac(args):
                                 predict_env.save("./models", args.env_name, args.algo, exp_num)
 
                     if traj_buffer.full():
+                        for traj in traj_buffer.get_trajectory():
+                            print("traj[0]", traj[0])
+                        
+                        for i in range(len(controller_buffer.storage)):
+                            for val in controller_buffer.storage[i][:200]:
+                                print(f"idx: {i}:", val)
+                            
+                        assert 1 == 0
+
+
                         n_states, a_loss = update_amat_and_train_anet(n_states, adj_mat, state_list, 
                                                                       state_dict, a_net, traj_buffer,
                                                                       optimizer_r, controller_goal_dim, 
@@ -1192,7 +1206,7 @@ def run_hrac(args):
                 achieved_goal = obs["achieved_goal"]
 
                 traj_buffer.create_new_trajectory()
-                traj_buffer.append(achieved_goal.copy())
+                traj_buffer.append(achieved_goal)
                 if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                     if len(cost_model_buffer.trajectory) != 0:
                         cost_model_buffer.add_trajectory_to_buffer()
@@ -1261,7 +1275,7 @@ def run_hrac(args):
 
             if not args.train_only_td3:
                 manager_transition[-2].append(next_state)
-            traj_buffer.append(next_achieved_goal.copy())
+            traj_buffer.append(next_achieved_goal)
 
             if args.train_only_td3:
                 controller_goal = goal - next_achieved_goal

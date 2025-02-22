@@ -123,12 +123,12 @@ class CustomVideoRendered:
                 circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
                 self.render_info["ax_states"].add_patch(circle_robot)
                 self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj_g")
-
-                x = current_step_info["second_goal_pos"][0] + shift_x
-                y = current_step_info["second_goal_pos"][1] + shift_y
-                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
-                self.render_info["ax_states"].add_patch(circle_robot)
-                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "hand_g")
+                if not(current_step_info["second_goal_pos"] is None):
+                    x = current_step_info["second_goal_pos"][0] + shift_x
+                    y = current_step_info["second_goal_pos"][1] + shift_y
+                    circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                    self.render_info["ax_states"].add_patch(circle_robot)
+                    self.render_info["ax_states"].text(x + 0.05, y + 0.05, "hand_g")
             else:
                 x = current_step_info["subgoal_pos"][0] + shift_x
                 y = current_step_info["subgoal_pos"][1] + shift_y
