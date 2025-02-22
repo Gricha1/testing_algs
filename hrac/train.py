@@ -192,6 +192,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     if "goal_met" in info:
                         goals_achieved += 1
                         episode_goals_achieved += 1
+                elif "Pusher" in env_name:
+                    goals_achieved += 1.0 * info["is_success"]
+                    episode_goals_achieved += 1.0 * info["is_success"]
                 elif args.domain_name == "BulletSafeGym":
                     goals_achieved = 0
                     episode_goals_achieved = 0

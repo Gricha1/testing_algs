@@ -61,10 +61,22 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             self.goal_pos = np.asarray([-0.2, 0.3])
             self.cylinder_pos = np.array([-0.2, -1.1]) + np.random.normal(0, 0.025, [2])
         elif self.args.pusher_random_obj_start_poses:
-            l_u = (-0.45, -0.05)
-            l_d = (-0.45, -0.4)
-            r_d = (0.6, -0.4)
-            r_u = (0.6, -0.05)
+            #l_u = (-0.45, -0.05)
+            #l_d = (-0.45, -0.4)
+            #r_d = (0.6, -0.4)
+            #r_u = (0.6, -0.05)
+            """
+            l_d-------------l_u
+            |               |
+            |               |
+            |               |
+            r_d-------------r_u
+            """
+
+            l_u = (0.1, -0.2)
+            l_d = (0.1, -0.8)
+            r_d = (-0.3, -0.8)
+            r_u = (-0.3, 0.2)
 
             x_min = min(l_u[0], l_d[0], r_d[0], r_u[0])
             x_max = max(l_u[0], l_d[0], r_d[0], r_u[0])
@@ -74,7 +86,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             def generate_random_point():
                 x = random.uniform(x_min, x_max)
                 y = random.uniform(y_min, y_max)
-                return (y, x)
+                return (x, y)
 
             self.goal_pos = np.asarray(generate_random_point())
             self.cylinder_pos = np.asarray(generate_random_point())
@@ -85,7 +97,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
 
         # testing
         #self.goal_pos = np.asarray([0, -0.6])
-        #self.cylinder_pos = np.array([-0.25, 0])
+        #self.cylinder_pos = np.array([0.1, -0.2])
 
         qpos[-4:-2] = self.cylinder_pos
         qpos[-2:] = self.goal_pos

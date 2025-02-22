@@ -70,8 +70,10 @@ class GoalWrapper(Wrapper):
         else:
             raise NotImplementedError
 
-        # info['is_success'] = \
-        #    np.sqrt(np.sum(np.square(self.get_EE_pos(obs[None]) - self.goal))) <= self.distance_threshold
+        info['is_success'] = \
+           np.sqrt(np.sum(np.square(achieved_goal - self.env.goal))) <= self.distance_threshold
+        
+        done = done or info['is_success']
 
         return out, reward, done, info
 
