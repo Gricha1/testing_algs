@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
     # environment
     ## pusher
+    parser.add_argument("--pusher_hard_goal_dist", action="store_true", default=False)
     parser.add_argument("--pusher_random_obj_start_poses", action="store_true", default=False)
     parser.add_argument("--pusher_four_goal_dim", action="store_true", default=False)
     parser.add_argument("--pusher_three_goal_dim", action="store_true", default=False)
