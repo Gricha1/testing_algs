@@ -314,7 +314,7 @@ def create_env(args, renderer_args={}):
             max_episode_steps=100
         )
         import gym 
-        env = SafeFetch(gym.make("Pusher-v0", reward_shaping="dense"))
+        env = SafeFetch(gym.make("Pusher-v0", reward_shaping="dense"), args)
     else:
         raise NotImplementedError
     

@@ -13,11 +13,17 @@ from gym.envs.mujoco import mujoco_env
 class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def __init__(self, args):
         self.args = args
+        self.cost_func = None
+        self.setted_cost_func = False
         self.num_timesteps = 0
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
         self.reset_model()
+
+    def set_cost_func(self, cost_func):
+        self.cost_func = cost_func
+        self.setted_cost_func = True
 
     def step(self, a):
         self.num_timesteps += 1
@@ -113,31 +119,52 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
 
         #self.goal_pos = np.asarray([0.1, 0.0])
         #self.cylinder_pos = np.array([0.1, -0.8])
-
+        #self.goal_pos = np.asarray([0.0, 0.0])
+        #self.cylinder_pos = np.array([-0.1, -0.5])
+        
         qpos[-4:-2] = self.cylinder_pos
         qpos[-2:] = self.goal_pos
         qvel = self.init_qvel + self.np_random.uniform(low=-0.005,
-                                                       high=0.005, size=self.model.nv)
+                                                    high=0.005, size=self.model.nv)
         qvel[-4:] = 0
         self.set_state(qpos, qvel)
+        
+        if self.args.pusher_safe_env and self.setted_cost_func:
+            assert not(self.cost_func is None)
+            while not(self.cost_func(self.get_body_com("goal").copy()[:2]) == 0 
+                      and self.cost_func(self.get_body_com("object").copy()[:2]) == 0):
+                print("not safe obj pose, goal pos - do reset, obj:", self.goal_pos, "goal:", self.goal_pos)
+                self.goal_pos = np.asarray(generate_random_point())
+                self.cylinder_pos = np.asarray(generate_random_point())
+
+                qpos[-4:-2] = self.cylinder_pos
+                qpos[-2:] = self.goal_pos
+                qvel = self.init_qvel + self.np_random.uniform(low=-0.005,
+                                                            high=0.005, size=self.model.nv)
+                qvel[-4:] = 0
+                self.set_state(qpos, qvel)
 
         if self.args.pusher_four_goal_dim:
+            self.ac_goal_pos = np.concatenate((self.get_body_com("object").copy()[:2], 
+                                               self.get_body_com("tips_arm").copy()[:2]))
             self.goal = np.concatenate((self.get_body_com("goal").copy()[:2], 
                                         self.get_body_com("object").copy()[:2]))
         elif self.args.pusher_three_goal_dim:
+            self.ac_goal_pos = self.get_body_com("object").copy()
             self.goal = self.get_body_com("goal").copy()
         elif self.args.pusher_two_goal_dim:
+            self.ac_goal_pos = self.get_body_com("object").copy()[:2]
             self.goal = self.get_body_com("goal").copy()[:2]
         else:
-            self.goal = np.concatenate((self.get_body_com("goal").copy(), 
-                                        self.get_body_com("object").copy()))
+            self.ac_goal_pos = np.concatenate((self.get_body_com("object").copy(), self.get_body_com("tips_arm").copy()))
+            self.goal = np.concatenate((self.get_body_com("goal").copy(), self.get_body_com("object").copy()))
 
         return self._get_obs()
 
     def _get_obs(self):
         return np.concatenate([
-            self.data.qpos.flat[:7],
-            self.data.qvel.flat[:7],
+            self.data.qpos.flat[:7].copy(),
+            self.data.qvel.flat[:7].copy(),
             self.get_body_com("tips_arm").copy(),
             self.get_body_com("object").copy(),
         ])

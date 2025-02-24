@@ -13,9 +13,6 @@ class GoalWrapper(Wrapper):
         super(GoalWrapper, self).__init__(env)
         self.env_name = env_name
         ob_space = env.observation_space
-        
-        #high = np.array([np.inf, np.inf, np.inf])
-        #high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
         if args.pusher_four_goal_dim:
             high = np.array([np.inf, np.inf, np.inf, np.inf])
         elif args.pusher_three_goal_dim:

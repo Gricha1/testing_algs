@@ -554,7 +554,14 @@ def run_hrac(args):
             #low = np.array([-2.0, -2.0, -2.0])
             def phi(state):
                 # manipulator_pose = [-6:-3], obj_pose=[-3:]
-                return torch.cat((state[:, -3:], state[:, -6:-3]), dim=1)
+                if args.pusher_four_goal_dim:
+                    return torch.cat((state[:, -3:-1], state[:, -6:-4]), dim=1)
+                elif args.pusher_three_goal_dim:
+                    return state[:, -3:]
+                elif args.pusher_two_goal_dim:
+                    return state[:, -3:-1]
+                else:
+                    return torch.cat((state[:, -3:], state[:, -6:-3]), dim=1)
         else:
             low = np.array((-10, -10))
             def phi(state):

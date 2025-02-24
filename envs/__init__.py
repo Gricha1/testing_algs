@@ -224,12 +224,14 @@ class MultyEnvWithGoal(EnvWithGoal):
         return self.env.step(action)
     
 class SafeFetch:
-    def __init__(self, env):
+    def __init__(self, env, args):
         self.env = env
+        self.args = args
         self.render_info = {}
         self.render_info["shift_x"] = 0
         self.render_info["shift_y"] = 0
         self.safety_bounds = self.get_safety_bounds()
+        self.env.env.set_cost_func(self.cost_func)
 
     def seed(self, seed):
         self.env.seed(seed)
@@ -253,11 +255,22 @@ class SafeFetch:
         return self.env.action_space
 
     def reset(self):
-        return self.env.reset()
+        obs = self.env.reset()
+        #print("obs['achieved_goal'][:2]:", obs['achieved_goal'][:2])
+        #print("obs['desired_goal'][:2]:", obs['desired_goal'][:2])
+        #print("data.qpos:", self.env.env.data.qpos[-4:])
+        #print()
+        #if self.args.pusher_safe_env:
+        #    while not(self.cost_func(np.array(obs['achieved_goal'][:2])) == 0 
+        #            and self.cost_func(np.array(obs['desired_goal'][:2])) == 0):
+        #        obs = self.env.reset()
+        #        print("not safe obj pose, goal pos - do reset, obj:", 
+        #                    obs['achieved_goal'][:2], "goal:", obs['desired_goal'][:2])
+        return obs
     
     def step(self, action):
-        next_tup, rew, done, info = self.env.step(action)
-        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
+        next_tup, rew, done, info = self.env.step(action)        
+        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal'][:2]))
 
         return next_tup, rew, done, info
     
@@ -265,7 +278,9 @@ class SafeFetch:
         if len(state.shape) == 1:
             robot_x, robot_y = state[:2]
             cost = 0
-            if robot_y <= self.safety_bounds[1-1].y:
+            if robot_y <= self.safety_bounds[1-1].y or robot_y >= self.safety_bounds[8-1].y:
+                cost = 1
+            elif robot_x <= self.safety_bounds[1-1].x or robot_x >= self.safety_bounds[6-1].x:
                 cost = 1
             elif robot_x <= self.safety_bounds[4-1].x and robot_x >= self.safety_bounds[3-1].x:
                 if robot_y <= self.safety_bounds[3-1].y:
@@ -273,16 +288,12 @@ class SafeFetch:
         else:
             robot_x = state[:, 0]
             robot_y = state[:, 1]
-            cost = (robot_y <= self.safety_bounds[3-1].y)
-            cost = cost + (robot_y <= self.safety_bounds[1-1].y)
+            cost = (robot_y <= self.safety_bounds[1-1].y) + (robot_y >= self.safety_bounds[8-1].y)
+            cost = cost + (robot_x <= self.safety_bounds[1-1].x) + (robot_x >= self.safety_bounds[6-1].x)
             cost = cost + (robot_x <= self.safety_bounds[4-1].x) * (robot_x >= self.safety_bounds[3-1].x) * (robot_y <= self.safety_bounds[3-1].y)
             cost = (cost >= 1)
         
-        return 0
-    
-    #TODO
-    def success_fn(self, reward):
-        return 0
+        return cost
 
     def get_safety_bounds(self, get_safe_unsafe_dataset=False):
         def extrapolate_points(l):
@@ -302,13 +313,17 @@ class SafeFetch:
             #             [y1, y2, ... ]
             #           )
         """
-
-                             3---------------4
-                             |               |
-                             |               |
-                             |               |
-                             |               |
-        1--------------------2               5-----------6
+        8------------------------------------------------------7
+        |                                                      |
+        |                                                      |
+        |                                                      |
+        |                                                      |
+        |                    3---------------4                 |
+        |                    |               |                 |
+        |                    |               |                 |
+        |                    |               |                 |
+        |                    |               |                 |
+        1--------------------2               5-----------------6
         """
         #safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
         #safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
@@ -316,12 +331,14 @@ class SafeFetch:
         #safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
         #safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
         #safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
-        safety_point_6 = Point(1.5, -1)
-        safety_point_5 = Point(0.6, -1)
-        safety_point_4 = Point(0.6, 0.5)
-        safety_point_3 = Point(-0.5, 0.5)
-        safety_point_2 = Point(-0.5, -1)
-        safety_point_1 = Point(-1.5, -1)
+        safety_point_8 = Point(-0.7, 0.5)
+        safety_point_7 = Point(1.0, 0.5)
+        safety_point_6 = Point(1.0, -0.5)
+        safety_point_5 = Point(0.3, -0.5)
+        safety_point_4 = Point(0.3, 0.1)
+        safety_point_3 = Point(-0.2, 0.1)
+        safety_point_2 = Point(-0.2, -0.5)
+        safety_point_1 = Point(-0.7, -0.5)
         
         xs = []
         ys = []
@@ -364,6 +381,9 @@ class SafeFetch:
                            safety_point_4,
                            safety_point_5,
                            safety_point_6,
+                           safety_point_7,
+                           safety_point_8,
+                           safety_point_1,
                            ]
 
         return safety_boundary
