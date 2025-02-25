@@ -106,7 +106,7 @@ class CostModelTrajectoryBuffer(object):
         solving inbalanced data problem(too much safe states in SafetyGym)
     """
 
-    def __init__(self, maxsize, state_dim, goal_dim, lidar_observation, frame_stack_num=1):
+    def __init__(self, maxsize, state_dim, goal_dim, frame_stack_num=1):
         self.maxsize = maxsize
         self.frame_stack_num = frame_stack_num
         self.next_idx = 0
@@ -114,12 +114,6 @@ class CostModelTrajectoryBuffer(object):
         self.storage = [[] for _ in range(3)]
         self.name = "cost_trajectory_buffer"
         self.goal_dim = goal_dim
-        #if lidar_observation:
-        #    self.state_dim = 2
-        #    self.agent_obst_len = 16
-        #else:
-        #    self.state_dim = state_dim
-        #    self.agent_obst_len = 0
 
     def __len__(self):
         return len(self.storage[0])

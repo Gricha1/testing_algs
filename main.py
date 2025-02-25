@@ -92,7 +92,7 @@ if __name__ == "__main__":
     parser.add_argument("--automatic_delta_pseudo", action="store_true")
 
     # Manager Parameters
-    parser.add_argument("--manager_algo", default="td3_adj", type=str) # ["td3_adj", "td3_adj_safe_cls", "td3_adj_safe_cls_high_lag", "td3_adj_safe_cls_low_lag"]
+    parser.add_argument("--manager_algo", default="td3_adj", type=str) # ["none", "td3_adj", "td3_adj_safe_cls", "td3_adj_safe_cls_high_lag", "td3_adj_safe_cls_low_lag"]
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
@@ -112,7 +112,6 @@ if __name__ == "__main__":
     # Controller Parameters
     parser.add_argument("--sac_alpha", default=0.2, type=float)
     parser.add_argument("--controller_algo", default="td3", type=str)
-    parser.add_argument("--train_only_td3", action='store_true', default=False)
     parser.add_argument("--self_td3_reward", action='store_true', default=False)
     parser.add_argument("--controller_grad_clip", default=0, type=float)
     parser.add_argument("--ctrl_soft_sync_rate", default=0.005, type=float)
@@ -192,14 +191,16 @@ if __name__ == "__main__":
     if args.manager_algo == "td3_adj_safe_cls_high_lag":
         assert not "lag" in args.controller_algo
 
-    assert args.manager_algo in ["td3_adj", 
+    assert args.manager_algo in ["none",
+                                 "td3_adj", 
                                  "td3_adj_safe_cls", 
                                  "td3_adj_safe_cls_high_lag", 
                                  "td3_adj_safe_cls_low_lag"]
     assert args.algo in ["ites_hrac", "ites_higl", "hrac", "higl"]
     assert args.controller_algo in ["td3_img_safe_c_cost", 
                                     "td3_img_safe_lag", 
-                                    "td3_img_safe", 
+                                    "td3_img_safe",
+                                    "sac_img_safe", 
                                     "td3_lag", 
                                     "td3", 
                                     "sac_lag", 

@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import numpy as np
 from torch.distributions.normal import Normal
 
-#torch.set_default_tensor_type(torch.cuda.FloatTensor)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TensorWrapper:
@@ -391,10 +390,8 @@ class PredictEnv:
         state = get_tensor(x, to_device=False)
         action = get_tensor(u, to_device=False)
         next_state = get_tensor(y, to_device=False)
-
         delta_state = next_state - state
         inputs = np.concatenate((state, action), axis=-1)
-
         labels = delta_state.numpy()
         _, loss = self.model.train(inputs, labels, batch_size=batch_size, holdout_ratio=0.2)
         del state, action, next_state
@@ -407,8 +404,8 @@ class PredictEnv:
                 imagined_state = current_state
             else:
                 imagined_state = self.step(prev_imagined_state, 
-                                            prev_action, 
-                                            deterministic=True)
+                                           prev_action, 
+                                           deterministic=True)
         return imagined_state
 
     def _termination_fn(self, env_name, obs, act, next_obs):

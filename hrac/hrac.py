@@ -284,9 +284,7 @@ class Manager(object):
             safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
         if "high_lag" in self.args.manager_algo:
             safety_loss = self.cost_critic.Q1(state, goal, actions).mean()
-            actor_loss = (
-                    actor_loss + safety_loss * self._cost_penalty
-                ) / (1 + self._cost_penalty)
+            actor_loss = (actor_loss + safety_loss * self._cost_penalty) / (1 + self._cost_penalty)
         if "low_lag" in self.args.manager_algo:            
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(state), actions) 
             safety_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
@@ -546,15 +544,12 @@ class CostModel(object):
                        frame_stack_num, 
                        safe_model_loss_coef, lr, cm_hidden_size,
                        regression_cost_model=False,
-                       cost_memmory=False,
                        phi=None):
         self.lidar_observation = lidar_observation
         self.safe_model_loss_coef = safe_model_loss_coef        
         self.frame_stack_num = frame_stack_num
         self.state_dim = state_dim
         self.goal_dim = goal_dim
-        self.cost_memmory = cost_memmory
-        self.phi = phi
         #if self.lidar_observation:
         #    self.state_dim = 2
         #    self.agent_obst_len = 16       
@@ -579,8 +574,7 @@ class CostModel(object):
 
     def train_cost_model(self, replay_buffer, 
                          cost_model_iterations=10, 
-                         cost_model_batch_size=128,
-                         dataset=None):
+                         cost_model_batch_size=128):
         debug_info = {}
         debug_info["safe_model_loss"] = []
         debug_info["safe_model_mean_true"] = []
@@ -636,7 +630,6 @@ class Controller(object):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, actor_lr, hidden_size,
                  critic_lr, repr_dim=15, no_xy=True, policy_noise=0.2, noise_clip=0.5,
                  absolute_goal=False, 
-                 cost_function=None,
                  controller_grad_clip=0, controller_safety_coef=0, 
                  controller_cumul_img_safety=False,
                  img_horizon=10,
@@ -669,7 +662,6 @@ class Controller(object):
         self.controller_safety_coef = controller_safety_coef
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip
-        self.cost_function = cost_function
         if "lag" in self.algo or "low_lag" in self.args.manager_algo:
             self.safe_threshold = torch.tensor(safe_threshold)
             self._pid_kp = args.ctrl_pid_kp
@@ -876,16 +868,14 @@ class Controller(object):
         # cost loss
         if self.algo in ["td3_lag", "sac_lag"]:
             safety_loss = self.cost_critic.Q1(state, sg, action).mean()
-            actor_loss = (
-                actor_loss + safety_loss * self._cost_penalty
-            ) / (1 + self._cost_penalty)
+            actor_loss = (actor_loss + safety_loss * self._cost_penalty) / (1 + self._cost_penalty)
         elif "img_safe" in self.algo:
             safety_loss = self.state_safety_on_horizon(init_state, sg, 
-                                                        controller_policy=self, 
-                                                        cost_model=cost_model,
-                                                        all_steps_safety=self.controller_cumul_img_safety,
-                                                        train=self.controller_cumul_img_safety,
-                                                        predict_env=predict_env)
+                                                       controller_policy=self, 
+                                                       cost_model=cost_model,
+                                                       all_steps_safety=self.controller_cumul_img_safety,
+                                                       train=self.controller_cumul_img_safety,
+                                                       predict_env=predict_env)
             if "lag" in self.algo:
                 actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
             else:
@@ -1015,13 +1005,8 @@ class Controller(object):
             for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
                 target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
             if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
-                for param, target_param in zip(
-                    self.cost_critic.parameters(),
-                    self.cost_critic_target.parameters()
-                ):
-                    target_param.data.copy_(
-                        tau * param.data + (1 - tau) * target_param.data
-                    )
+                for param, target_param in zip(self.cost_critic.parameters(), self.cost_critic_target.parameters()):
+                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
             if "td3" in self.algo:
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)

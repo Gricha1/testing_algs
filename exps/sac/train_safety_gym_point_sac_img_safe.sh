@@ -15,7 +15,7 @@ python main.py --domain_name Safexp \
                --wm_n_initial_exploration_steps 30000 \
                --cost_model \
                --cost_model_batch_size 512 \
-               --controller_algo td3_img_safe \
+               --controller_algo sac_img_safe \
                --controller_safety_coef 0.001 \
                --img_horizon 10 \
                --validation_without_image --eval_freq 30000 \
