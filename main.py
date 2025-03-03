@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
     # environment
     ## pusher
+    parser.add_argument("--safe_env_hazards", action="store_true", default=False)
     parser.add_argument("--pusher_safe_env", action="store_true", default=False)
     parser.add_argument("--pusher_safe_env_hazards", action="store_true", default=False)
     parser.add_argument("--pusher_hard_goal_dist", action="store_true", default=False)
@@ -32,6 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--pusher_three_goal_dim", action="store_true", default=False)
     parser.add_argument("--pusher_two_goal_dim", action="store_true", default=False)
     parser.add_argument("--pusher_hard_task", action="store_true", default=False)
+    parser.add_argument("--pusher_sparse_reward", action="store_true", default=False)
 
     parser.add_argument("--max_timesteps", default=5e6, type=float)
     parser.add_argument("--eval_freq", default=100_000, type=float) # 300_000

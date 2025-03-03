@@ -61,18 +61,17 @@ class GoalWrapper(Wrapper):
             'observation': obs,
             'desired_goal': self.env.goal,
             'achieved_goal': achieved_goal}
-
-        if self.reward_shaping == 'dense':
-            reward = -np.sum(np.square(achieved_goal - self.env.goal))
-            reward -= 0.0001 * np.square(action).sum()
-        elif self.reward_shaping == 'sparse':
-            reward = sparse_reward
-        else:
-            raise NotImplementedError
+        
+        reward = -np.sum(np.square(achieved_goal - self.env.goal))
+        reward -= 0.0001 * np.square(action).sum()
 
         info['is_success'] = \
            np.sqrt(np.sum(np.square(achieved_goal - self.env.goal))) <= self.distance_threshold
         
+        if self.args.pusher_sparse_reward:
+            reward = 1.0 * info['is_success']
+            reward -= 0.0001 * np.square(action).sum()        
+
         done = done or info['is_success']
 
         return out, reward, done, info

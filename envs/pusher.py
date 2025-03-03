@@ -17,7 +17,10 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         self.setted_cost_func = False
         self.num_timesteps = 0
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher.xml' % dir_path, 4)
+        if self.args.safe_env_hazards:
+            mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher_hazards.xml' % dir_path, 4)
+        else:
+            mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
         self.reset_model()
 
@@ -119,9 +122,23 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
 
         #self.goal_pos = np.asarray([0.1, 0.0])
         #self.cylinder_pos = np.array([0.1, -0.8])
+            
         #self.goal_pos = np.asarray([0.0, 0.0])
         #self.cylinder_pos = np.array([-0.1, -0.5])
-        
+
+        # safe task 1    
+        #self.cylinder_pos = np.asarray([-0.3, 0.0])
+        #self.goal_pos = np.array([0.1, -0.8])
+
+        # safe task 1    
+        #self.cylinder_pos = np.asarray([-0.3, 0.0])
+        #self.goal_pos = np.array([0.4, 0.2])
+
+        if self.args.safe_env_hazards:
+            self.hazard_pos = np.asarray([0.3, 0.0])
+
+        if self.args.safe_env_hazards:
+            qpos[-6:-4] = self.hazard_pos
         qpos[-4:-2] = self.cylinder_pos
         qpos[-2:] = self.goal_pos
         qvel = self.init_qvel + self.np_random.uniform(low=-0.005,
