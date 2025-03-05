@@ -475,9 +475,6 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
         exp_num):
     print("train anet")
     for traj in traj_buffer.get_trajectory():
-        print("traj[0]:", traj[0])
-
-    for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
             adj_factor = args.adj_factor if (args.algo == "higl" or args.algo == "ites_higl") else 1
             for j in range(1, min(int(args.manager_propose_freq*adj_factor), len(traj) - i)):                
