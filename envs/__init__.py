@@ -256,16 +256,6 @@ class SafeFetch:
 
     def reset(self):
         obs = self.env.reset()
-        #print("obs['achieved_goal'][:2]:", obs['achieved_goal'][:2])
-        #print("obs['desired_goal'][:2]:", obs['desired_goal'][:2])
-        #print("data.qpos:", self.env.env.data.qpos[-4:])
-        #print()
-        #if self.args.pusher_safe_env:
-        #    while not(self.cost_func(np.array(obs['achieved_goal'][:2])) == 0 
-        #            and self.cost_func(np.array(obs['desired_goal'][:2])) == 0):
-        #        obs = self.env.reset()
-        #        print("not safe obj pose, goal pos - do reset, obj:", 
-        #                    obs['achieved_goal'][:2], "goal:", obs['desired_goal'][:2])
         return obs
     
     def step(self, action):
@@ -325,12 +315,7 @@ class SafeFetch:
         |                    |               |                 |
         1--------------------2               5-----------------6
         """
-        #safety_point_9 = Point(0.03229626534308827 + 17.5, -0.06590457330324587 + 18)
-        #safety_point_8 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 18)
-        #safety_point_7 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 14)
-        #safety_point_6 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 14)
-        #safety_point_5 = Point(0.03229626534308827 + 14, -0.06590457330324587 + 2)
-        #safety_point_4 = Point(0.03229626534308827 - 2, -0.06590457330324587 + 2)
+        """
         safety_point_8 = Point(-0.7, 0.5)
         safety_point_7 = Point(1.0, 0.5)
         safety_point_6 = Point(1.0, -0.5)
@@ -339,16 +324,19 @@ class SafeFetch:
         safety_point_3 = Point(-0.2, 0.1)
         safety_point_2 = Point(-0.2, -0.5)
         safety_point_1 = Point(-0.7, -0.5)
+        """
+        safety_point_8 = Point(-0.35, 0.05)
+        safety_point_7 = Point(0.65, 0.05)
+        safety_point_6 = Point(0.65, -0.4)
+        safety_point_5 = Point(0.35, -0.4)
+        safety_point_4 = Point(0.35, -0.15)
+        safety_point_3 = Point(-0.15, -0.15)
+        safety_point_2 = Point(-0.15, -0.4)
+        safety_point_1 = Point(-0.35, -0.4)
         
         xs = []
         ys = []
         # usafe states
-        #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
-        #xs.append((safety_point_5.x - 1, safety_point_5.y + 1))
-        #xs.append((safety_point_6.x - 1, safety_point_6.y - 1))
-        #xs.append((safety_point_7.x - 1, safety_point_7.y - 1))
-        #xs.append((safety_point_8.x - 1, safety_point_8.y + 1))
-        #xs.append((safety_point_9.x + 1, safety_point_9.y + 1))
         xs.append((safety_point_2.x, safety_point_2.y))
         xs.append((safety_point_3.x, safety_point_3.y))
         xs.append((safety_point_4.x, safety_point_4.y))

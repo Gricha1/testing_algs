@@ -475,6 +475,9 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
         exp_num):
     print("train anet")
     for traj in traj_buffer.get_trajectory():
+        print("traj[0]:", traj[0])
+
+    for traj in traj_buffer.get_trajectory():
         for i in range(len(traj)):
             adj_factor = args.adj_factor if (args.algo == "higl" or args.algo == "ites_higl") else 1
             for j in range(1, min(int(args.manager_propose_freq*adj_factor), len(traj) - i)):                
@@ -492,7 +495,7 @@ def update_amat_and_train_anet(n_states, adj_mat, state_list, state_dict, a_net,
                 s_i = (s_i) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
                 s_i_j = (s_i_j) * args.a_net_discretization_koef # from -1.5, 1.5 to -15, 15
                 s1 = tuple(np.round(s_i).astype(np.int32))
-                s2 = tuple(np.round(s_i_j).astype(np.int32))
+                s2 = tuple(np.round(s_i_j).astype(np.int32))                
                 if s1 not in state_list:
                     state_list.append(s1)
                     state_dict[s1] = n_states

@@ -9,6 +9,23 @@ import numpy as np
 from gym import utils
 from gym.envs.mujoco import mujoco_env
 
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+    @property
+    def x(self):
+        return self._x
+    @property
+    def y(self):
+        return self._y
+    @x.setter
+    def x(self, x):
+        self._x = x
+    @y.setter
+    def y(self, y):
+        self._y = y
+
 
 class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def __init__(self, args):
@@ -82,10 +99,10 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             r_d-------------r_u
             """
 
-            l_u = (0.1, -0.2)
+            l_u = (0.1, 0.2)
             l_d = (0.1, -0.8)
             r_d = (-0.3, -0.8)
-            r_u = (-0.3, 0.2)
+            r_u = (-0.3, -0.2)
 
             x_min = min(l_u[0], l_d[0], r_d[0], r_u[0])
             x_max = max(l_u[0], l_d[0], r_d[0], r_u[0])
@@ -133,6 +150,46 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         # safe task 1    
         #self.cylinder_pos = np.asarray([-0.3, 0.0])
         #self.goal_pos = np.array([0.4, 0.2])
+            
+        """
+        safe zone:
+            8------------------------------------------------------7
+            |                                                      |
+            |                                                      |
+            |                                                      |
+            |                                                      |
+            |                    3---------------4                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            1--------------------2               5-----------------6
+        """
+        if self.args.pusher_safe_env:
+            assert self.args.pusher_random_obj_start_poses
+            safe_pos_1 = Point(-0.35, -0.8)
+            safe_pos_2 = Point(-0.35, -0.6)
+            safe_pos_3 = Point(-0.1, -0.6)
+            safe_pos_4 = Point(-0.1, -0.1)
+            safe_pos_5 = Point(-0.35, -0.1)
+            safe_pos_6 = Point(-0.35, 0.2)
+            safe_pos_7 = Point(0.1, 0.2)
+            safe_pos_8 = Point(0.1, -0.8)
+            safe_points = [None, safe_pos_1, safe_pos_2, safe_pos_3, 
+                                safe_pos_4, safe_pos_5, safe_pos_6, 
+                                safe_pos_7, safe_pos_8]
+            def is_safe_state(state, safe_points):
+                if state[0] < safe_points[1].x or state[0] > safe_points[8].x:
+                    return False
+                if state[1] < safe_points[1].y or state[1] > safe_points[7].y:
+                    return False
+                if state[0] < safe_points[3].x and state[1] > safe_points[3].y and state[1] < safe_points[4].y:
+                    return False
+                return True
+
+            while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
+                self.goal_pos = np.asarray(generate_random_point())
+                self.cylinder_pos = np.asarray(generate_random_point())
 
         if self.args.safe_env_hazards:
             self.hazard_pos = np.asarray([0.3, 0.0])
@@ -145,21 +202,6 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
                                                     high=0.005, size=self.model.nv)
         qvel[-4:] = 0
         self.set_state(qpos, qvel)
-        
-        if self.args.pusher_safe_env and self.setted_cost_func:
-            assert not(self.cost_func is None)
-            while not(self.cost_func(self.get_body_com("goal").copy()[:2]) == 0 
-                      and self.cost_func(self.get_body_com("object").copy()[:2]) == 0):
-                print("not safe obj pose, goal pos - do reset, obj:", self.goal_pos, "goal:", self.goal_pos)
-                self.goal_pos = np.asarray(generate_random_point())
-                self.cylinder_pos = np.asarray(generate_random_point())
-
-                qpos[-4:-2] = self.cylinder_pos
-                qpos[-2:] = self.goal_pos
-                qvel = self.init_qvel + self.np_random.uniform(low=-0.005,
-                                                            high=0.005, size=self.model.nv)
-                qvel[-4:] = 0
-                self.set_state(qpos, qvel)
 
         if self.args.pusher_four_goal_dim:
             self.ac_goal_pos = np.concatenate((self.get_body_com("object").copy()[:2], 
