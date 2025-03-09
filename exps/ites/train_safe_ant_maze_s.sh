@@ -6,7 +6,7 @@ fi
 
 cd ../..
 python main.py --seed $seed \
-               --env_name SafeAntMazeC \
+               --env_name SafeAntMazeS \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
                --man_rew_scale 0.1 \
