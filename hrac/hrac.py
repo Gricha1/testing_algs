@@ -456,7 +456,8 @@ class Manager(object):
                         ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
                         self.set_delta(ag2sel)
 
-                actor_loss, goal_loss, safety_subgoals_loss, ld_loss, scaled_norm_direction = self.actor_loss(state, achieved_goal, goal,
+                actor_loss, goal_loss, safety_subgoals_loss, ld_loss, scaled_norm_direction = self.actor_loss(
+                                                                                        state, achieved_goal, goal,
                                                                                         a_net, r_margin, cost_model,
                                                                                         selected_landmark,
                                                                                         self.no_pseudo_landmark,

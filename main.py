@@ -77,9 +77,9 @@ if __name__ == "__main__":
     parser.add_argument("--initial_sample", type=int, default=1000)
     parser.add_argument("--goal_thr", type=float, default=-10.)
     parser.add_argument("--planner_start_step", type=int, default=60000)
-
     # HIGL: Novelty
-    parser.add_argument("--novelty_algo", type=str, default="none", choices=["rnd", "none"])
+    #parser.add_argument("--novelty_algo", type=str, default="none", choices=["rnd", "none"])
+    parser.add_argument("--novelty_algo", type=str, default="rnd")
     parser.add_argument("--use_novelty_landmark", action="store_true")
     parser.add_argument("--close_thr", type=float, default=0.2)
     parser.add_argument("--n_landmark_novelty", type=int, default=20)
@@ -87,8 +87,7 @@ if __name__ == "__main__":
     parser.add_argument("--rnd_lr", type=float, default=1e-3)
     parser.add_argument("--rnd_batch_size", default=128, type=int)
     parser.add_argument("--use_ag_as_input", action="store_true")
-
-    # Ablation
+    # HIGL: Ablation
     parser.add_argument("--no_pseudo_landmark", action="store_true")
     parser.add_argument("--discard_by_anet", action="store_true")
     parser.add_argument("--automatic_delta_pseudo", action="store_true")
