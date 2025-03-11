@@ -14,6 +14,8 @@ if __name__ == "__main__":
     parser.add_argument("--validate_img_states", action="store_true", default=False)
     
     parser.add_argument("--load", action="store_true", default=False)
+    parser.add_argument("--load_without_cost_model", action="store_true", default=False)
+    parser.add_argument("--load_without_world_model", action="store_true", default=False)
     parser.add_argument("--loaded_exp_num", default=0, type=str)
     parser.add_argument("--log_dir", default="./logs", type=str)
     parser.add_argument("--save_models", default=True, type=bool)

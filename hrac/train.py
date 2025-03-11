@@ -911,13 +911,13 @@ def run_hrac(args):
         try:
             if not args.manager_algo == "none":
                 manager_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
-            if args.cost_model:
+            if args.cost_model and not args.load_without_cost_model:
                 cost_model.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
-            if args.world_model:
+            if args.world_model and not args.load_without_world_model:
                 predict_env.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             controller_policy.load("./models", args.env_name, args.algo, exp_num=args.loaded_exp_num)
             print("Loaded successfully.")
-            just_loaded = True
+            just_loaded = False
         except Exception as e:
             just_loaded = False
             print(e, "Loading failed.")

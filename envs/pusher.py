@@ -120,36 +120,6 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         else:
             self.goal_pos = np.asarray([0, 0])
             self.cylinder_pos = np.array([-0.25, 0.15]) + np.random.normal(0, 0.025, [2])
-
-        # testing
-        #self.goal_pos = np.asarray([0, -0.6])
-        #self.cylinder_pos = np.array([0, 0.15])
-            
-        #self.goal_pos = np.asarray([0.1, -0.8])
-        #self.cylinder_pos = np.array([-0.1, 0.0])
-            
-        #self.goal_pos = np.asarray([-0.1, -0.8])
-        #self.cylinder_pos = np.array([-0.1, 0.0])
-            
-        #self.goal_pos = np.asarray([-0.1, 0.0])
-        #self.cylinder_pos = np.array([-0.1, -0.8])
-            
-        #self.goal_pos = np.asarray([-0.1, 0.0])
-        #self.cylinder_pos = np.array([0.1, -0.8])
-
-        #self.goal_pos = np.asarray([0.1, 0.0])
-        #self.cylinder_pos = np.array([0.1, -0.8])
-            
-        #self.goal_pos = np.asarray([0.0, 0.0])
-        #self.cylinder_pos = np.array([-0.1, -0.5])
-
-        # safe task 1    
-        #self.cylinder_pos = np.asarray([-0.3, 0.0])
-        #self.goal_pos = np.array([0.1, -0.8])
-
-        # safe task 1    
-        #self.cylinder_pos = np.asarray([-0.3, 0.0])
-        #self.goal_pos = np.array([0.4, 0.2])
             
         """
         safe zone:
@@ -190,6 +160,37 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
                 self.goal_pos = np.asarray(generate_random_point())
                 self.cylinder_pos = np.asarray(generate_random_point())
+
+        # testing
+        #self.goal_pos = np.asarray([0, -0.6])
+        #self.cylinder_pos = np.array([0, 0.15])
+            
+        #self.goal_pos = np.asarray([0.1, -0.8])
+        #self.cylinder_pos = np.array([-0.1, 0.0])
+            
+        #self.goal_pos = np.asarray([-0.1, -0.8])
+        #self.cylinder_pos = np.array([-0.1, 0.0])
+            
+        #self.goal_pos = np.asarray([-0.1, 0.0])
+        #self.cylinder_pos = np.array([-0.1, -0.8])
+            
+        #self.goal_pos = np.asarray([-0.1, 0.0])
+        #self.cylinder_pos = np.array([0.1, -0.8])
+
+        #self.goal_pos = np.asarray([0.1, 0.0])
+        #self.cylinder_pos = np.array([0.1, -0.8])
+            
+        #self.goal_pos = np.asarray([0.0, 0.0])
+        #self.cylinder_pos = np.array([-0.1, -0.5])
+
+        # safe task 1    
+        #self.cylinder_pos = np.asarray([-0.3, 0.0])
+        #self.goal_pos = np.array([0.1, -0.8])
+
+        # safe task 1    
+        #self.cylinder_pos = np.asarray([-0.3, 0.0])
+        #self.goal_pos = np.array([0.4, 0.2])
+
 
         if self.args.safe_env_hazards:
             self.hazard_pos = np.asarray([0.3, 0.0])
