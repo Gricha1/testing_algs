@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic, ControllerSafeModel, RndPredictor
+    ManagerActor, ManagerCritic, ControllerSafeModel, RndPredictor, ControllerRewardModel
 
 from hrac.world_models import EnsembleDynamicsModel, PredictEnv
 from planner.goal_plan import Planner
@@ -155,6 +155,17 @@ class Manager(object):
         self.n_landmark_cov = n_landmark_cov
         self.planner_initial_sample = planner_initial_sample
         self.planner_goal_thr = planner_goal_thr
+
+
+    def subgoal_transition(self, achieved_goal, subgoal, next_achieved_goal):
+        if self.absolute_goal:
+            return subgoal
+        else:
+            if len(achieved_goal.shape) == 1:  # check if batched
+                return achieved_goal + subgoal - next_achieved_goal
+            else:
+                return achieved_goal + subgoal -\
+                       next_achieved_goal
     
     def init_planner(self):
         self.planner = Planner(landmark_cov_sampling=self.planner_cov_sampling,
@@ -536,6 +547,88 @@ class Manager(object):
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
         self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
+
+
+class RewardModel(object):
+    """
+        phi: G x S -> [0, 1]
+    """
+    def __init__(self, state_dim, goal_dim, action_dim, lidar_observation, 
+                       frame_stack_num, 
+                       safe_model_loss_coef, lr, cm_hidden_size,
+                       regression_cost_model=False,
+                       phi=None):
+        self.lidar_observation = lidar_observation
+        self.reward_model_loss_coef = safe_model_loss_coef        
+        self.frame_stack_num = frame_stack_num
+        self.state_dim = state_dim
+        self.goal_dim = goal_dim
+        self.action_dim = action_dim
+        #if self.lidar_observation:
+        #    self.state_dim = 2
+        #    self.agent_obst_len = 16       
+        #    self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
+        #else:
+        #    self.state_dim = state_dim
+        #    self.agent_obst_len = 0
+        #    if self.cost_memmory:
+        #        self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
+        #    else:
+        self.reward_model = ControllerRewardModel(self.goal_dim, 
+                                                  self.state_dim * self.frame_stack_num,
+                                                  self.action_dim, 
+                                                  cm_hidden_size).to(device)
+        
+        self.reward_model_criterion = nn.MSELoss()        
+        self.reward_model_optimizer = torch.optim.Adam(self.reward_model.parameters(),
+                                                     lr=lr, weight_decay=0.0001)
+        
+    def predict(self, goal, state, action):
+        return self.reward_model(goal, state, action)
+
+    def train_reward_model(self, replay_buffer, 
+                           reward_model_iterations=10, 
+                           reward_model_batch_size=128):
+        debug_info = {}
+        debug_info["reward_model_loss"] = []
+        debug_info["reward_model_mean_true"] = []
+        debug_info["reward_model_mean_pred"] = []
+        for _ in range(reward_model_iterations):
+            x, y, x_ag, y_ag, g, u, r, d, _, _ = replay_buffer.sample(reward_model_batch_size)
+            goal = get_tensor(g, to_device=False) # cost for the next_state
+            goal_device = goal.to(device)
+            state = get_tensor(x, to_device=False) # cost for the next_state
+            state_device = state.to(device)
+            reward = get_tensor(r, to_device=False)
+            reward_device = reward.to(device)
+            action = get_tensor(u, to_device=False)
+            action_device = action.to(device)
+
+            reward_model_loss, true, pred = self.train_batch_reward_model(goal_device, state_device, 
+                                                                        reward_device, action_device)
+            debug_info["reward_model_loss"].append(reward_model_loss.mean().cpu().detach())
+            debug_info["reward_model_mean_true"].append(true.float().mean().cpu().detach())
+            debug_info["reward_model_mean_pred"].append(pred.float().mean().cpu().detach())
+        return debug_info
+    
+    def train_batch_reward_model(self, goal, state, reward, action):
+        pred = self.reward_model(goal, state, action)
+        true = reward
+        reward_model_loss = self.reward_model_loss_coef * self.reward_model_criterion(pred, true)
+        
+        self.reward_model_optimizer.zero_grad()
+        reward_model_loss.backward()
+        self.reward_model_optimizer.step()
+
+        return reward_model_loss, true, pred
+    
+
+    def save(self, dir, env_name, algo, exp_num):
+        torch.save(self.safe_model.state_dict(), "{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo))
+        
+    def load(self, dir, env_name, algo, exp_num):
+        self.safe_model.load_state_dict(torch.load("{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo)))
+
                 
 class CostModel(object):
     """
@@ -581,35 +674,23 @@ class CostModel(object):
         debug_info["safe_model_mean_true"] = []
         debug_info["safe_model_mean_pred"] = []
         for _ in range(cost_model_iterations):
-            if replay_buffer.name == "cost_trajectory_buffer":
-                g, x, c = replay_buffer.sample(cost_model_batch_size)
-                goal = get_tensor(g, to_device=False)
-                goal_device = goal.to(device)
-                state = get_tensor(x, to_device=False)
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
-            elif replay_buffer.cost_memmory:
-                x, y, x_ag, y_ag, sg, u, r, c, d, _, _ = replay_buffer.sample(cost_model_batch_size)
-                if not self.cost_memmory:
-                    y = np.concatenate((y[:, :self.goal_dim], y), axis=1)
-                goal = get_tensor(x_ag, to_device=False) # cost for the next_state
-                goal_device = goal.to(device)
-                state = get_tensor(y, to_device=False) # cost for the next_state
-                state_device = state.to(device)
-                cost = get_tensor(c, to_device=False)
-                cost_device = cost.to(device)
-            else:
-                assert 1 == 0
+            assert replay_buffer.name == "cost_trajectory_buffer"
+            ac_g, x, c = replay_buffer.sample(cost_model_batch_size)
+            ac_goal = get_tensor(ac_g, to_device=False)
+            ac_goal_goal_device = ac_goal.to(device)
+            state = get_tensor(x, to_device=False)
+            state_device = state.to(device)
+            cost = get_tensor(c, to_device=False)
+            cost_device = cost.to(device)
 
-            safe_model_loss, true, pred = self.train_batch_cost_model(goal_device, state_device, cost_device)
+            safe_model_loss, true, pred = self.train_batch_cost_model(ac_goal_goal_device, state_device, cost_device)
             debug_info["safe_model_loss"].append(safe_model_loss.mean().cpu().detach())
             debug_info["safe_model_mean_true"].append(true.float().mean().cpu().detach())
             debug_info["safe_model_mean_pred"].append(pred.float().mean().cpu().detach())
         return debug_info
     
-    def train_batch_cost_model(self, goal, state, cost):
-        pred = self.safe_model(goal, state)
+    def train_batch_cost_model(self, ac_goal, state, cost):
+        pred = self.safe_model(ac_goal, state)
         true = cost
         safe_model_loss = self.safe_model_loss_coef * self.safe_model_criterion(pred, true)
         
@@ -652,7 +733,6 @@ class Controller(object):
         self.no_xy = no_xy
         self.policy_noise = policy_noise
         self.noise_clip = noise_clip
-        self.absolute_goal = absolute_goal
         self.criterion = nn.SmoothL1Loss()  
         self.controller_cumul_img_safety = controller_cumul_img_safety
         self.algo = algo
@@ -759,7 +839,8 @@ class Controller(object):
                                 all_steps_safety=False, 
                                 train=False,
                                 predict_env=None,
-                                return_img_states=False):
+                                return_img_states=False,
+                                manager_policy=None):
 
         assert not(predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
@@ -823,7 +904,7 @@ class Controller(object):
                 """
                 safety = safety_cost(self.phi(next_img_state), next_img_state)
                 safeties.append(safety)
-            manager_proposed_goal = controller_policy.subgoal_transition(self.phi(img_state), 
+            manager_proposed_goal = manager_policy.subgoal_transition(self.phi(img_state), 
                                                                          manager_proposed_goal, 
                                                                          self.phi(next_img_state))
             h += 1
@@ -856,7 +937,7 @@ class Controller(object):
             return safety, img_states
         return safety
 
-    def actor_loss(self, state, sg, init_state, cost_model, predict_env):
+    def actor_loss(self, state, sg, init_state, cost_model, predict_env, manager_policy):
         # reward loss
         if "td3" in self.algo:
             action = self.actor(state, sg)
@@ -876,23 +957,14 @@ class Controller(object):
                                                        cost_model=cost_model,
                                                        all_steps_safety=self.controller_cumul_img_safety,
                                                        train=self.controller_cumul_img_safety,
-                                                       predict_env=predict_env)
+                                                       predict_env=predict_env, 
+                                                       manager_policy=manager_policy)
             if "lag" in self.algo:
                 actor_loss = (actor_loss + self._cost_penalty * safety_loss.mean()) / (1 + self._cost_penalty)
             else:
                 actor_loss += self.controller_safety_coef * safety_loss.mean()
    
         return actor_loss
-
-    def subgoal_transition(self, achieved_goal, subgoal, next_achieved_goal):
-        if self.absolute_goal:
-            return subgoal
-        else:
-            if len(achieved_goal.shape) == 1:  # check if batched
-                return achieved_goal + subgoal - next_achieved_goal
-            else:
-                return achieved_goal + subgoal -\
-                       next_achieved_goal
 
     def multi_subgoal_transition(self, states, subgoal):
         assert 1 == 0, "achieved goal instead of states should be"
@@ -914,7 +986,7 @@ class Controller(object):
         self._cost_penalty = max(0.0, pid_o)
         self._cost_ds.append(self._cost_d)
 
-    def train(self, replay_buffer, cost_model, predict_env, iterations, 
+    def train(self, replay_buffer, cost_model, predict_env, manager_policy, iterations, 
               batch_size=100, discount=0.99, tau=0.005, ep_cost=None):
         avg_act_loss, avg_crit_loss = 0., 0.
         if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
@@ -926,7 +998,7 @@ class Controller(object):
             else:
                 x, y, x_ag, y_ag, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
-            next_g = get_tensor(self.subgoal_transition(x_ag, sg, y_ag))
+            next_g = get_tensor(manager_policy.subgoal_transition(x_ag, sg, y_ag))
             state = self.clean_obs(get_tensor(x))
             action = get_tensor(u)
             sg = get_tensor(sg)
@@ -987,7 +1059,7 @@ class Controller(object):
                 self.cost_critic_optimizer.step()
 
             # Compute actor loss
-            actor_loss = self.actor_loss(state, sg, init_state, cost_model, predict_env)
+            actor_loss = self.actor_loss(state, sg, init_state, cost_model, predict_env, manager_policy)
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()

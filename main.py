@@ -23,6 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
     parser.add_argument("--sparce_reward", action="store_true")
+    parser.add_argument("--cost_budget", default=25, type=float)
 
     # environment
     ## pusher
@@ -113,6 +114,7 @@ if __name__ == "__main__":
     parser.add_argument("--man_hidden_size", default=300, type=int)
 
     # Controller Parameters
+    parser.add_argument("--ctr_cem", action='store_true', default=False)
     parser.add_argument("--sac_alpha", default=0.2, type=float)
     parser.add_argument("--controller_algo", default="td3", type=str)
     parser.add_argument("--self_td3_reward", action='store_true', default=False)
@@ -133,6 +135,7 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
     ## Cost Model Parameters
+    parser.add_argument("--reward_model", action='store_true', default=False)
     parser.add_argument("--cost_model", action='store_true', default=False)
     parser.add_argument("--regression_cost_model", action='store_true', default=False)
     parser.add_argument("--cm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
@@ -152,7 +155,6 @@ if __name__ == "__main__":
     parser.add_argument("--controller_curriculum_safety_coef", default=4000., type=float)
     parser.add_argument("--controller_cumul_img_safety", action='store_true', default=False)
     parser.add_argument("--controller_safety_coef", default=4000., type=float)
-    parser.add_argument("--cost_budget", default=25, type=float)
     parser.add_argument("--ctrl_pid_kp", default=1e-6, type=float)
     parser.add_argument("--ctrl_pid_ki", default=1e-7, type=float)
     parser.add_argument("--ctrl_pid_kd", default=1e-7, type=float)
@@ -165,8 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--wm_pretrain_epoches", default=20, type=int) # to avoid wm explosion in beggining
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--wm_batch_size", default=256, type=int)
-    parser.add_argument("--wm_train_freq", default=20, type=int)
-    parser.add_argument("--cost_memmory", action='store_true', default=False)
+    parser.add_argument("--wm_train_freq", default=20, type=int)    
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)
@@ -215,6 +216,9 @@ if __name__ == "__main__":
         assert args.controller_cumul_img_safety
     if "img_safe" in args.controller_algo:
         args.img_horizon <= args.manager_propose_freq
+
+    if args.reward_model:
+        assert args.world_model
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
         args.man_rew_scale = 1.0

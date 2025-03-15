@@ -111,6 +111,21 @@ class Critic(nn.Module):
         return x1
     
 
+class RewardCritic(nn.Module):
+    def __init__(self, state_dim, hidden_dim=300):
+        super().__init__()
+
+        self.l1 = nn.Linear(state_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, hidden_dim)
+        self.l3 = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x1 = F.relu(self.l1(x))
+        x1 = F.relu(self.l2(x1))
+        x1 = self.l3(x1)
+
+        return x1
+
 class SafeCritic(nn.Module):
     def __init__(self, state_dim, hidden_dim=300):
         super().__init__()
@@ -126,6 +141,14 @@ class SafeCritic(nn.Module):
 
         return torch.sigmoid(x1)
 
+class ControllerRewardModel(nn.Module):
+    def __init__(self, goal_dim, state_dim, action_dim, hidden_dim):
+        super().__init__()
+
+        self.critic = RewardCritic(goal_dim + state_dim + action_dim, hidden_dim=hidden_dim)
+    
+    def forward(self, g, x, u):
+        return self.critic(torch.cat([g, x, u], 1))
 
 class ControllerSafeModel(nn.Module):
     def __init__(self, goal_dim, state_dim, hidden_dim):
