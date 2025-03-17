@@ -232,6 +232,7 @@ class Manager(object):
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False, 
                    controller_policy=None):
         actions = self.actor(state, goal)
+
         # HRAC high level reward loss
         if self.args.noise_man_training:
             actions = torch.clamp(actions + torch.normal(mean=0, 
@@ -270,16 +271,15 @@ class Manager(object):
             safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
         if "high_lag" in self.args.manager_algo:
             safety_lag_loss = self.cost_critic.Q1(state, goal, actions).mean()
-            actor_loss = (actor_loss + safety_lag_loss * self._cost_penalty) / (1 + self._cost_penalty)
         if "low_lag" in self.args.manager_algo:            
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(state), actions) 
             safety_lag_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
-            actor_loss = (
-                    actor_loss + safety_lag_loss * self._cost_penalty
-                ) / (1 + self._cost_penalty)
-        if "safe_cls" in self.args.manager_algo:
-            actor_loss = actor_loss + safety_subgoal_cls_loss
-        return actor_loss, goal_loss, safety_subgoal_cls_loss + safety_lag_loss, ld_loss, scaled_norm_direction
+
+        return actor_loss, \
+               goal_loss, \
+               {"safety_subgoal_cls_loss": safety_subgoal_cls_loss, 
+                "safety_lag_loss": safety_lag_loss}, \
+               ld_loss, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -360,7 +360,7 @@ class Manager(object):
             next_state = get_tensor(y)
             achieved_goal = get_tensor(x_ag)
             next_achieved_goal = get_tensor(y_ag)
-            # print(g)
+        
             goal = get_tensor(g)
             subgoal = get_tensor(sg)
 
@@ -420,14 +420,12 @@ class Manager(object):
             # Compute actor loss
             if self.algo == "hrac":
                 assert a_net is not None
-
-                actor_loss, goal_loss, safety_subgoals_loss, _, _ = \
+                actor_loss, goal_loss, safety_loss, _, _ = \
                     self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, 
                                     selected_landmark=None, controller_policy=controller_policy)
                 
             elif self.algo == "higl":
                 assert a_net is not None
-
                 if self.planner is None:  # If planner is not ready
                     selected_landmark = torch.ones(len(state), self.action_dim).to(device)
                     selected_landmark *= float("inf")  # Build dummy selected landmark
@@ -442,7 +440,7 @@ class Manager(object):
                         ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
                         self.set_delta(ag2sel)
 
-                actor_loss, goal_loss, safety_subgoals_loss, ld_loss, scaled_norm_direction = self.actor_loss(
+                actor_loss, goal_loss, safety_loss, ld_loss, scaled_norm_direction = self.actor_loss(
                                                                                         state, achieved_goal, goal,
                                                                                         a_net, r_margin, cost_model,
                                                                                         selected_landmark,
@@ -456,6 +454,10 @@ class Manager(object):
 
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
+            if "lag" in self.args.manager_algo: 
+                actor_loss = (actor_loss + safety_loss["safety_lag_loss"] * self._cost_penalty) / (1 + self._cost_penalty)
+            if "safe_cls" in self.args.manager_algo:
+                actor_loss = actor_loss + safety_loss["safety_subgoal_cls_loss"]
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()
@@ -475,7 +477,7 @@ class Manager(object):
             if a_net is not None:
                 avg_goal_loss += goal_loss
             if "safe_cls" in self.args.manager_algo:
-                avg_safety_subgoals_loss += safety_subgoals_loss
+                avg_safety_subgoals_loss += sum([loss_s.item() for _, loss_s in safety_loss.items()])
 
             # Update the frozen target models
             for param, target_param in zip(self.critic.parameters(),
@@ -526,7 +528,8 @@ class Manager(object):
 
 class RewardModel(object):
     """
-        phi: G x S -> [0, 1]
+        reward_model: G x S -> R
+        phi: S -> G
     """
     def __init__(self, state_dim, goal_dim, action_dim, lidar_observation, 
                        frame_stack_num, 
@@ -539,16 +542,6 @@ class RewardModel(object):
         self.state_dim = state_dim
         self.goal_dim = goal_dim
         self.action_dim = action_dim
-        #if self.lidar_observation:
-        #    self.state_dim = 2
-        #    self.agent_obst_len = 16       
-        #    self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
-        #else:
-        #    self.state_dim = state_dim
-        #    self.agent_obst_len = 0
-        #    if self.cost_memmory:
-        #        self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
-        #    else:
         self.reward_model = ControllerRewardModel(self.goal_dim, 
                                                   self.state_dim * self.frame_stack_num,
                                                   self.action_dim, 
@@ -606,7 +599,8 @@ class RewardModel(object):
                 
 class CostModel(object):
     """
-        phi: G x S -> [0, 1]
+        cost_model: G x S -> [0, 1]
+        phi: S -> G
     """
     def __init__(self, state_dim, goal_dim, lidar_observation, 
                        frame_stack_num, 
@@ -618,16 +612,6 @@ class CostModel(object):
         self.frame_stack_num = frame_stack_num
         self.state_dim = state_dim
         self.goal_dim = goal_dim
-        #if self.lidar_observation:
-        #    self.state_dim = 2
-        #    self.agent_obst_len = 16       
-        #    self.safe_model = ControllerSafeModel(self.goal_dim + (self.state_dim + self.agent_obst_len) * frame_stack_num, cm_hidden_size).to(device)
-        #else:
-        #    self.state_dim = state_dim
-        #    self.agent_obst_len = 0
-        #    if self.cost_memmory:
-        #        self.safe_model = ControllerSafeModel(state_dim, cm_hidden_size).to(device)
-        #    else:
         self.safe_model = ControllerSafeModel(self.goal_dim, 
                                               self.state_dim * self.frame_stack_num, 
                                               cm_hidden_size).to(device)
@@ -872,7 +856,7 @@ class Controller(object):
         return safety
 
     def actor_loss(self, state, sg, init_state, cost_model, predict_env, manager_policy):
-        # reward loss
+        # HRAC low level reward loss
         if "td3" in self.algo:
             action = self.actor(state, sg)
             actor_loss = -self.critic.Q1(state, sg, action).mean()
@@ -881,7 +865,8 @@ class Controller(object):
             actor_loss = (self.sac_alpha * log_prob - self.critic.Q1(state, sg, action)).mean()
         else:
             assert 1 == 0
-        # cost loss
+
+        # ITES low level cost loss
         if self.algo in ["td3_lag", "sac_lag"]:
             safety_loss = self.cost_critic.Q1(state, sg, action).mean()
             actor_loss = (actor_loss + safety_loss * self._cost_penalty) / (1 + self._cost_penalty)
