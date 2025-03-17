@@ -67,6 +67,7 @@ class Manager(object):
                  delta=2.0,
                  landmark_loss_coeff=0.,
                  hidden_size=300,
+                 phi=None,
                  args=None
                  ):
         
@@ -74,6 +75,7 @@ class Manager(object):
         self.device = device
         self.args = args
 
+        self.phi = phi
         self.scale = scale
         self.torch_scale = torch.tensor(self.scale).type('torch.FloatTensor').to(device)
         self.actor = ManagerActor(state_dim, goal_dim, action_dim,
@@ -230,6 +232,7 @@ class Manager(object):
                    cost_model=None, selected_landmark=None, no_pseudo_landmark=False, 
                    controller_policy=None):
         actions = self.actor(state, goal)
+        # HRAC high level reward loss
         if self.args.noise_man_training:
             actions = torch.clamp(actions + torch.normal(mean=0, 
                                                 std=self.args.man_safe_noise_sigma, 
@@ -255,56 +258,28 @@ class Manager(object):
                 batch_landmarks, scaled_norm_direction = self.get_pseudo_landmark(achieved_goal, selected_landmark)
             ld_loss = torch.clamp(F.pairwise_distance(a_net(batch_landmarks), a_net(gen_subgoal)) - r_margin, min=0.).mean()
             
-        # ITES
-        safety_loss = 0
+        # ITES high level cost loss
         safety_subgoal_cls_loss = 0
+        safety_lag_loss = 0
         if "safe_cls" in self.args.manager_algo:
-            copy_state = state.detach()
-            manager_absolute_goal = actions.clone()
             if not self.absolute_goal:
-                manager_absolute_goal += copy_state[:, :actions.shape[1]]
-            if cost_model.frame_stack_num > 1:
-                for i in range(cost_model.frame_stack_num - 1):
-                    copy_state = torch.cat((copy_state, copy_state), dim=1)
-            """
-            # test copy states
-            if cost_model.frame_stack_num > 1:
-                agent_pose = copy_state[:, :cost_model.state_dim]
-                part_of_state = agent_pose
-                if cost_model.agent_obst_len != 0:
-                    obstacle_data = copy_state[:, -cost_model.agent_obst_len:]
-                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-                for i in range(cost_model.frame_stack_num - 1):
-                    if cost_model.agent_obst_len != 0:
-                        part_of_state = torch.cat((part_of_state, agent_pose, obstacle_data), dim=1)
-                    else:
-                        part_of_state = torch.cat((part_of_state, agent_pose), dim=1)
+                safety_subgoal_cls_loss = cost_model.safe_model(actions + self.phi(state), state)
             else:
-                agent_pose = copy_state[:, :cost_model.state_dim]
-                part_of_state = agent_pose
-                if cost_model.agent_obst_len != 0:
-                    obstacle_data = copy_state[:, -cost_model.agent_obst_len:]
-                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-            if cost_model.cost_memmory:
-                manager_absolute_goal = agent_pose
-            else:
-                manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-            """
-            safety_subgoal_cls_loss = cost_model.safe_model(manager_absolute_goal, copy_state)
+                safety_subgoal_cls_loss = cost_model.safe_model(actions, state)
             safety_subgoal_cls_loss = safety_subgoal_cls_loss.mean()
             safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
         if "high_lag" in self.args.manager_algo:
-            safety_loss = self.cost_critic.Q1(state, goal, actions).mean()
-            actor_loss = (actor_loss + safety_loss * self._cost_penalty) / (1 + self._cost_penalty)
+            safety_lag_loss = self.cost_critic.Q1(state, goal, actions).mean()
+            actor_loss = (actor_loss + safety_lag_loss * self._cost_penalty) / (1 + self._cost_penalty)
         if "low_lag" in self.args.manager_algo:            
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(state), actions) 
-            safety_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
+            safety_lag_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
             actor_loss = (
-                    actor_loss + safety_loss * self._cost_penalty
+                    actor_loss + safety_lag_loss * self._cost_penalty
                 ) / (1 + self._cost_penalty)
         if "safe_cls" in self.args.manager_algo:
             actor_loss = actor_loss + safety_subgoal_cls_loss
-        return actor_loss, goal_loss, safety_subgoal_cls_loss + safety_loss, ld_loss, scaled_norm_direction
+        return actor_loss, goal_loss, safety_subgoal_cls_loss + safety_lag_loss, ld_loss, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -621,13 +596,12 @@ class RewardModel(object):
         self.reward_model_optimizer.step()
 
         return reward_model_loss, true, pred
-    
 
     def save(self, dir, env_name, algo, exp_num):
-        torch.save(self.safe_model.state_dict(), "{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo))
+        torch.save(self.reward_model.state_dict(), "{}/{}/{}_{}_RewardModel.pth".format(dir, exp_num, env_name, algo))
         
     def load(self, dir, env_name, algo, exp_num):
-        self.safe_model.load_state_dict(torch.load("{}/{}/{}_{}_SafeModel.pth".format(dir, exp_num, env_name, algo)))
+        self.reward_model.load_state_dict(torch.load("{}/{}/{}_{}_RewardModel.pth".format(dir, exp_num, env_name, algo)))
 
                 
 class CostModel(object):
@@ -845,12 +819,10 @@ class Controller(object):
         assert not(predict_env is None), "world model must be initialized"
         manager_proposed_goal = actions.clone()
         next_img_state = state.clone()
-
         safety_cost = cost_model.safe_model
-
+        
         if self.algo in ["td3_img_safe_c_cost"]:
             safeties_c_cost = []
-
         h = 0
         if all_steps_safety:
             safeties = []    
@@ -875,33 +847,6 @@ class Controller(object):
                 safety_c_cost = self.cost_critic.Q1(img_state, manager_proposed_goal, ctrl_actions).mean()
                 safeties_c_cost.append(safety_c_cost)
             if all_steps_safety:
-                """
-                if cost_model.frame_stack_num > 1:
-                    part_of_state = []
-                    agent_poses = [img_state_[:, :cost_model.state_dim] for img_state_ in img_states[h-cost_model.frame_stack_num+1:h+1]]
-                    obstacle_datas = [img_state_[:, -cost_model.agent_obst_len:] for img_state_ in img_states[h-cost_model.frame_stack_num+1:h+1]]
-                    # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
-                    while len(agent_poses) < cost_model.frame_stack_num:
-                        batch_size = agent_poses[0].shape[0]
-                        agent_pose = torch.zeros(batch_size, cost_model.state_dim).to(device)
-                        if cost_model.agent_obst_len != 0:
-                            obstacle_data = torch.zeros(batch_size, cost_model.agent_obst_len).to(device)
-                        agent_poses.append(agent_pose)
-                        if cost_model.agent_obst_len != 0:
-                            obstacle_datas.append(obstacle_data)
-                    part_of_state = [torch.cat((agent_pose, obstacle_data), dim=1) for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas)]
-                    part_of_state = torch.cat(part_of_state, dim=1)
-                    agent_pose = next_img_state[:, :cost_model.state_dim]
-                    manager_absolute_goal = torch.cat((agent_pose, part_of_state), dim=1)
-                else:
-                    agent_pose = next_img_state[:, :cost_model.state_dim]
-                    part_of_state = agent_pose
-                    if cost_model.agent_obst_len != 0:
-                        obstacle_data = next_img_state[:, -cost_model.agent_obst_len:]
-                        part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-                    manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
-                    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
-                """
                 safety = safety_cost(self.phi(next_img_state), next_img_state)
                 safeties.append(safety)
             manager_proposed_goal = manager_policy.subgoal_transition(self.phi(img_state), 
@@ -909,16 +854,6 @@ class Controller(object):
                                                                          self.phi(next_img_state))
             h += 1
         if not all_steps_safety:
-            #agent_pose = next_img_state[:, :cost_model.state_dim]
-            #part_of_state = agent_pose
-            #if cost_model.agent_obst_len != 0:
-            #    obstacle_data = next_img_state[:, -cost_model.agent_obst_len:]
-            #    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-            #if cost_model.cost_memmory:
-            #    manager_absolute_goal = agent_pose
-            #else:
-            #    manager_absolute_goal = next_img_state[:, :cost_model.goal_dim]
-            #    manager_absolute_goal = torch.cat((manager_absolute_goal, part_of_state), dim=1)
             safety = safety_cost(self.phi(next_img_state), next_img_state)
         else:
             safety = 0
@@ -932,7 +867,6 @@ class Controller(object):
             for el in safeties_c_cost:
                 c_cost_safety = c_cost_safety + el            
             safety = safety + c_cost_safety
-
         if return_img_states:
             return safety, img_states
         return safety

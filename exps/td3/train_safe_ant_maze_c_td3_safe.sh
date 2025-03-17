@@ -11,7 +11,6 @@ python main.py --env_name SafeAntMazeC \
                --world_model \
                --cost_model \
                --cm_pretrain \
-               --cost_memmory \
                --controller_imagination_safety_loss \
                --controller_safety_coef 6 \
                --validation_without_image --eval_freq 30000 \

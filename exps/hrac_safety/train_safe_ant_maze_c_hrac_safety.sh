@@ -9,7 +9,8 @@ python main.py --seed $seed \
                --env_name SafeAntMazeC \
                --validation_without_image --eval_freq 30000 \
                --random_start_pose \
-               --man_rew_scale 0.1 --goal_loss_coeff 20.0 \
+               --man_rew_scale 0.1 \
+               --goal_loss_coeff 20.0 \
                --world_model \
                --cost_memmory \
                --cost_model \
@@ -17,6 +18,7 @@ python main.py --seed $seed \
                --coef_safety_modelfree 800 \
                --controller_algo "td3_img_safe" \
                --controller_safety_coef 6 \
+               --controller_cumul_img_safety \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --not_use_wandb

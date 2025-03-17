@@ -233,8 +233,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                     part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
                             manager_absolute_goal = agent_pose
                             manager_absolute_goal = manager_absolute_goal.type('torch.FloatTensor').to("cuda")
-                            cost_model_val = cost_model.safe_model(manager_absolute_goal)                            
-                        debug_info["cost_model_val"] = cost_model_val
+                            cost_model_subgoal = cost_model.safe_model(manager_absolute_goal)                            
+                        debug_info["cost_model_subgoal"] = cost_model_subgoal
                     if args.domain_name == "Safexp":
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
@@ -536,7 +536,6 @@ def run_hrac(args):
                 low = np.array([-2.0, -2.0])
             else:
                 low = np.array([-2.0, -2.0, -2.0, -2.0, -2.0, -2.0])
-            #low = np.array([-2.0, -2.0, -2.0])
             def phi(state):
                 # manipulator_pose = [-6:-3], obj_pose=[-3:]
                 if args.pusher_four_goal_dim:
@@ -717,6 +716,7 @@ def run_hrac(args):
             delta=args.delta,
             landmark_loss_coeff=args.landmark_loss_coeff,
             hidden_size=args.man_hidden_size,
+            phi=phi,
             args=args
         )
     else:
@@ -1206,6 +1206,8 @@ def run_hrac(args):
                             controller_policy.save("./models", args.env_name, args.algo, exp_num)
                             if not args.manager_algo == "none":
                                 manager_policy.save("./models", args.env_name, args.algo, exp_num)
+                            if args.reward_model:
+                                reward_model.save("./models", args.env_name, args.algo, exp_num)
                             if args.cost_model:
                                 cost_model.save("./models", args.env_name, args.algo, exp_num)
                             if args.world_model:
