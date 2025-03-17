@@ -44,7 +44,16 @@ def get_tensor(z, to_device=True):
         return var(torch.FloatTensor(z.copy()), to_device).unsqueeze(0)
     else:
         return var(torch.FloatTensor(z.copy()), to_device)
-
+    
+def subgoal_transition(achieved_goal, subgoal, next_achieved_goal, absolute_goal=False):
+    if absolute_goal:
+        return subgoal
+    else:
+        if len(achieved_goal.shape) == 1:  # check if batched
+            return achieved_goal + subgoal - next_achieved_goal
+        else:
+            return achieved_goal + subgoal -\
+                    next_achieved_goal
 
 class Manager(object):
     def __init__(self, state_dim, goal_dim, action_dim, actor_lr,
@@ -157,17 +166,6 @@ class Manager(object):
         self.n_landmark_cov = n_landmark_cov
         self.planner_initial_sample = planner_initial_sample
         self.planner_goal_thr = planner_goal_thr
-
-
-    def subgoal_transition(self, achieved_goal, subgoal, next_achieved_goal):
-        if self.absolute_goal:
-            return subgoal
-        else:
-            if len(achieved_goal.shape) == 1:  # check if batched
-                return achieved_goal + subgoal - next_achieved_goal
-            else:
-                return achieved_goal + subgoal -\
-                       next_achieved_goal
     
     def init_planner(self):
         self.planner = Planner(landmark_cov_sampling=self.planner_cov_sampling,
@@ -548,8 +546,7 @@ class RewardModel(object):
                                                   cm_hidden_size).to(device)
         
         self.reward_model_criterion = nn.MSELoss()        
-        self.reward_model_optimizer = torch.optim.Adam(self.reward_model.parameters(),
-                                                     lr=lr, weight_decay=0.0001)
+        self.reward_model_optimizer = torch.optim.Adam(self.reward_model.parameters(), lr=lr, weight_decay=0.0001)
         
     def predict(self, goal, state, action):
         return self.reward_model(goal, state, action)
@@ -615,13 +612,29 @@ class CostModel(object):
         self.safe_model = ControllerSafeModel(self.goal_dim, 
                                               self.state_dim * self.frame_stack_num, 
                                               cm_hidden_size).to(device)
-        
+        class BinaryFocalLoss(nn.Module):
+            def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
+                super(BinaryFocalLoss, self).__init__()
+                self.alpha = alpha
+                self.gamma = gamma
+                self.reduction = reduction
+            def forward(self, inputs, targets):
+                p = torch.sigmoid(inputs)
+                bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+                pt = torch.where(targets == 1, p, 1 - p)
+                focal_loss = self.alpha * (1 - pt) ** self.gamma * bce_loss
+                if self.reduction == 'mean':
+                    return focal_loss.mean()
+                elif self.reduction == 'sum':
+                    return focal_loss.sum()
+                else:
+                    return focal_loss
         if regression_cost_model:
             self.safe_model_criterion = nn.MSELoss()
         else:
             self.safe_model_criterion = nn.BCELoss()
-        self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(),
-                                                     lr=lr, weight_decay=0.0001)
+        #self.safe_model_criterion = BinaryFocalLoss(alpha=0.25, gamma=2.0)
+        self.safe_model_optimizer = torch.optim.Adam(self.safe_model.parameters(), lr=lr, weight_decay=0.0001)
         
 
     def train_cost_model(self, replay_buffer, 
@@ -728,23 +741,35 @@ class Controller(object):
         self.critic = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
         self.critic_target = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-            lr=critic_lr, weight_decay=0.0001)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr, weight_decay=0.0001)
         
         if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
-            self.cost_critic = ControllerCritic(
-                state_dim, goal_dim, action_dim, hidden_size
-            ).to(device)
-            self.cost_critic_target = ControllerCritic(
-                state_dim, goal_dim, action_dim, hidden_size
-            ).to(device)
-            self.cost_critic_target.load_state_dict(
-                self.cost_critic.state_dict()
-            )
+            class FocalLossRegression(nn.Module):
+                def __init__(self, gamma=2.0, alpha=1.0, reduction='mean'):
+                    super(FocalLossRegression, self).__init__()
+                    self.gamma = gamma
+                    self.alpha = alpha
+                    self.reduction = reduction
+                def forward(self, y_pred, y_true):
+                    error = torch.abs(y_pred - y_true)
+                    weights = torch.pow(error, self.gamma)
+                    loss = self.alpha * weights * error
+                    if self.reduction == 'mean':
+                        return loss.mean()
+                    elif self.reduction == 'sum':
+                        return loss.sum()
+                    elif self.reduction == 'none':
+                        return loss
+                    else:
+                        raise ValueError(f"Unsupported reduction: {self.reduction}")
+            self.cost_critic = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
+            self.cost_critic_target = ControllerCritic(state_dim, goal_dim, action_dim, hidden_size).to(device)
+            self.cost_critic_target.load_state_dict(self.cost_critic.state_dict())
             self.cost_critic_optimizer = torch.optim.Adam(
                 self.cost_critic.parameters(), lr=critic_lr, weight_decay=0.0001
             )
             self.cost_criterion = nn.SmoothL1Loss() 
+            #self.cost_criterion = FocalLossRegression(gamma=2.0, alpha=1.0)
 
 
     def clean_obs(self, state, dims=2):
@@ -833,9 +858,14 @@ class Controller(object):
             if all_steps_safety:
                 safety = safety_cost(self.phi(next_img_state), next_img_state)
                 safeties.append(safety)
-            manager_proposed_goal = manager_policy.subgoal_transition(self.phi(img_state), 
-                                                                         manager_proposed_goal, 
-                                                                         self.phi(next_img_state))
+            if self.args.manager_algo == "none":
+                absolute_goal = False
+            else:
+                absolute_goal = manager_policy.absolute_goal
+            manager_proposed_goal = subgoal_transition(self.phi(img_state), 
+                                                        manager_proposed_goal, 
+                                                        self.phi(next_img_state),
+                                                        absolute_goal)
             h += 1
         if not all_steps_safety:
             safety = safety_cost(self.phi(next_img_state), next_img_state)
@@ -917,7 +947,11 @@ class Controller(object):
             else:
                 x, y, x_ag, y_ag, sg, u, r, d, _, _ = replay_buffer.sample(batch_size)
             init_state = get_tensor(x)
-            next_g = get_tensor(manager_policy.subgoal_transition(x_ag, sg, y_ag))
+            if self.args.manager_algo == "none":
+                absolute_goal = False
+            else:
+                absolute_goal = manager_policy.absolute_goal
+            next_g = get_tensor(subgoal_transition(x_ag, sg, y_ag, absolute_goal))
             state = self.clean_obs(get_tensor(x))
             action = get_tensor(u)
             sg = get_tensor(sg)
@@ -935,44 +969,35 @@ class Controller(object):
             elif "sac" in self.algo:
                 with torch.no_grad():
                     next_action, next_log_prob = self.actor.sample_action_logprob(next_state, next_g)
+
+            # Reward Critic
             target_Q1, target_Q2 = self.critic_target(next_state, next_g, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
             if "sac" in self.algo:
                 target_Q = target_Q - self.sac_alpha * next_log_prob
             target_Q = reward + (done * discount * target_Q)
             target_Q_no_grad = target_Q.detach()
-
-            # Get current Q estimate
             current_Q1, current_Q2 = self.critic(state, sg, action)
-
-            # Compute critic loss
-            critic_loss = self.criterion(current_Q1, target_Q_no_grad) + \
-                        self.criterion(current_Q2, target_Q_no_grad)
-
-            # Optimize the critic
+            critic_loss = self.criterion(current_Q1, target_Q_no_grad) \
+                                + self.criterion(current_Q2, target_Q_no_grad)
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
             self.critic_optimizer.step()
 
             cost_critic_loss = 0
             if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"] or "low_lag" in self.args.manager_algo:
-                # Cost critic
+                # Cost Critic
                 target_C1, target_C2 = self.cost_critic_target(
                     next_state, next_g, next_action
                 )
                 target_C = torch.max(target_C1, target_C2)
                 target_C = cost + (done * discount * target_C)
+                if "sac" in self.algo:
+                    target_C = target_C - self.sac_alpha * next_log_prob
                 target_C_no_grad = target_C.detach()
-
-                # Get current C estimate
                 current_C1, current_C2 = self.cost_critic(state, sg, action)
-
-                # Compute cost critic loss
-                cost_critic_loss = self.cost_criterion(
-                    current_C1, target_C_no_grad
-                ) + self.cost_criterion(current_C2, target_C_no_grad)
-
-                # Optimize the cost critic
+                cost_critic_loss = self.cost_criterion(current_C1, target_C_no_grad) \
+                                        + self.cost_criterion(current_C2, target_C_no_grad)
                 self.cost_critic_optimizer.zero_grad()
                 cost_critic_loss.backward()
                 self.cost_critic_optimizer.step()
@@ -1002,17 +1027,17 @@ class Controller(object):
             if "td3" in self.algo:
                 for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-
             if "lag" in self.algo and ep_cost is not None:
                 self.pid_update(ep_cost)
 
         if self.algo in ["td3_img_safe_c_cost", "td3_lag", "sac_lag"]:
-            debug_info["controller_critic_loss"] = avg_cost_loss / iterations
-
+            debug_info["controller_safe_critic_loss"] = avg_cost_loss / iterations
         if "lag" in self.algo and ep_cost is not None:
             debug_info["lagrangian"] = self._cost_penalty
+        debug_info["controller_actor_loss"] = avg_act_loss / iterations
+        debug_info["controller_critic_loss"] = avg_crit_loss / iterations
 
-        return avg_act_loss / iterations, avg_crit_loss / iterations, debug_info
+        return debug_info
 
     def save(self, dir, env_name, algo, exp_num):
         torch.save(self.actor.state_dict(), "{}/{}/{}_{}_ControllerActor.pth".format(dir, exp_num, env_name, algo))

@@ -124,7 +124,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             episode_imagine_subgoal_safety = 0
             episode_subgoals_count = 0
             while not done:
-                if not args.manager_algo == "none" and step_count % manager_propose_frequency == 0:
+                if args.manager_algo == "none":
+                    subgoal = goal - achieved_goal
+                elif step_count % manager_propose_frequency == 0:
                     subgoal = manager_policy.sample_goal(state, goal)
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
@@ -163,11 +165,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
 
                 step_count += 1
                 global_steps += 1
-                if args.manager_algo == "none":
-                    controller_subgoal = goal - achieved_goal
-                    action = controller_policy.select_action(state, controller_subgoal, evaluation=True)
-                else:
-                    action = controller_policy.select_action(state, subgoal, evaluation=True)
+
+                action = controller_policy.select_action(state, subgoal, evaluation=True)
                 new_obs, reward, done, info = env.step(action)
                 new_goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
@@ -316,26 +315,24 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                         env_name=env_name,
                                                         safe_model=cost_model.safe_model if args.cost_model else None)
                         positions_screens.append(screen.transpose(2, 0, 1))
-
-                if not args.manager_algo == "none":
-                    subgoal = manager_policy.subgoal_transition(achieved_goal, subgoal, new_achieved_goal)
+                if args.manager_algo == "none":
+                    absolute_goal = False
+                else:
+                    absolute_goal = manager_policy.absolute_goal
+                subgoal = hrac.subgoal_transition(achieved_goal, subgoal, new_achieved_goal, 
+                                                  absolute_goal)
 
                 avg_reward += reward
                 if "Safe" in env_name:
                     avg_cost += cost
                     episode_cost += cost
-                if args.manager_algo == "none":
-                    controller_subgoal = goal - new_achieved_goal
-                    if args.self_td3_reward:
-                        avg_controller_rew += calculate_controller_reward(achieved_goal, 
-                                                                          controller_subgoal, 
-                                                                          new_achieved_goal, ctrl_rew_scale, action)    
-                    else:
-                        avg_controller_rew = reward*ctrl_rew_scale
-                else:
+
+                if not args.manager_algo == "none" or (args.manager_algo == "none" and args.self_td3_reward):
                     avg_controller_rew += calculate_controller_reward(achieved_goal, 
-                                                                      subgoal, 
-                                                                      new_achieved_goal, ctrl_rew_scale, action)    
+                                                                          subgoal, 
+                                                                          new_achieved_goal, ctrl_rew_scale, action)
+                else:
+                    avg_controller_rew = reward*ctrl_rew_scale
                 episode_reward += reward
 
                 goal = new_goal
@@ -779,7 +776,7 @@ def run_hrac(args):
                          ep_controller_reward, episode_cost, man_episode_cost, episode_safety_subgoal_rate, 
                          ep_manager_reward, total_timesteps, pid_costs=None):
         print("train controller")
-        ctrl_act_loss, ctrl_crit_loss, debug_info_controller = controller_policy.train(
+        debug_info_controller = controller_policy.train(
             controller_buffer, 
             cost_model=cost_model,
             predict_env=predict_env,
@@ -793,10 +790,8 @@ def run_hrac(args):
         if "lag" in args.controller_algo and episode_num > 10:
             print(f'Train controller with pid. Use avg cost {np.mean(pid_costs)}')
         if episode_num % 10 == 0:
-            print("Controller actor loss: {:.3f}".format(ctrl_act_loss))
-            print("Controller critic loss: {:.3f}".format(ctrl_crit_loss))
-        writer.add_scalar("data/controller_actor_loss", ctrl_act_loss, total_timesteps)
-        writer.add_scalar("data/controller_critic_loss", ctrl_crit_loss, total_timesteps)
+            print("Controller actor loss: {:.3f}".format(debug_info_controller["controller_actor_loss"]))
+            print("Controller critic loss: {:.3f}".format(debug_info_controller["controller_critic_loss"]))
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
         writer.add_scalar(f"data/controller_buffer_size", len(controller_buffer), total_timesteps)
@@ -1258,7 +1253,9 @@ def run_hrac(args):
                     acc_wm_imagination_episode_metric = 0
                     wm_imagination_episode_metric = 0
 
-                if not args.manager_algo == "none":
+                if args.manager_algo == "none":
+                    subgoal = goal - achieved_goal
+                else:
                     subgoal = manager_policy.sample_goal(state, goal)
                     if "Safe" in args.env_name:
                         episode_subgoals_count += 1
@@ -1278,8 +1275,7 @@ def run_hrac(args):
                         manager_transition = [state, None, achieved_goal, None, goal, subgoal, 0, False, [state], []]
 
             if args.manager_algo == "none":
-                controller_subgoal = goal - achieved_goal
-                action = controller_policy.select_action(state, controller_subgoal)
+                action = controller_policy.select_action(state, subgoal)
                 if "td3" in args.controller_algo:
                     action = ctrl_noise.perturb_action(action, -max_action, max_action)
                     if not args.ctr_cem:
@@ -1288,7 +1284,6 @@ def run_hrac(args):
                 action = controller_policy.select_action(state, subgoal)
                 if not args.ctr_cem:
                     action = ctrl_noise.perturb_action(action, -max_action, max_action)            
-
             action_copy = action.copy()
 
             next_tup, manager_reward, done, info = env.step(action_copy)
@@ -1302,54 +1297,46 @@ def run_hrac(args):
                 if manager_buffer.cost_memmory:
                     manager_transition[8] += cost
                 manager_transition[-1].append(action)
-            ep_manager_reward += manager_reward * args.man_rew_scale
-
-            if not args.manager_algo == "none":
                 manager_transition[-2].append(next_state)
+            ep_manager_reward += manager_reward * args.man_rew_scale
             traj_buffer.append(next_achieved_goal)
 
-            if args.manager_algo == "none":
-                controller_subgoal = goal - next_achieved_goal
-                if args.self_td3_reward:
-                    controller_reward = calculate_controller_reward(achieved_goal, 
-                                                                    controller_subgoal, 
-                                                                    next_achieved_goal, 
-                                                                    args.ctrl_rew_scale, action)
-                else:
-                    controller_reward = manager_reward * args.ctrl_rew_scale
-            else:
+            if not args.manager_algo == "none" or (args.manager_algo == "none" and args.self_td3_reward):
                 controller_reward = calculate_controller_reward(achieved_goal, 
                                                                 subgoal, 
                                                                 next_achieved_goal, 
                                                                 args.ctrl_rew_scale, action)
-                subgoal = manager_policy.subgoal_transition(achieved_goal, subgoal, next_achieved_goal)
-                controller_subgoal = subgoal
+            else:
+                controller_reward = manager_reward * args.ctrl_rew_scale
+            if args.manager_algo == "none":
+                absolute_goal = False
+            else:
+                absolute_goal = manager_policy.absolute_goal
+            subgoal = hrac.subgoal_transition(achieved_goal, subgoal, next_achieved_goal, 
+                                              absolute_goal)
 
             ep_controller_reward += controller_reward
             if "Safe" in args.env_name:
                 episode_cost += cost
                 controller_episode_cost += 0
-
             if args.inner_dones:
                 ctrl_done = done or timesteps_since_subgoal % args.manager_propose_freq == 0
             else:
                 ctrl_done = done
 
-
             if (args.domain_name == "Safexp" and args.cost_model) or args.cost_model_trajectory_buffer:
                 cost_model_buffer.append(next_achieved_goal, next_state, info["safety_cost"])
-
             if args.world_model:
                 world_model_buffer.add(
                     (state, next_state, achieved_goal, next_achieved_goal, goal, 
                         action, manager_reward, float(done), [], []))
             if controller_buffer.cost_memmory:
                 controller_buffer.add(
-                    (state, next_state, achieved_goal, next_achieved_goal, controller_subgoal, 
+                    (state, next_state, achieved_goal, next_achieved_goal, subgoal, 
                      action, controller_reward, info["safety_cost"], float(ctrl_done), [], []))
             else:
                 controller_buffer.add(
-                    (state, next_state, achieved_goal, next_achieved_goal, controller_subgoal, 
+                    (state, next_state, achieved_goal, next_achieved_goal, subgoal, 
                      action, controller_reward, float(ctrl_done), [], []))
 
             state = next_state
@@ -1362,7 +1349,6 @@ def run_hrac(args):
             if not args.manager_algo == "none":
                 timesteps_since_manager += 1
                 timesteps_since_subgoal += 1
-
             if args.controller_curriculumn and args.controller_curriculum_start_step <= total_timesteps:                
                 controller_policy.controller_safety_coef = args.controller_curriculum_safety_coef
 
@@ -1375,26 +1361,16 @@ def run_hrac(args):
                 if episode_timesteps % imagined_state_freq == 0:
                     acc_wm_imagination_episode_metric += wm_imagination_episode_metric / imagined_state_freq
                     wm_imagination_episode_metric = 0
-
             prev_action = action_copy
 
-            if not args.manager_algo == "none" and timesteps_since_subgoal % args.manager_propose_freq == 0:
+            if args.manager_algo == "none":
+                subgoal = goal - achieved_goal
+            elif timesteps_since_subgoal % args.manager_propose_freq == 0:
                 manager_transition[1] = state
                 manager_transition[3] = achieved_goal
                 manager_transition[7] = float(done)
-
                 manager_buffer.add(manager_transition)
                 subgoal = manager_policy.sample_goal(state, goal)
-
-                if "Safe" in args.env_name:
-                    if manager_policy.absolute_goal:
-                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(subgoal)
-                    else:
-                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
-                            episode_safety_subgoal_rate += env.cost_func(achieved_goal + subgoal)
-                    episode_subgoals_count += 1
-
                 if not args.absolute_goal:
                     subgoal = man_noise.perturb_action(subgoal,
                         min_action=-man_scale, 
@@ -1403,6 +1379,14 @@ def run_hrac(args):
                     subgoal = man_noise.perturb_action(subgoal,
                         min_action=-man_scale, 
                         max_action=man_scale)
+                if "Safe" in args.env_name:
+                    if manager_policy.absolute_goal:
+                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
+                            episode_safety_subgoal_rate += env.cost_func(subgoal)
+                    else:
+                        if "SafeAntMaze" in env_name and not args.domain_name == "BulletSafeGym":
+                            episode_safety_subgoal_rate += env.cost_func(achieved_goal + subgoal)
+                    episode_subgoals_count += 1
 
                 timesteps_since_subgoal = 0
                 if manager_buffer.cost_memmory:
