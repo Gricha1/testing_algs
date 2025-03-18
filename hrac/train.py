@@ -160,6 +160,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                             all_steps_safety=True,
                                                             predict_env=predict_env,
                                                             return_img_states=False,
+                                                            manager_policy=manager_policy,
                                                             )
                     episode_subgoals_count += 1
 
@@ -211,29 +212,37 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     debug_info["goals_achieved"] = episode_goals_achieved
                     if args.cost_model:
                         with torch.no_grad():
-                            torch_state = torch.from_numpy(state[None, :])
-                            torch_achieved_goal = torch.from_numpy(achieved_goal[None, :])
-                            if cost_model.frame_stack_num > 1:
-                                agent_pose = torch_state[:, :cost_model.state_dim]
-                                part_of_state = agent_pose
-                                if cost_model.agent_obst_len != 0:
-                                    obstacle_data = torch_state[:, -cost_model.agent_obst_len:]
-                                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-                                for i in range(cost_model.frame_stack_num - 1):
-                                    if cost_model.agent_obst_len != 0:
-                                        part_of_state = torch.cat((part_of_state, agent_pose, obstacle_data), dim=1)
-                                    else:
-                                        part_of_state = torch.cat((part_of_state, agent_pose), dim=1)
-                            else:
-                                agent_pose = torch_state[:, :cost_model.state_dim]
-                                part_of_state = agent_pose
-                                if cost_model.agent_obst_len != 0:
-                                    obstacle_data = state[:, -cost_model.agent_obst_len:]
-                                    part_of_state = torch.cat((part_of_state, obstacle_data), dim=1)
-                            manager_absolute_goal = agent_pose
-                            manager_absolute_goal = manager_absolute_goal.type('torch.FloatTensor').to("cuda")
-                            cost_model_subgoal = cost_model.safe_model(manager_absolute_goal)                            
-                        debug_info["cost_model_subgoal"] = cost_model_subgoal
+                            torch_state = torch.from_numpy(state[None, :]).type('torch.FloatTensor').to("cuda")
+                            torch_achieved_goal = torch.from_numpy(achieved_goal[None, :]).type('torch.FloatTensor').to("cuda")
+                            torch_subgoal = torch.from_numpy(subgoal[None, :]).type('torch.FloatTensor').to("cuda")
+                            cost_model_state = cost_model.safe_model(cost_model.phi(torch_state), torch_state)
+                            debug_info["cost_model_state"] = cost_model_state.item()
+                            if not args.manager_algo == "none":
+                                if manager_policy.absolute_goal:
+                                    cost_model_subgoal = cost_model.safe_model(
+                                                                    torch_subgoal, 
+                                                                    torch_state)
+                                else:
+                                    cost_model_subgoal = cost_model.safe_model(
+                                                                    torch_subgoal + cost_model.phi(torch_state), 
+                                                                    torch_state)
+                                debug_info["cost_model_subgoal"] = cost_model_subgoal.item()
+                    if args.world_model:
+                        with torch.no_grad():
+                            torch_state = torch.from_numpy(state[None, :]).type('torch.FloatTensor').to("cuda")
+                            torch_subgoal = torch.from_numpy(subgoal[None, :]).type('torch.FloatTensor').to("cuda")
+                            curr_imagine_subgoal_safety, img_states = controller_policy.state_safety_on_horizon(
+                                                                torch_state, torch_subgoal, 
+                                                                controller_policy, 
+                                                                cost_model=cost_model,
+                                                                all_steps_safety=args.controller_cumul_img_safety,
+                                                                predict_env=predict_env,
+                                                                return_img_states=True,
+                                                                manager_policy=manager_policy,
+                                                                )
+                            debug_info["wm_img_states"] = [controller_policy.pose(img_state).cpu().numpy().flatten() 
+                                                            for img_state in img_states]
+                            debug_info["wm_img_states_safety"] = curr_imagine_subgoal_safety.item()
                     if args.domain_name == "Safexp":
                         debug_info["dist_to_goal"] = env.env.dist_goal()
                     debug_info["dist_a_net_s_sg"] = 0
@@ -294,7 +303,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, 
                                                                    state, step_count, imagined_state_freq)
                         prev_imagined_state = imagined_state
-                        current_step_info["imagined_robot_pos"] = imagined_state[:2]
                     # add apples and bombs if GatherEnv
                     if env_name =="AntGather":
                         current_step_info["apples_and_bombs"] = env.get_apples_and_bombs()
@@ -543,9 +551,22 @@ def run_hrac(args):
                     return state[:, -3:-1]
                 else:
                     return torch.cat((state[:, -3:], state[:, -6:-3]), dim=1)
+            def pose(state):
+                # manipulator_pose = [-6:-3], obj_pose=[-3:]
+                if args.pusher_four_goal_dim:
+                    return state[:, -6:-4]
+                elif args.pusher_three_goal_dim:
+                    return state[:, -3:]
+                elif args.pusher_two_goal_dim:
+                    return state[:, -3:-1]
+                else:
+                    return state[:, -6:-3]
         else:
             low = np.array((-10, -10))
             def phi(state):
+                # ant_xy = [:2]
+                return state[:, :2]
+            def pose(state):
                 # ant_xy = [:2]
                 return state[:, :2]
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
@@ -601,7 +622,10 @@ def run_hrac(args):
         env.seed(args.seed)
         low = np.array((-5.0, -5.0))
         def phi(state):
-            # ant_xy = [:2]
+            # robot_xy = [:2]
+            return state[:, :2]
+        def pose(state):
+            # robot_xy = [:2]
             return state[:, :2]
         controller_goal_dim = goal_dim
     else:
@@ -713,7 +737,7 @@ def run_hrac(args):
             delta=args.delta,
             landmark_loss_coeff=args.landmark_loss_coeff,
             hidden_size=args.man_hidden_size,
-            phi=phi,
+            phi=phi,            
             args=args
         )
     else:
@@ -749,6 +773,7 @@ def run_hrac(args):
             algo=args.controller_algo,
             sac_alpha=args.sac_alpha,        
             phi=phi,
+            pose=pose,
             args=args
         )
 
@@ -862,7 +887,8 @@ def run_hrac(args):
                                     safe_model_loss_coef=args.safe_model_loss_coef, 
                                     lr=args.cm_lr,
                                     cm_hidden_size=args.cm_hidden_size,
-                                    regression_cost_model=args.regression_cost_model)
+                                    regression_cost_model=args.regression_cost_model,
+                                    phi=phi)
         if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size,
                                                                 state_dim=state_dim,

@@ -612,6 +612,8 @@ class CostModel(object):
         self.safe_model = ControllerSafeModel(self.goal_dim, 
                                               self.state_dim * self.frame_stack_num, 
                                               cm_hidden_size).to(device)
+        self.phi = phi
+
         class BinaryFocalLoss(nn.Module):
             def __init__(self, alpha=0.25, gamma=2.0, reduction='mean'):
                 super(BinaryFocalLoss, self).__init__()
@@ -690,11 +692,14 @@ class Controller(object):
                  algo="td3",
                  sac_alpha=None,
                  phi=None,
+                 pose=None,
                  args=None,
 
     ):
         self.device = device
         self.args = args
+        self.phi = phi
+        self.pose = pose
         self.torch_scale = torch.tensor(max_action).type('torch.FloatTensor').to(device)
 
         self.state_dim = state_dim
@@ -710,7 +715,6 @@ class Controller(object):
 
         self.sac_alpha = sac_alpha
 
-        self.phi = phi
         self.controller_safety_coef = controller_safety_coef
         self.img_horizon = img_horizon
         self.controller_grad_clip = controller_grad_clip

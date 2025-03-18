@@ -94,19 +94,29 @@ class CustomVideoRendered:
         circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="g", alpha=0.5)
         self.render_info["ax_states"].add_patch(circle_robot) 
         self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
+        if "cost_model_state" in debug_info:
+            cost_model_state = debug_info["cost_model_state"]
+            if env_name == "SafePusher":
+                self.render_info["ax_states"].text(x + 0.05, y - 0.1, f"{int(cost_model_state*100)/100}")
+            else:
+                self.render_info["ax_states"].text(x + 0.05, y - 2.0, f"{int(cost_model_state*100)/100}")
+        if "wm_img_states" in debug_info:
+            x_coords = []
+            y_coords = []
+            for img_state in debug_info["wm_img_states"]:
+                x = img_state[0] + shift_x
+                y = img_state[1] + shift_y
+                x_coords.append(x)
+                y_coords.append(y)
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 3, color="r", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
+            wm_img_states_safety = debug_info["wm_img_states_safety"]
+            self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+                                               f"{int(wm_img_states_safety*100)/100}")
         # world model comparsion
         if self.world_model_comparsion or self.controller_safe_model:
             self.robot_poses.append((x - shift_x, y - shift_y))   
-
-        # robot imagined pose
-        if self.world_model_comparsion:
-            radius = current_step_info["robot_radius"]
-            x = current_step_info["imagined_robot_pos"][0] + shift_x
-            y = current_step_info["imagined_robot_pos"][1] + shift_y
-            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
-            self.render_info["ax_states"].add_patch(circle_robot) 
-            self.render_info["ax_states"].text(x, y + 0.05, "i_s")
-            self.world_model_poses.append((x - shift_x, y - shift_y))   
 
         if env_name == "SafePusher":
             x = current_step_info["obj_pos"][0] + shift_x
@@ -123,6 +133,9 @@ class CustomVideoRendered:
                 circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
                 self.render_info["ax_states"].add_patch(circle_robot)
                 self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj_g")
+                if "cost_model_subgoal" in debug_info:
+                    cost_model_subgoal = debug_info["cost_model_subgoal"]
+                    self.render_info["ax_states"].text(x + 0.05, y - 0.1, f"{int(cost_model_subgoal*100)/100}")
                 if not(current_step_info["second_goal_pos"] is None):
                     x = current_step_info["second_goal_pos"][0] + shift_x
                     y = current_step_info["second_goal_pos"][1] + shift_y
@@ -135,6 +148,9 @@ class CustomVideoRendered:
                 circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
                 self.render_info["ax_states"].add_patch(circle_robot)
                 self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
+                if "cost_model_subgoal" in debug_info:
+                    cost_model_subgoal = debug_info["cost_model_subgoal"]
+                    self.render_info["ax_states"].text(x + 0.05, y - 2.0, f"{int(cost_model_subgoal*100)/100}")
                 if self.add_subgoal_values:
                     self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
                     self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
@@ -146,19 +162,6 @@ class CustomVideoRendered:
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="y", alpha=0.5)
             self.render_info["ax_states"].add_patch(circle_robot) 
             self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")  
-
-        # world model comparsion
-        if self.world_model_comparsion or self.controller_safe_model:
-            xA, yA = zip(*self.robot_poses)
-            self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
-            if self.world_model_comparsion:
-                xB, yB = zip(*self.world_model_poses)
-                self.render_info["ax_world_model_robot_trajectories"].plot(xB, yB, 'r', label='wm poses')
-
-        if self.controller_safe_model:
-            cb = plot_values(self.render_info["fig"], 
-                        self.render_info["ax_world_model_robot_trajectories"], 
-                        safe_model, render_info=self.render_info, return_cb=True)
 
         # safety boundary
         if self.plot_safety_boundary:
