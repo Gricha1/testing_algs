@@ -188,8 +188,8 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         #self.goal_pos = np.array([0.1, -0.8])
 
         # safe task 2  
-        self.cylinder_pos = np.asarray([-0.3, 0.0])
-        self.goal_pos = np.array([-0.3, -0.8])
+        #self.cylinder_pos = np.asarray([-0.3, 0.0])
+        #self.goal_pos = np.array([-0.3, -0.8])
                 
         # safe task 3
         #self.cylinder_pos = np.asarray([-0.3, -0.8])

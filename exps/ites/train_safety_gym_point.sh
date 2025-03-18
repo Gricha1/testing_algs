@@ -11,7 +11,8 @@ python main.py --domain_name Safexp \
                --task_name PointGoal1 \
                --env_name SafeGym \
                --seed $seed \
-               --validation_without_image --eval_freq 30000 \
+               --validation_without_image \
+               --eval_freq 30000 \
                --man_rew_scale 100.0 \
                --goal_loss_coeff 20.0 \
                --manager_propose_freq 10 \

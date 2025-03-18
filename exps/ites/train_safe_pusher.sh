@@ -12,7 +12,7 @@ python main.py --seed $seed \
                --pusher_random_obj_start_poses \
                --pusher_three_goal_dim \
                --traj_buffer_size 5000 \
-               --cost_budget 5 \
+               --cost_budget 10.0 \
                --load \
                --loaded_exp_num ml4_233 \
                --load_without_cost_model \
@@ -20,7 +20,6 @@ python main.py --seed $seed \
                --validation_without_image --eval_freq 30000 \
                --wm_pretrain_epoches 100 \
                --wm_n_initial_exploration_steps 30000 \
-               --goal_loss_coeff 20 \
                --cost_model \
                --man_rew_scale 0.1 \
                --goal_loss_coeff 20.0 \
