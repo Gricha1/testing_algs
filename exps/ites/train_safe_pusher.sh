@@ -32,6 +32,6 @@ python main.py --seed $seed \
                --max_timesteps 4000000 \
                --wandb_postfix "" \
                --not_use_wandb \
-               #--cm_pretrain \
+               --cm_pretrain \
                #--wm_pretrain
 

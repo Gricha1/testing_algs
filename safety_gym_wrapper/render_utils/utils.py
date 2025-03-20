@@ -58,13 +58,6 @@ class CustomVideoRendered:
                
         if self.plot_subgoal:
             assert "subgoal_pos" in current_step_info
-        if self.plot_world_model_state:
-            assert "imagined_robot_pos" in current_step_info
-
-        if env_name == "SafeAntMaze":
-            safety_boundary, safe_dataset = self.env.get_safety_bounds(get_safe_unsafe_dataset=True)
-            debug_info["safety_boundary"] = safety_boundary
-            debug_info["safe_dataset"] = safe_dataset
 
         env_min_x, env_max_x = self.render_info["env_min_x"], self.render_info["env_max_x"]
         env_min_y, env_max_y = self.render_info["env_min_y"], self.render_info["env_max_y"]
@@ -92,18 +85,33 @@ class CustomVideoRendered:
         circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="g", alpha=0.5)
         self.render_info["ax_states"].add_patch(circle_robot) 
         self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
+        if "cost_model_state" in debug_info:
+            cost_model_state = debug_info["cost_model_state"]
+            #self.render_info["ax_states"].text(x + 0.05, y - 0.4, f"{int(cost_model_state*100)/100}")
+        # dubug
+        for key_ in debug_info:
+            if key_.startswith("cost_model_achieved_goal_"):
+                cost_val = debug_info[key_]
+                state_key = "_".join(key_.split("_")[2:])
+                x, y = debug_info[state_key]
+                self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
+        if "wm_img_states" in debug_info:
+            x_coords = []
+            y_coords = []
+            for img_state in debug_info["wm_img_states"]:
+                x = img_state[0]
+                y = img_state[1]
+                x_coords.append(x)
+                y_coords.append(y)
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 3, color="r", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
+            wm_img_states_safety = debug_info["wm_img_states_safety"]
+            #self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+            #                                   f"{int(wm_img_states_safety*100)/100}")
         # world model comparsion
         if self.world_model_comparsion or (self.controller_safe_model and self.plot_cost_model_heatmap):
             self.robot_poses.append((x, y))   
-
-        # robot imagined pose
-        if self.plot_world_model_state or self.world_model_comparsion:
-            x = current_step_info["imagined_robot_pos"][0]
-            y = current_step_info["imagined_robot_pos"][1]
-            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 2, color="r", alpha=0.5)
-            self.render_info["ax_states"].add_patch(circle_robot) 
-            self.render_info["ax_states"].text(x, y + 0.05, "i_s")
-            self.world_model_poses.append((x, y))  
 
         # subgoal
         if self.plot_subgoal:
@@ -115,19 +123,22 @@ class CustomVideoRendered:
             if self.add_subgoal_values:
                 self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
                 self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
-
+            if "cost_model_subgoal" in debug_info:
+                    cost_model_subgoal = debug_info["cost_model_subgoal"]
+                    #self.render_info["ax_states"].text(x + 0.05, y - 0.4, f"{int(cost_model_subgoal*100)/100}")
         # goal
-        if env_name != "AntGather" and env_name != "AntMazeSparse" and plot_goal:
+        if plot_goal:
             x = current_step_info["goal_pos"][0]
             y = current_step_info["goal_pos"][1]
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="y", alpha=0.5)
             self.render_info["ax_states"].add_patch(circle_robot) 
             self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")  
+            if "cost_model_state" in debug_info:
+                cost_model_goal = debug_info["cost_model_goal"]
+                #self.render_info["ax_states"].text(x + 0.05, y - 0.4, f"{int(cost_model_goal*100)/100}")
 
         # world model comparsion
         if self.world_model_comparsion or (self.controller_safe_model and self.plot_cost_model_heatmap):
-            #xA, yA = zip(*self.robot_poses)
-            #self.render_info["ax_world_model_robot_trajectories"].plot(xA, yA, 'g', label='robot poses')
             x = current_step_info["robot_pos"][0]
             y = current_step_info["robot_pos"][1]
             circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="r", alpha=1, fill=False)

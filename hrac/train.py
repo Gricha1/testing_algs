@@ -150,8 +150,6 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                             manager_policy=manager_policy,
                                                             )
                                     episode_imagine_subgoal_safety += curr_imagine_subgoal_safety
-                                    print("len img_states:", len(img_states))
-                                    print("shape [0]:", img_states[0].shape)
                                 else:
                                     episode_imagine_subgoal_safety += controller_policy.state_safety_on_horizon(
                                                             state_torch, subgoal_torch, 
@@ -215,8 +213,53 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                             torch_state = torch.from_numpy(state[None, :]).type('torch.FloatTensor').to("cuda")
                             torch_achieved_goal = torch.from_numpy(achieved_goal[None, :]).type('torch.FloatTensor').to("cuda")
                             torch_subgoal = torch.from_numpy(subgoal[None, :]).type('torch.FloatTensor').to("cuda")
+                            torch_goal = torch.from_numpy(goal[None, :]).type('torch.FloatTensor').to("cuda")
+                            if args.domain_name == "Safexp":
+                                # debug
+                                test_achieved_goal_1 = np.array([-1, 0])
+                                #test_achieved_goal_1[0] += 0.5
+                                debug_info["achieved_goal_1"] = test_achieved_goal_1.copy()
+                                test_achieved_goal_1 = torch.from_numpy(test_achieved_goal_1[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_2 = np.array([-1, 1])
+                                #test_achieved_goal_2[0] -= 0.5
+                                debug_info["achieved_goal_2"] = test_achieved_goal_2.copy()
+                                test_achieved_goal_2 = torch.from_numpy(test_achieved_goal_2[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_3 = np.array([0, -1])
+                                #test_achieved_goal_3[0] += 0.5
+                                #test_achieved_goal_3[1] += 0.5
+                                debug_info["achieved_goal_3"] = test_achieved_goal_3.copy()
+                                test_achieved_goal_3 = torch.from_numpy(test_achieved_goal_3[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_4 = np.array([1, -1])
+                                #test_achieved_goal_4[0] -= 0.5
+                                #test_achieved_goal_4[1] -= 0.5
+                                debug_info["achieved_goal_4"] = test_achieved_goal_4.copy()
+                                test_achieved_goal_4 = torch.from_numpy(test_achieved_goal_4[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_5 = np.array([1, 1])
+                                #test_achieved_goal_4[0] -= 0.5
+                                #test_achieved_goal_4[1] -= 0.5
+                                debug_info["achieved_goal_5"] = test_achieved_goal_5.copy()
+                                test_achieved_goal_5 = torch.from_numpy(test_achieved_goal_5[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                # debug
+                                cost_model_achieved_goal_1 = cost_model.safe_model(test_achieved_goal_1, torch_state)
+                                cost_model_achieved_goal_2 = cost_model.safe_model(test_achieved_goal_2, torch_state)
+                                cost_model_achieved_goal_3 = cost_model.safe_model(test_achieved_goal_3, torch_state)
+                                cost_model_achieved_goal_4 = cost_model.safe_model(test_achieved_goal_4, torch_state)
+                                cost_model_achieved_goal_5 = cost_model.safe_model(test_achieved_goal_5, torch_state)
+                                debug_info["cost_model_achieved_goal_1"] = cost_model_achieved_goal_1.item()
+                                debug_info["cost_model_achieved_goal_2"] = cost_model_achieved_goal_2.item()
+                                debug_info["cost_model_achieved_goal_3"] = cost_model_achieved_goal_3.item()
+                                debug_info["cost_model_achieved_goal_4"] = cost_model_achieved_goal_4.item()
+                                debug_info["cost_model_achieved_goal_5"] = cost_model_achieved_goal_5.item()
+                        
                             cost_model_state = cost_model.safe_model(cost_model.phi(torch_state), torch_state)
                             debug_info["cost_model_state"] = cost_model_state.item()
+                            cost_model_goal = cost_model.safe_model(torch_goal, torch_state)
+                            debug_info["cost_model_goal"] = cost_model_goal.item()
                             if not args.manager_algo == "none":
                                 if manager_policy.absolute_goal:
                                     cost_model_subgoal = cost_model.safe_model(
@@ -599,7 +642,6 @@ def run_hrac(args):
             if args.validate:
                 cost_dataset_seeds = [213]
             else:
-                #cost_dataset_seeds = [34, 943, 565, 24, 243, 521, 732, 87, 213, 123, 102, 5, 143]
                 cost_dataset_seeds = [34, 943]
             safe_dataset = []
             for seed_ in cost_dataset_seeds:
@@ -616,7 +658,7 @@ def run_hrac(args):
                          "plot_safety_boundary": False,
                          "plot_world_model_state": args.world_model,
                          "controller_safe_model": args.cost_model,
-                         "plot_cost_model_heatmap": True if args.manager_algo == "none" else False,
+                         "plot_cost_model_heatmap": False,
                          }
         renderer = get_renderer(env, args, renderer_args)
         env.seed(args.seed)
@@ -911,8 +953,7 @@ def run_hrac(args):
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
-            if args.domain_name == "Safexp":
-                writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
+            writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
     else:
         cost_model = None
 
@@ -1033,13 +1074,13 @@ def run_hrac(args):
                     exploration_total_timesteps += 1
 
 
-        if args.wm_pretrain:
+        if args.wm_pretrain or args.cm_pretrain:
             print("pretraining world model")
             acc_wm_imagination_episode_metric = 0
             total_timesteps = 0 
             episode_num = 0
             for i in range(args.wm_pretrain_epoches):
-                print(f"pretrain world model {i}/{args.wm_pretrain_epoches}")
+                print(f"pretrain world/cost model {i}/{args.wm_pretrain_epoches}")
                 if args.world_model:
                     train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
                                       batch_size=args.wm_batch_size, episode_num=episode_num,

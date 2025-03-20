@@ -141,45 +141,12 @@ class CostModelTrajectoryBuffer(object):
 
                 if self.frame_stack_num > 1:
                     assert 1 == 0
-                #if self.frame_stack_num > 1:
-                #    frame_stack_states_i = [sc_pair[0] for sc_pair in current_trajectory[i-self.frame_stack_num+1:i+1]]
-                #else:
                 _ = current_trajectory[i][0]
                 state_i = current_trajectory[i][1]
                 _ = current_trajectory[i][1]
                 goal_j = current_trajectory[j][0]
                 _ = current_trajectory[j][1]
                 cost_j = current_trajectory[j][2]
-
-                #manager_absolute_goal = state_j[:self.goal_dim]
-                """
-                part_of_state = []
-                if self.frame_stack_num > 1:
-                    agent_poses = [state_i[:self.state_dim] for state_i in frame_stack_states_i]
-                    if self.agent_obst_len == 0:
-                        obstacle_data = []
-                    else:
-                        obstacle_datas = [state_i[-self.agent_obst_len:] for state_i in frame_stack_states_i]
-                    # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
-                    while len(agent_poses) < self.frame_stack_num:
-                        agent_poses.append([0 for i in range(self.state_dim)])
-                        if self.agent_obst_len == 0:
-                            obstacle_data = []
-                        else:
-                            obstacle_datas.append([0 for i in range(self.agent_obst_len)])
-                    for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas):
-                        part_of_state.extend(agent_pose)
-                        part_of_state.extend(obstacle_data)
-                else:
-                    agent_pose = state_i[:self.state_dim]
-                    part_of_state.extend(agent_pose)
-                    if self.agent_obst_len != 0:
-                        obstacle_data = state_i[-self.agent_obst_len:]
-                        part_of_state.extend(obstacle_data)
-                state = []
-                state.extend(manager_absolute_goal)
-                state.extend(part_of_state)
-                """
                 if cost_j >= 1: # test could be [0, 1, 2]                    
                     unsafes.append((goal_j, state_i))
                 else:
@@ -198,16 +165,18 @@ class CostModelTrajectoryBuffer(object):
                 unsafes = random.sample(unsafes, min_len)
                 safes = []
         else:
-            samples_to_add = len(current_trajectory)
-            samples_to_add = min(samples_to_add, min_len) // 2
-            unsafes = random.sample(unsafes, samples_to_add)
-            safes = random.sample(safes, samples_to_add)
+            pass
+            #samples_to_add = len(current_trajectory)
+            #samples_to_add = min(samples_to_add, min_len) // 2
+            #unsafes = random.sample(unsafes, samples_to_add)
+            #safes = random.sample(safes, samples_to_add)
+            unsafes = []
+            safes = []
 
         state_goal_pairs.extend(unsafes)
         state_goal_pairs.extend(safes)
         costs.extend([1 for i in range(len(unsafes))])
         costs.extend([0 for i in range(len(safes))])
-
         for (goal, state), cost in zip(state_goal_pairs, costs):
             self.add((goal, state, cost))
         
