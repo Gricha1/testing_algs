@@ -156,22 +156,21 @@ class CostModelTrajectoryBuffer(object):
         # add = trajectory_len samples to buffer
         min_len = min(len(unsafes), len(safes))        
         if min_len == 0:
-            if len(unsafes) == 0:
-                min_len = len(safes) // 4
-                unsafes = []
-                safes = random.sample(safes, min_len)    
-            else:
-                min_len = len(unsafes) // 4
-                unsafes = random.sample(unsafes, min_len)
-                safes = []
-        else:
-            pass
-            #samples_to_add = len(current_trajectory)
-            #samples_to_add = min(samples_to_add, min_len) // 2
-            #unsafes = random.sample(unsafes, samples_to_add)
-            #safes = random.sample(safes, samples_to_add)
-            unsafes = []
             safes = []
+            unsafes = []
+            #if len(unsafes) == 0:
+            #    min_len = len(safes) // 4
+            #    unsafes = []
+            #    safes = random.sample(safes, min_len)    
+            #else:
+            #    min_len = len(unsafes) // 4
+            #    unsafes = random.sample(unsafes, min_len)
+            #    safes = []
+        else:
+            samples_to_add = len(current_trajectory)
+            samples_to_add = min(samples_to_add, min_len) // 2
+            unsafes = random.sample(unsafes, samples_to_add)
+            safes = random.sample(safes, samples_to_add)
 
         state_goal_pairs.extend(unsafes)
         state_goal_pairs.extend(safes)

@@ -943,12 +943,16 @@ def run_hrac(args):
                              total_timesteps=0,
                              episode_num=0):
             print("train cost model")
+            if len(cost_model_buffer) == 0:
+                print("cost model buffer is empty!!!")
+                return
             debug_info = cost_model.train_cost_model(replay_buffer, 
                                                      cost_model_iterations=cost_model_iterations,
                                                      cost_model_batch_size=cost_model_batch_size)
             
             if episode_num % 10 == 0:
-                print("cost model loss: {:.3f}".format(np.mean(debug_info["safe_model_loss"])))
+                print("cost model loss: {:.3f},".format(np.mean(debug_info["safe_model_loss"])), 
+                      f"cost buffer len: {len(cost_model_buffer)}")
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
