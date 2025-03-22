@@ -100,6 +100,15 @@ class CustomVideoRendered:
                 self.render_info["ax_states"].text(x + 0.05, y - 0.1, f"{int(cost_model_state*100)/100}")
             else:
                 self.render_info["ax_states"].text(x + 0.05, y - 2.0, f"{int(cost_model_state*100)/100}")
+
+        # dubug
+        for key_ in debug_info:
+            if key_.startswith("cost_model_achieved_goal_"):
+                cost_val = debug_info[key_]
+                state_key = "_".join(key_.split("_")[2:])
+                x, y, z = debug_info[state_key]
+                self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
+
         if "wm_img_states" in debug_info:
             x_coords = []
             y_coords = []

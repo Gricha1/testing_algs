@@ -255,6 +255,73 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                 debug_info["cost_model_achieved_goal_3"] = cost_model_achieved_goal_3.item()
                                 debug_info["cost_model_achieved_goal_4"] = cost_model_achieved_goal_4.item()
                                 debug_info["cost_model_achieved_goal_5"] = cost_model_achieved_goal_5.item()
+                            elif env_name == "SafePusher":
+                                # debug
+                                test_achieved_goal_1 = achieved_goal.copy()
+                                test_achieved_goal_1[0] = 0
+                                test_achieved_goal_1[1] = -0.5
+                                debug_info["achieved_goal_1"] = test_achieved_goal_1.copy()
+                                test_achieved_goal_1 = torch.from_numpy(test_achieved_goal_1[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_2 = achieved_goal.copy()
+                                test_achieved_goal_2[0] = -0.7
+                                test_achieved_goal_2[1] = 0
+                                debug_info["achieved_goal_2"] = test_achieved_goal_2.copy()
+                                test_achieved_goal_2 = torch.from_numpy(test_achieved_goal_2[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_3 = achieved_goal.copy()
+                                test_achieved_goal_3[0] = 0.7
+                                test_achieved_goal_3[1] = 0
+                                debug_info["achieved_goal_3"] = test_achieved_goal_3.copy()
+                                test_achieved_goal_3 = torch.from_numpy(test_achieved_goal_3[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_4 = achieved_goal.copy()
+                                test_achieved_goal_4[0] = 1
+                                test_achieved_goal_4[1] = 0
+                                debug_info["achieved_goal_4"] = test_achieved_goal_4.copy()
+                                test_achieved_goal_4 = torch.from_numpy(test_achieved_goal_4[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_5 = achieved_goal.copy()
+                                test_achieved_goal_5[0] = -1
+                                test_achieved_goal_5[1] = 0.4
+                                debug_info["achieved_goal_5"] = test_achieved_goal_5.copy()
+                                test_achieved_goal_5 = torch.from_numpy(test_achieved_goal_5[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_6 = achieved_goal.copy()
+                                test_achieved_goal_6[0] = 1
+                                test_achieved_goal_6[1] = -0.4
+                                debug_info["achieved_goal_6"] = test_achieved_goal_6.copy()
+                                test_achieved_goal_6 = torch.from_numpy(test_achieved_goal_6[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_7 = achieved_goal.copy()
+                                test_achieved_goal_7[0] = -1
+                                test_achieved_goal_7[1] = 0
+                                debug_info["achieved_goal_7"] = test_achieved_goal_7.copy()
+                                test_achieved_goal_7 = torch.from_numpy(test_achieved_goal_7[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                test_achieved_goal_8 = achieved_goal.copy()
+                                test_achieved_goal_8[0] = 0
+                                test_achieved_goal_8[1] = 0.4
+                                debug_info["achieved_goal_8"] = test_achieved_goal_8.copy()
+                                test_achieved_goal_8 = torch.from_numpy(test_achieved_goal_8[None, :]).type('torch.FloatTensor').to("cuda")
+
+                                # debug
+                                cost_model_achieved_goal_1 = cost_model.safe_model(test_achieved_goal_1, torch_state)
+                                cost_model_achieved_goal_2 = cost_model.safe_model(test_achieved_goal_2, torch_state)
+                                cost_model_achieved_goal_3 = cost_model.safe_model(test_achieved_goal_3, torch_state)
+                                cost_model_achieved_goal_4 = cost_model.safe_model(test_achieved_goal_4, torch_state)
+                                cost_model_achieved_goal_5 = cost_model.safe_model(test_achieved_goal_5, torch_state)
+                                cost_model_achieved_goal_6 = cost_model.safe_model(test_achieved_goal_6, torch_state)
+                                cost_model_achieved_goal_7 = cost_model.safe_model(test_achieved_goal_7, torch_state)
+                                cost_model_achieved_goal_8 = cost_model.safe_model(test_achieved_goal_8, torch_state)
+                                debug_info["cost_model_achieved_goal_1"] = cost_model_achieved_goal_1.item()
+                                debug_info["cost_model_achieved_goal_2"] = cost_model_achieved_goal_2.item()
+                                debug_info["cost_model_achieved_goal_3"] = cost_model_achieved_goal_3.item()
+                                debug_info["cost_model_achieved_goal_4"] = cost_model_achieved_goal_4.item()
+                                debug_info["cost_model_achieved_goal_5"] = cost_model_achieved_goal_5.item()
+                                debug_info["cost_model_achieved_goal_6"] = cost_model_achieved_goal_6.item()
+                                debug_info["cost_model_achieved_goal_7"] = cost_model_achieved_goal_7.item()
+                                debug_info["cost_model_achieved_goal_8"] = cost_model_achieved_goal_8.item()
                         
                             cost_model_state = cost_model.safe_model(cost_model.phi(torch_state), torch_state)
                             debug_info["cost_model_state"] = cost_model_state.item()
