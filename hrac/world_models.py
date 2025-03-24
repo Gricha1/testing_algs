@@ -213,6 +213,14 @@ class EnsembleDynamicsModel():
     def set_elite_model_idxes(self, elite_model_idxes):
         self.elite_model_idxes = elite_model_idxes
 
+    def get_weights_norm(self):
+        with torch.no_grad():
+            nn1_norm = self.ensemble_model.nn1.weight.norm().item() + self.ensemble_model.nn1.bias.norm().item()
+            nn2_norm = self.ensemble_model.nn2.weight.norm().item() + self.ensemble_model.nn2.bias.norm().item()
+            nn3_norm = self.ensemble_model.nn3.weight.norm().item() + self.ensemble_model.nn3.bias.norm().item()
+            nn4_norm = self.ensemble_model.nn4.weight.norm().item() + self.ensemble_model.nn4.bias.norm().item()
+            return nn1_norm + nn2_norm + nn3_norm + nn4_norm
+
     #@profile
     def train(self, inputs, labels, batch_size=256, holdout_ratio=0., max_epochs_since_update=5):
         self._max_epochs_since_update = max_epochs_since_update
@@ -458,10 +466,7 @@ class PredictEnv:
             ensemble_model_means, ensemble_model_vars = self.model.predict(inputs, torch_deviced=torch_deviced)
         else:
             ensemble_model_means, ensemble_model_vars = self.model.predict(inputs, factored=True)
-        #print(ensemble_model_means.shape, ensemble_model_vars.shape)
-        #random_idx = np.random.randint(5,size=1)#
-        # ensemble_model_means[random_idx] += obs
-        # test
+        
         if not deterministic:
             if torch_deviced:
                 ensemble_model_stds = torch.sqrt(ensemble_model_vars)
@@ -590,8 +595,6 @@ class PredictEnv:
         temp_model_type='pytorch'
         if load_wm_as_pkl:
             env_model = torch.load("{}/{}/{}_{}_env_model.pkl".format(dir, exp_num, env_name, algo))
-            #predict_env = PredictEnv(env_model, temp_env_name, temp_model_type)
-            #self = predict_env
             self.model = env_model
         else:
             self.model.ensemble_model.load_state_dict(torch.load("{}/{}/{}_{}_env_model.pth".format(dir, exp_num, env_name, algo)))

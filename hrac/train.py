@@ -1056,10 +1056,13 @@ def run_hrac(args):
                     print("epoches: {:.3f}".format(epoches), end=" ")
 
             wm_update_time = time.time() - start_wm_train
+            weights_norm = predict_env.model.get_weights_norm()
+            writer.add_scalar(f"data/world_model_weights_norm", weights_norm, total_timesteps)
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
             writer.add_scalar(f"data/world_model_update_epoches", epoches, total_timesteps)
             writer.add_scalar(f"data/world_model_update_time", wm_update_time, total_timesteps)
             print("time = ", wm_update_time, end=" ")
+            print("weights_norm = ", weights_norm, end=" ")
             print()
     else:
         predict_env = None   
