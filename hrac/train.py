@@ -1055,9 +1055,11 @@ def run_hrac(args):
                     print("world model loss: {:.3f}".format(world_model_loss), end=" ")
                     print("epoches: {:.3f}".format(epoches), end=" ")
 
+            wm_update_time = time.time() - start_wm_train
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
             writer.add_scalar(f"data/world_model_update_epoches", epoches, total_timesteps)
-            print("time = ", time.time() - start_wm_train, end=" ")
+            writer.add_scalar(f"data/world_model_update_time", wm_update_time, total_timesteps)
+            print("time = ", wm_update_time, end=" ")
             print()
     else:
         predict_env = None   
@@ -1204,6 +1206,7 @@ def run_hrac(args):
 
         ## Main training ...
         print("start training...")
+        start_training_time = time.time()
         while total_timesteps < args.max_timesteps:
             if done:
                 # Update lagrangian
@@ -1295,7 +1298,6 @@ def run_hrac(args):
                                                                         or "low_lag" in args.manager_algo else None)
                         if "low_lag" in args.manager_algo:
                             manager_policy._cost_penalty = controller_policy._cost_penalty
-
                         writer.add_scalar("data/manager_actor_loss", man_act_loss, total_timesteps)
                         writer.add_scalar("data/manager_critic_loss", man_crit_loss, total_timesteps)
                         writer.add_scalar("data/manager_goal_loss", man_goal_loss, total_timesteps)
@@ -1312,7 +1314,10 @@ def run_hrac(args):
                             if not(man_safety_loss is None):
                                 print("Manager safety loss: {:.3f}".format(man_safety_loss))
 
+                    FPS = total_timesteps / (time.time() - start_training_time)
+                    writer.add_scalar("data/FPS", FPS, total_timesteps)
                     print("TB dir:", output_dir)
+                    print("Training FPS:", FPS)
                     print("*************")
                     print()
 
