@@ -352,6 +352,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                                 )
                             debug_info["wm_img_states"] = [controller_policy.pose(img_state).cpu().numpy().flatten() 
                                                             for img_state in img_states]
+                            if env_name == "SafePusher":
+                                debug_info["wm_img_achieveds"] = [controller_policy.phi(img_state).cpu().numpy().flatten() 
+                                                                for img_state in img_states]
                             debug_info["wm_img_states_safety"] = curr_imagine_subgoal_safety.item()
                     if args.domain_name == "Safexp":
                         debug_info["dist_to_goal"] = env.env.dist_goal()
@@ -664,11 +667,11 @@ def run_hrac(args):
             def pose(state):
                 # manipulator_pose = [-6:-3], obj_pose=[-3:]
                 if args.pusher_four_goal_dim:
-                    return state[:, -6:-4]
+                    return state[:, -6:-3]
                 elif args.pusher_three_goal_dim:
-                    return state[:, -3:]
+                    return state[:, -6:-3]
                 elif args.pusher_two_goal_dim:
-                    return state[:, -3:-1]
+                    return state[:, -6:-3]
                 else:
                     return state[:, -6:-3]
         else:
@@ -1038,8 +1041,9 @@ def run_hrac(args):
             
         def train_world_model(replay_buffer, acc_wm_imagination_episode_metric, batch_size=256, 
                               episode_num=0, total_timesteps=0):
+            start_wm_train = time.time()
             with TensorWrapper():
-                print("train world model")
+                print("train world model", end="")
                 world_model_loss = predict_env.train_world_model(replay_buffer, batch_size=batch_size)
                 
                 writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
@@ -1047,9 +1051,11 @@ def run_hrac(args):
                     writer.add_scalar("data/world_model_euclid_dist", acc_wm_imagination_episode_metric, total_timesteps)
 
                 if episode_num % 10 == 0:
-                    print("world model loss: {:.3f}".format(world_model_loss))
+                    print("world model loss: {:.3f}".format(world_model_loss), end=" ")
 
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
+            print("time = ", time.time() - start_wm_train, end=" ")
+            print()
     else:
         predict_env = None   
 
@@ -1146,12 +1152,12 @@ def run_hrac(args):
 
 
         if args.wm_pretrain or args.cm_pretrain:
-            print("pretraining world model")
+            print("pretraining world/cost/reward model")
             acc_wm_imagination_episode_metric = 0
             total_timesteps = 0 
             episode_num = 0
             for i in range(args.wm_pretrain_epoches):
-                print(f"pretrain world/cost model {i}/{args.wm_pretrain_epoches}")
+                print(f"pretrain world/cost/reward model {i}/{args.wm_pretrain_epoches}")
                 if args.world_model:
                     train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
                                       batch_size=args.wm_batch_size, episode_num=episode_num,

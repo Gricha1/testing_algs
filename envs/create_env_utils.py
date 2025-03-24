@@ -109,6 +109,21 @@ class CustomVideoRendered:
                 x, y, z = debug_info[state_key]
                 self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
 
+        if "wm_img_achieveds" in debug_info:
+            x_coords = []
+            y_coords = []
+            for img_state in debug_info["wm_img_achieveds"]:
+                x = img_state[0] + shift_x
+                y = img_state[1] + shift_y
+                x_coords.append(x)
+                y_coords.append(y)
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 3, color="r", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
+            wm_img_states_safety = debug_info["wm_img_states_safety"]
+            self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+                                               f"{int(wm_img_states_safety*100)/100}")
+            
         if "wm_img_states" in debug_info:
             x_coords = []
             y_coords = []

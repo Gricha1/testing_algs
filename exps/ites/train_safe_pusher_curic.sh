@@ -16,8 +16,7 @@ python main.py --seed $seed \
                --goal_loss_coeff 20.0 \
                --cost_budget 0.0 \
                --load \
-               --loaded_exp_num ml4_233 \
-               --load_without_cost_model \
+               --loaded_exp_num ml3_157 \
                --load_without_world_model \
                --validation_without_image --eval_freq 30000 \
                --wm_pretrain_epoches 100 \
