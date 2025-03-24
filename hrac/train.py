@@ -1056,6 +1056,7 @@ def run_hrac(args):
                     print("epoches: {:.3f}".format(epoches), end=" ")
 
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
+            writer.add_scalar(f"data/world_model_update_epoches", epoches, total_timesteps)
             print("time = ", time.time() - start_wm_train, end=" ")
             print()
     else:
@@ -1500,9 +1501,10 @@ def run_hrac(args):
 
             ## logging world model performance
             if not args.manager_algo == "none" and args.world_model and episode_num > 1:
-                imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, episode_timesteps, imagined_state_freq)
+                imagined_state = predict_env.imagine_state(prev_imagined_state, prev_action, state, 
+                                                           episode_timesteps, imagined_state_freq)
                 prev_imagined_state = imagined_state
-                cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state[:2] - state[:2]) ** 2))
+                cur_wm_imagination_episode_metric = np.sqrt(np.sum((imagined_state - state) ** 2))
                 wm_imagination_episode_metric += cur_wm_imagination_episode_metric
                 if episode_timesteps % imagined_state_freq == 0:
                     acc_wm_imagination_episode_metric += wm_imagination_episode_metric / imagined_state_freq
