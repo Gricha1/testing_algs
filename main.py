@@ -168,6 +168,7 @@ if __name__ == "__main__":
     parser.add_argument("--wm_n_initial_exploration_steps", default=10_000, type=int)
     parser.add_argument("--wm_batch_size", default=256, type=int)
     parser.add_argument("--wm_train_freq", default=20, type=int)    
+    parser.add_argument("--wm_update_poches", default=0, type=int)
     parser.add_argument("--world_model", action='store_true', default=False)
     parser.add_argument("--wm_learning_rate", default=1e-3, type=float)
     parser.add_argument("--wm_buffer_size", default=1e6, type=int)

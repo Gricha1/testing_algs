@@ -1035,7 +1035,8 @@ def run_hrac(args):
         with TensorWrapper():
             env_model = EnsembleDynamicsModel(num_networks, num_elites, state_dim, action_dim, 
                                               reward_size, cost_size, pred_hidden_size,
-                                              learning_rate=learning_rate, use_decay=use_decay)
+                                              learning_rate=learning_rate, use_decay=use_decay,
+                                              update_poches=args.wm_update_poches)
             predict_env = PredictEnv(env_model, env_name, model_type, args.testing_mean_wm)
         world_model_buffer = utils.ReplayBuffer(maxsize=args.wm_buffer_size)
             
@@ -1044,7 +1045,7 @@ def run_hrac(args):
             start_wm_train = time.time()
             with TensorWrapper():
                 print("train world model", end="")
-                world_model_loss = predict_env.train_world_model(replay_buffer, batch_size=batch_size)
+                epoches, world_model_loss = predict_env.train_world_model(replay_buffer, batch_size=batch_size)
                 
                 writer.add_scalar("data/world_model_loss", world_model_loss, total_timesteps)
                 if episode_num > 1:
@@ -1052,6 +1053,7 @@ def run_hrac(args):
 
                 if episode_num % 10 == 0:
                     print("world model loss: {:.3f}".format(world_model_loss), end=" ")
+                    print("epoches: {:.3f}".format(epoches), end=" ")
 
             writer.add_scalar(f"data/world_model_buffer_size", len(replay_buffer), total_timesteps)
             print("time = ", time.time() - start_wm_train, end=" ")
