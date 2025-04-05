@@ -120,6 +120,7 @@ class Manager(object):
         self.coef_safety_modelfree = coef_safety_modelfree
         if "high_lag" in self.args.manager_algo:
             self._cost_penalty = 0.0
+            # Cost Critic
             self.cost_critic = ControllerCritic(
                 state_dim, goal_dim, action_dim, hidden_size
             ).to(device)
@@ -133,7 +134,7 @@ class Manager(object):
                 self.cost_critic.parameters(), lr=critic_lr, weight_decay=0.0001
             )
             self.cost_criterion = nn.SmoothL1Loss() 
-        if "high_lag" in self.args.manager_algo:
+            # Lagrangian
             self.safe_threshold = torch.tensor(args.cost_budget)
             self._pid_kp = args.ctrl_pid_kp
             self._pid_ki = args.ctrl_pid_ki
@@ -258,8 +259,7 @@ class Manager(object):
             ld_loss = torch.clamp(F.pairwise_distance(a_net(batch_landmarks), a_net(gen_subgoal)) - r_margin, min=0.).mean()
             
         # ITES high level cost loss
-        safety_subgoal_cls_loss = 0
-        safety_lag_loss = 0
+        safety_losses = {}
         if "safe_cls" in self.args.manager_algo:
             if not self.absolute_goal:
                 safety_subgoal_cls_loss = cost_model.safe_model(actions + self.phi(state), state)
@@ -267,16 +267,18 @@ class Manager(object):
                 safety_subgoal_cls_loss = cost_model.safe_model(actions, state)
             safety_subgoal_cls_loss = safety_subgoal_cls_loss.mean()
             safety_subgoal_cls_loss = self.coef_safety_modelfree * safety_subgoal_cls_loss
+            safety_losses["safety_subgoal_cls_loss"] = safety_subgoal_cls_loss
         if "high_lag" in self.args.manager_algo:
             safety_lag_loss = self.cost_critic.Q1(state, goal, actions).mean()
-        if "low_lag" in self.args.manager_algo:            
+            safety_losses["safety_lag_loss"] = safety_lag_loss
+        elif "low_lag" in self.args.manager_algo:            
             ctrl_actions = controller_policy.actor(controller_policy.clean_obs(state), actions) 
             safety_lag_loss = controller_policy.cost_critic.Q1(state, actions, ctrl_actions).mean()
+            safety_losses["safety_lag_loss"] = safety_lag_loss
 
         return actor_loss, \
                goal_loss, \
-               {"safety_subgoal_cls_loss": safety_subgoal_cls_loss, 
-                "safety_lag_loss": safety_lag_loss}, \
+               safety_losses, \
                ld_loss, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):

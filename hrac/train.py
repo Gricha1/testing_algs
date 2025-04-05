@@ -345,7 +345,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                                 torch_state, torch_subgoal, 
                                                                 controller_policy, 
                                                                 cost_model=cost_model,
-                                                                all_steps_safety=args.controller_cumul_img_safety,
+                                                                all_steps_safety=True,
                                                                 predict_env=predict_env,
                                                                 return_img_states=True,
                                                                 manager_policy=manager_policy,
@@ -367,6 +367,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         debug_info["dist_a_net_s_g"] = 0
                     debug_info["dist_a_net_s_g"] = 0
                     current_step_info = {}
+                    current_step_info["torch_state"] = torch_state
                     if env_name == "SafePusher":
                         if args.pusher_four_goal_dim:
                             current_step_info["robot_pos"] = np.array(achieved_goal[2:4])
@@ -434,7 +435,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                         debug_info=debug_info, 
                                                         plot_goal=True,
                                                         env_name=env_name,
-                                                        safe_model=cost_model.safe_model if args.cost_model else None)
+                                                        safe_model=cost_model if args.cost_model else None)
                         positions_screens.append(screen.transpose(2, 0, 1))
                 if args.manager_algo == "none":
                     absolute_goal = False
@@ -639,12 +640,12 @@ def run_hrac(args):
     assert "Safe" in args.env_name, "consider only safe envs"
 
     if args.domain_name == "SafetyMaze":
-        renderer_args = {}
+        renderer_args = {"cost_model_heatmap": args.cost_model_heatmap}
         if args.env_name == "SafePusher":
             renderer_args = {"plot_subgoal": False if args.manager_algo == "none" else True, 
                             "world_model_comparsion": False,
                             "plot_safety_boundary": True,
-                            "controller_safe_model": False,
+                            "cost_model_heatmap": args.cost_model_heatmap,
                             }
             if args.pusher_four_goal_dim:
                 low = np.array([-2.0, -2.0, -2.0, -2.0])
@@ -1166,11 +1167,11 @@ def run_hrac(args):
             episode_num = 0
             for i in range(args.wm_pretrain_epoches):
                 print(f"pretrain world/cost/reward model {i}/{args.wm_pretrain_epoches}")
-                if args.world_model:
+                if args.world_model and args.wm_pretrain:
                     train_world_model(world_model_buffer, acc_wm_imagination_episode_metric, 
                                       batch_size=args.wm_batch_size, episode_num=episode_num,
                                       total_timesteps=total_timesteps)
-                if args.cm_pretrain:
+                if args.cost_model and args.cm_pretrain:
                     train_cost_model(cost_model_buffer,
                                      cost_model_iterations=env.max_len if args.domain_name == "Safexp" else 600,
                                      cost_model_batch_size=args.cost_model_batch_size,
@@ -1185,8 +1186,10 @@ def run_hrac(args):
         episode_num = 0
         done = True
         evaluations = []
-        if "lag" in args.controller_algo or "high_lag" in args.manager_algo or "low_lag" in args.manager_algo:
-            pid_costs = deque(maxlen=10)
+        if "high_lag" in args.manager_algo or "low_lag" in args.manager_algo:
+            high_pid_costs = deque(maxlen=10)
+        if "lag" in args.controller_algo:
+            low_pid_costs = deque(maxlen=10)
 
         ep_obs_seq = None
         ep_ac_seq = None
@@ -1215,14 +1218,13 @@ def run_hrac(args):
                 # Update lagrangian
                 if total_timesteps != 0 and ("lag" in args.manager_algo or "lag" in args.controller_algo):
                     if "high_lag" in args.manager_algo: 
-                        pid_costs.append(episode_cost)
+                        high_pid_costs.append(episode_cost)
                     elif "low_lag" in args.manager_algo:
-                        pid_costs.append((episode_cost/env.max_len) * float(args.manager_propose_freq))
-                    else:
-                        if "td3_img_safe_lag" == args.controller_algo:
-                            pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
-                        elif "lag" in args.controller_algo:
-                            pid_costs.append(episode_cost)
+                        high_pid_costs.append((episode_cost/env.max_len) * float(args.manager_propose_freq))
+                    if "td3_img_safe_lag" == args.controller_algo:
+                        low_pid_costs.append((episode_cost/env.max_len) * float(args.img_horizon))
+                    elif "lag" in args.controller_algo:
+                        low_pid_costs.append(episode_cost)
                         
                 # Update Novelty Priority Queue
                 if ep_obs_seq is not None:
@@ -1277,7 +1279,7 @@ def run_hrac(args):
                                         ep_controller_reward, controller_episode_cost, episode_cost, 
                                         episode_safety_subgoal_rate_, 
                                         ep_manager_reward, total_timesteps,
-                                        pid_costs=pid_costs if "lag" in args.controller_algo else None)
+                                        pid_costs=low_pid_costs if "lag" in args.controller_algo else None)
                         
                     ## Train manager
                     if not args.manager_algo == "none" and timesteps_since_manager >= args.train_manager_freq:
@@ -1297,7 +1299,7 @@ def run_hrac(args):
                                                                  a_net=a_net, r_margin=r_margin,
                                                                  total_timesteps=total_timesteps,
                                                                  novelty_pq=novelty_pq,
-                                                                 ep_cost=np.mean(pid_costs) if "high_lag" in args.manager_algo \
+                                                                 ep_cost=np.mean(high_pid_costs) if "high_lag" in args.manager_algo \
                                                                         or "low_lag" in args.manager_algo else None)
                         if "low_lag" in args.manager_algo:
                             manager_policy._cost_penalty = controller_policy._cost_penalty

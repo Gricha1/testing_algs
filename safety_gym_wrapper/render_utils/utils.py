@@ -109,8 +109,8 @@ class CustomVideoRendered:
                 self.render_info["ax_states"].add_patch(circle_robot) 
             self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
             wm_img_states_safety = debug_info["wm_img_states_safety"]
-            #self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
-            #                                   f"{int(wm_img_states_safety*100)/100}")
+            self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+                                               f"{int(wm_img_states_safety*100)/100}")
         # world model comparsion
         if self.world_model_comparsion or (self.controller_safe_model and self.plot_cost_model_heatmap):
             self.robot_poses.append((x, y))   

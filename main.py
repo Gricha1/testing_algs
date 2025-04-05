@@ -12,6 +12,7 @@ if __name__ == "__main__":
     parser.add_argument("--visulazied_episode", default=0, type=int)
     parser.add_argument("--test_train_dataset", action="store_true", default=False)
     parser.add_argument("--validate_img_states", action="store_true", default=False)
+    parser.add_argument("--cost_model_heatmap", action="store_true", default=False)
     
     parser.add_argument("--load", action="store_true", default=False)
     parser.add_argument("--load_without_cost_model", action="store_true", default=False)
@@ -197,7 +198,8 @@ if __name__ == "__main__":
         assert not "lag" in args.controller_algo
 
     assert args.manager_algo in ["none",
-                                 "td3_adj", 
+                                 "td3_adj",
+                                 "td3_high_lag", 
                                  "td3_adj_safe_cls", 
                                  "td3_adj_safe_cls_high_lag", 
                                  "td3_adj_safe_cls_low_lag"]

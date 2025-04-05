@@ -3,7 +3,7 @@ import torch
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def plot_values(fig, ax_values, safe_model, render_info={}, return_cb=True):
+def plot_values(current_step_info, fig, ax_values, safe_model, render_info={}, return_cb=True):
     env_max_x = render_info["env_max_x"]
     env_min_x = render_info["env_min_x"]
     env_max_y = render_info["env_max_y"]
@@ -22,7 +22,12 @@ def plot_values(fig, ax_values, safe_model, render_info={}, return_cb=True):
                 grid_state.append(0)
             grid_states.append(grid_state)
     grid_states = torch.FloatTensor(np.array(grid_states)).to(device)
-    grid_vs = safe_model.predict(grid_states)
+
+    grid_states = safe_model.phi(grid_states)
+    torch_state = current_step_info["torch_state"].clone()
+    torch_state = torch_state.expand(grid_states.shape[0], -1)
+
+    grid_vs = safe_model.safe_model(grid_states, torch_state)
     grid_vs = grid_vs.detach().cpu().numpy().reshape(grid_resolution_x, grid_resolution_y)[::-1]
     #mask = grid_vs >= 0.5
     #grid_vs[mask] = 1

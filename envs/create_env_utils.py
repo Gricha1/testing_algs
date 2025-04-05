@@ -10,8 +10,8 @@ from envs.create_fetch_env import create_fetch_env
 
 
 class CustomVideoRendered:
-    def __init__(self, env, env_name, controller_safe_model=False, 
-                 world_model_comparsion=True, plot_subgoal=True, 
+    def __init__(self, env, env_name, cost_model_heatmap=False, 
+                 world_model_comparsion=False, plot_subgoal=True, 
                  plot_safety_boundary=True):
         # config
         self.add_subgoal_values = False
@@ -25,7 +25,7 @@ class CustomVideoRendered:
         self.render_info["ax_states"] = None
         self.env = env
         self.world_model_comparsion = world_model_comparsion
-        self.controller_safe_model = controller_safe_model
+        self.cost_model_heatmap = cost_model_heatmap
         self.shift_x = env.render_info["shift_x"]
         self.shift_y = env.render_info["shift_y"]
         if env_name == "SafePusher":
@@ -44,12 +44,12 @@ class CustomVideoRendered:
             assert 1 == 0, "didnt implement"
     
     def setup_renderer(self):
-        if self.world_model_comparsion or self.controller_safe_model:
+        if self.world_model_comparsion:
             self.robot_poses = []
             self.world_model_poses = []
     
     def delete_data(self):
-        if self.world_model_comparsion or self.controller_safe_model:
+        if self.world_model_comparsion:
             del self.robot_poses
             del self.world_model_poses
 
@@ -75,7 +75,11 @@ class CustomVideoRendered:
                 self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
                 self.render_info["ax_subgoal_values"] = self.render_info["fig"].add_subplot(122)
-            elif self.world_model_comparsion or self.controller_safe_model:
+            elif self.cost_model_heatmap:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_cost_model_heatmap"] = self.render_info["fig"].add_subplot(122)
+            elif self.world_model_comparsion:
                 self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
                 self.render_info["ax_world_model_robot_trajectories"] = self.render_info["fig"].add_subplot(122)
@@ -84,7 +88,7 @@ class CustomVideoRendered:
                 self.render_info["ax_states"] = self.render_info["fig"].add_subplot(111)
         self.render_info["ax_states"].set_ylim(bottom=env_min_y, top=env_max_y)
         self.render_info["ax_states"].set_xlim(left=env_min_x, right=env_max_x)
-        if self.world_model_comparsion or self.controller_safe_model:
+        if self.world_model_comparsion:
             self.render_info["ax_world_model_robot_trajectories"].set_ylim(bottom=env_min_y, top=env_max_y)
             self.render_info["ax_world_model_robot_trajectories"].set_xlim(left=env_min_x, right=env_max_x)
 
@@ -104,10 +108,11 @@ class CustomVideoRendered:
         # dubug
         for key_ in debug_info:
             if key_.startswith("cost_model_achieved_goal_"):
-                cost_val = debug_info[key_]
-                state_key = "_".join(key_.split("_")[2:])
-                x, y, z = debug_info[state_key]
-                self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
+                pass
+                #cost_val = debug_info[key_]
+                #state_key = "_".join(key_.split("_")[2:])
+                #x, y, z = debug_info[state_key]
+                #self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
 
         if "wm_img_achieveds" in debug_info:
             x_coords = []
@@ -139,8 +144,13 @@ class CustomVideoRendered:
             self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
                                                f"{int(wm_img_states_safety*100)/100}")
         # world model comparsion
-        if self.world_model_comparsion or self.controller_safe_model:
+        if self.world_model_comparsion:
             self.robot_poses.append((x - shift_x, y - shift_y))   
+
+        if self.cost_model_heatmap:
+            cb = plot_values(current_step_info, self.render_info["fig"], 
+                            self.render_info["ax_cost_model_heatmap"], 
+                            safe_model, render_info=self.render_info, return_cb=True)
 
         if env_name == "SafePusher":
             x = current_step_info["obj_pos"][0] + shift_x
@@ -190,32 +200,35 @@ class CustomVideoRendered:
         # safety boundary
         if self.plot_safety_boundary:
             safety_boundary = debug_info["safety_boundary"]
-            if self.controller_safe_model:
-                safe_dataset = debug_info["safe_dataset"]
             xs = [point.x + shift_x for point in safety_boundary]
             ys = [point.y + shift_y for point in safety_boundary]
             self.render_info["ax_states"].plot(xs, ys, 'b')
-            if self.world_model_comparsion or self.controller_safe_model:
+            if self.cost_model_heatmap:
+                xs = [point.x for point in safety_boundary]
+                ys = [point.y for point in safety_boundary]
+                self.render_info["ax_cost_model_heatmap"].plot(xs, ys, 'b')
+            if self.world_model_comparsion:
                 xs = [point.x for point in safety_boundary]
                 ys = [point.y for point in safety_boundary]
                 self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
-                # safe dataset check
-                if self.controller_safe_model and self.plot_safe_dataset:
-                    xs_dataset = safe_dataset[0]
-                    ys_dataset = safe_dataset[1]
-                    x1s_unsafe = []
-                    x2s_unsafe = []
-                    x1s_safe = []
-                    x2s_safe = []
-                    for i in range(len(ys_dataset)):
-                        if ys_dataset[i] == 1:
-                            x1s_unsafe.append(xs_dataset[i][0])
-                            x2s_unsafe.append(xs_dataset[i][1])
-                        else:
-                            x1s_safe.append(xs_dataset[i][0])
-                            x2s_safe.append(xs_dataset[i][1])
-                    self.render_info["ax_world_model_robot_trajectories"].plot(x1s_unsafe, x2s_unsafe, 'r')
-                    self.render_info["ax_world_model_robot_trajectories"].plot(x1s_safe, x2s_safe, 'g')
+            # safe dataset check
+            if self.cost_model_heatmap and self.plot_safe_dataset:
+                safe_dataset = debug_info["safe_dataset"]
+                xs_dataset = safe_dataset[0]
+                ys_dataset = safe_dataset[1]
+                x1s_unsafe = []
+                x2s_unsafe = []
+                x1s_safe = []
+                x2s_safe = []
+                for i in range(len(ys_dataset)):
+                    if ys_dataset[i] == 1:
+                        x1s_unsafe.append(xs_dataset[i][0])
+                        x2s_unsafe.append(xs_dataset[i][1])
+                    else:
+                        x1s_safe.append(xs_dataset[i][0])
+                        x2s_safe.append(xs_dataset[i][1])
+                self.render_info["ax_cost_model_heatmap"].plot(x1s_unsafe, x2s_unsafe, 'r')
+                self.render_info["ax_cost_model_heatmap"].plot(x1s_safe, x2s_safe, 'g')
 
             
         # print maze
@@ -284,9 +297,9 @@ class CustomVideoRendered:
         data = np.frombuffer(self.render_info["fig"].canvas.tostring_rgb(), dtype=np.uint8)
         data = data.reshape(self.render_info["fig"].canvas.get_width_height()[::-1] + (3,))
         self.render_info["ax_states"].clear()
-        if self.world_model_comparsion or self.controller_safe_model:
-            if self.controller_safe_model:
-                cb.remove()
+        if self.cost_model_heatmap:
+            cb.remove()
+        if self.world_model_comparsion:
             self.render_info["ax_world_model_robot_trajectories"].clear()
         if self.add_subgoal_values:
             self.render_info["ax_subgoal_values"].clear()
