@@ -5,7 +5,7 @@ from collections import deque
 import numpy as np
 from gym import spaces
 
-import envs.create_maze_env
+import safety_ant_maze_pusher_envs.create_maze_env
 
 class Point:
     def __init__(self, x, y):

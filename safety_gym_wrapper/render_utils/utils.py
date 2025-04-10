@@ -251,7 +251,6 @@ class CustomVideoRendered:
         return data
     
 
-
 def get_renderer(env, args, renderer_args):
     renderer = CustomVideoRendered(env,  
                                    args,

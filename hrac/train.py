@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 from safety_gym_wrapper.env import make_safety
 from safety_gym_wrapper.experience_collection import get_safetydataset_as_random_experience
 from safety_gym_wrapper.render_utils.utils import get_renderer
-from envs.create_env_utils import create_env
+from safety_ant_maze_pusher_envs.create_env_utils import create_env
 from bullet_safety_gym_env.utills_env_create import create_bullet_safety_gym_env
 
 from hrac.safe_mpc_controller import SafeMPC

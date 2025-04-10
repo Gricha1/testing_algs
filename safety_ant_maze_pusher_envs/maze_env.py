@@ -22,7 +22,7 @@ import math
 import numpy as np
 import gym
 
-from envs import maze_env_utils
+from safety_ant_maze_pusher_envs import maze_env_utils
 
 
 # Directory that contains mujoco xml files.
