@@ -29,8 +29,9 @@ if __name__ == "__main__":
     # environment
     ## pusher
     parser.add_argument("--safe_env_hazards", action="store_true", default=False)
-    parser.add_argument("--pusher_safe_env", action="store_true", default=False)
+    parser.add_argument("--pusher_safe_env_safe_zone", action="store_true", default=False)
     parser.add_argument("--pusher_safe_env_hazards", action="store_true", default=False)
+    parser.add_argument("--pusher_safe_env_dangerous_circle", action="store_true", default=False)
     parser.add_argument("--pusher_hard_goal_dist", action="store_true", default=False)
     parser.add_argument("--pusher_random_obj_start_poses", action="store_true", default=False)
     parser.add_argument("--pusher_four_goal_dim", action="store_true", default=False)
@@ -193,7 +194,7 @@ if __name__ == "__main__":
 
     # Run the algorithm
     args = parser.parse_args()
-
+    
     if args.manager_algo == "td3_adj_safe_cls_high_lag":
         assert not "lag" in args.controller_algo
 

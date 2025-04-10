@@ -48,6 +48,9 @@ def create_env(args, renderer_args={}):
             env = MultyEnvWithGoal(envs)
         env.seed(args.seed)
     elif "SafePusher" in args.env_name:
+        assert float(args.pusher_safe_env_dangerous_circle) + \
+               float(args.pusher_safe_env_hazards) + \
+               float(args.pusher_safe_env_safe_zone) <= 1.0, "only one safe wrapper is possible"
         from gym.envs.registration import register
         register(
             id='Pusher-v0',

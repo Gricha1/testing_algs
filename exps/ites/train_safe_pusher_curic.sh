@@ -18,6 +18,7 @@ python main.py --seed $seed \
                --load \
                --loaded_exp_num ml4_233 \
                --load_without_world_model \
+               --load_without_cost_model \
                --validation_without_image --eval_freq 30000 \
                --wm_pretrain_epoches 100 \
                --wm_n_initial_exploration_steps 30000 \

@@ -3,6 +3,7 @@ from __future__ import print_function
 from __future__ import absolute_import
 
 import os
+import math
 import random
 
 import numpy as np
@@ -135,7 +136,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             |                    |               |                 |
             1--------------------2               5-----------------6
         """
-        if self.args.pusher_safe_env:
+        if self.args.pusher_safe_env_safe_zone:
             assert self.args.pusher_random_obj_start_poses
             safe_pos_1 = Point(-0.35, -0.8)
             safe_pos_2 = Point(-0.35, -0.6)
@@ -160,6 +161,34 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
                 self.goal_pos = np.asarray(generate_random_point())
                 self.cylinder_pos = np.asarray(generate_random_point())
+        
+        elif self.args.pusher_safe_env_dangerous_circle:
+            assert self.args.pusher_random_obj_start_poses
+            safe_pos_3 = Point(-0.1, -0.6)
+            safe_pos_4 = Point(-0.1, -0.1)
+            circle_center_x = (safe_pos_3.x + safe_pos_4.x) / 2
+            circle_center_y = (safe_pos_3.y + safe_pos_4.y) / 2
+            circle_radius = 0.3
+
+            #self.cylinder_pos = np.asarray([-0.3, 0.0])
+            #self.goal_pos = np.array([0.1, -0.8])
+
+            def is_safe_state(state):
+                # Проверка, что точка не внутри круга
+                distance_to_center = math.sqrt((state[0] - circle_center_x)**2 + 
+                                            (state[1] - circle_center_y)**2)
+                if distance_to_center <= circle_radius:
+                    return False
+                    
+                return True
+
+            while not is_safe_state(self.cylinder_pos) or not is_safe_state(self.goal_pos):
+                self.goal_pos = np.asarray(generate_random_point())
+                self.cylinder_pos = np.asarray(generate_random_point())
+
+        else:
+            assert 1 == 0
+
 
         # testing
         #self.goal_pos = np.asarray([0, -0.6])

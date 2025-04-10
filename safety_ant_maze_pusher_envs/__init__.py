@@ -1,3 +1,4 @@
+import math
 import random
 import argparse
 from collections import deque
@@ -265,114 +266,154 @@ class SafeFetch:
         return next_tup, rew, done, info
     
     def cost_func(self, state):
-        if len(state.shape) == 1:
-            robot_x, robot_y = state[:2]
-            cost = 0
-            if robot_y <= self.safety_bounds[1-1].y or robot_y >= self.safety_bounds[8-1].y:
-                cost = 1
-            elif robot_x <= self.safety_bounds[1-1].x or robot_x >= self.safety_bounds[6-1].x:
-                cost = 1
-            elif robot_x <= self.safety_bounds[4-1].x and robot_x >= self.safety_bounds[3-1].x:
-                if robot_y <= self.safety_bounds[3-1].y:
+        if self.args.pusher_safe_env_safe_zone:
+            if len(state.shape) == 1:
+                robot_x, robot_y = state[:2]
+                cost = 0
+                if robot_y <= self.safety_bounds[1-1].y or robot_y >= self.safety_bounds[8-1].y:
                     cost = 1
+                elif robot_x <= self.safety_bounds[1-1].x or robot_x >= self.safety_bounds[6-1].x:
+                    cost = 1
+                elif robot_x <= self.safety_bounds[4-1].x and robot_x >= self.safety_bounds[3-1].x:
+                    if robot_y <= self.safety_bounds[3-1].y:
+                        cost = 1
+            else:
+                robot_x = state[:, 0]
+                robot_y = state[:, 1]
+                cost = (robot_y <= self.safety_bounds[1-1].y) + (robot_y >= self.safety_bounds[8-1].y)
+                cost = cost + (robot_x <= self.safety_bounds[1-1].x) + (robot_x >= self.safety_bounds[6-1].x)
+                cost = cost + (robot_x <= self.safety_bounds[4-1].x) * (robot_x >= self.safety_bounds[3-1].x) * (robot_y <= self.safety_bounds[3-1].y)
+                cost = (cost >= 1)
+        elif self.args.pusher_safe_env_dangerous_circle:
+            if len(state.shape) == 1:
+                robot_x, robot_y = state[:2]
+                # Проверка расстояния до центра круга
+                distance_sq = (robot_x - self.unsafe_center_x)**2 + (robot_y - self.unsafe_center_y)**2
+                cost = 1 if distance_sq < self.unsafe_radius**2 else 0
+            else:
+                robot_x = state[:, 0]
+                robot_y = state[:, 1]
+                # Векторизованная проверка для массива состояний
+                distance_sq = (robot_x - self.unsafe_center_x)**2 + (robot_y - self.unsafe_center_y)**2
+                cost = (distance_sq < self.unsafe_radius**2).astype(float)
         else:
-            robot_x = state[:, 0]
-            robot_y = state[:, 1]
-            cost = (robot_y <= self.safety_bounds[1-1].y) + (robot_y >= self.safety_bounds[8-1].y)
-            cost = cost + (robot_x <= self.safety_bounds[1-1].x) + (robot_x >= self.safety_bounds[6-1].x)
-            cost = cost + (robot_x <= self.safety_bounds[4-1].x) * (robot_x >= self.safety_bounds[3-1].x) * (robot_y <= self.safety_bounds[3-1].y)
-            cost = (cost >= 1)
+            assert 1 == 0
         
         return cost
 
     def get_safety_bounds(self, get_safe_unsafe_dataset=False):
-        def extrapolate_points(l):
-            extrapolated_points = []
-            for i in range(len(l) - 1):
-                x1, y1 = l[i]
-                x2, y2 = l[i + 1]
-                dx = (x2 - x1) / 5
-                dy = (y2 - y1) / 5
-                extrapolated_points.append((x1, y1))
-                for j in range(1, 5):
-                    extrapolated_points.append((x1 + j * dx, y1 + j * dy))
-            return extrapolated_points
+        if self.args.pusher_safe_env_safe_zone:
+            def extrapolate_points(l):
+                extrapolated_points = []
+                for i in range(len(l) - 1):
+                    x1, y1 = l[i]
+                    x2, y2 = l[i + 1]
+                    dx = (x2 - x1) / 5
+                    dy = (y2 - y1) / 5
+                    extrapolated_points.append((x1, y1))
+                    for j in range(1, 5):
+                        extrapolated_points.append((x1 + j * dx, y1 + j * dy))
+                return extrapolated_points
 
-        # dataset = (
-            #             [(x11, x12), (x21, x22), ... ], 
-            #             [y1, y2, ... ]
-            #           )
-        """
-        8------------------------------------------------------7
-        |                                                      |
-        |                                                      |
-        |                                                      |
-        |                                                      |
-        |                    3---------------4                 |
-        |                    |               |                 |
-        |                    |               |                 |
-        |                    |               |                 |
-        |                    |               |                 |
-        1--------------------2               5-----------------6
-        """
-        """
-        safety_point_8 = Point(-0.7, 0.5)
-        safety_point_7 = Point(1.0, 0.5)
-        safety_point_6 = Point(1.0, -0.5)
-        safety_point_5 = Point(0.3, -0.5)
-        safety_point_4 = Point(0.3, 0.1)
-        safety_point_3 = Point(-0.2, 0.1)
-        safety_point_2 = Point(-0.2, -0.5)
-        safety_point_1 = Point(-0.7, -0.5)
-        """
-        safety_point_8 = Point(-0.35, 0.05)
-        safety_point_7 = Point(0.65, 0.05)
-        safety_point_6 = Point(0.65, -0.4)
-        safety_point_5 = Point(0.35, -0.4)
-        safety_point_4 = Point(0.35, -0.15)
-        safety_point_3 = Point(-0.15, -0.15)
-        safety_point_2 = Point(-0.15, -0.4)
-        safety_point_1 = Point(-0.35, -0.4)
+            # dataset = (
+                #             [(x11, x12), (x21, x22), ... ], 
+                #             [y1, y2, ... ]
+                #           )
+            """
+            8------------------------------------------------------7
+            |                                                      |
+            |                                                      |
+            |                                                      |
+            |                                                      |
+            |                    3---------------4                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            |                    |               |                 |
+            1--------------------2               5-----------------6
+            """
+            """
+            safety_point_8 = Point(-0.7, 0.5)
+            safety_point_7 = Point(1.0, 0.5)
+            safety_point_6 = Point(1.0, -0.5)
+            safety_point_5 = Point(0.3, -0.5)
+            safety_point_4 = Point(0.3, 0.1)
+            safety_point_3 = Point(-0.2, 0.1)
+            safety_point_2 = Point(-0.2, -0.5)
+            safety_point_1 = Point(-0.7, -0.5)
+            """
+            safety_point_8 = Point(-0.35, 0.05)
+            safety_point_7 = Point(0.65, 0.05)
+            safety_point_6 = Point(0.65, -0.4)
+            safety_point_5 = Point(0.35, -0.4)
+            safety_point_4 = Point(0.35, -0.15)
+            safety_point_3 = Point(-0.15, -0.15)
+            safety_point_2 = Point(-0.15, -0.4)
+            safety_point_1 = Point(-0.35, -0.4)
+            
+            xs = []
+            ys = []
+            # usafe states
+            xs.append((safety_point_2.x, safety_point_2.y))
+            xs.append((safety_point_3.x, safety_point_3.y))
+            xs.append((safety_point_4.x, safety_point_4.y))
+            xs.append((safety_point_5.x, safety_point_5.y))
+            xs.append((safety_point_6.x, safety_point_6.y))
+            #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
+            xs = extrapolate_points(xs)
+            for i in range(len(xs)):
+                ys.append(1)
+            num_unsafe_states = len(xs)
+
+            # safe states
+            """
+            xs_safe = []
+            xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
+            xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
+            xs_safe = extrapolate_points(xs_safe)
+            xs.extend(xs_safe)
+            for i in range(len(xs_safe)):
+                ys.append(0)
+            dataset = [xs, ys]
+            """
+
+            safety_boundary = [
+                            safety_point_1,
+                            safety_point_2, 
+                            safety_point_3,
+                            safety_point_4,
+                            safety_point_5,
+                            safety_point_6,
+                            safety_point_7,
+                            safety_point_8,
+                            safety_point_1,
+                            ]            
         
-        xs = []
-        ys = []
-        # usafe states
-        xs.append((safety_point_2.x, safety_point_2.y))
-        xs.append((safety_point_3.x, safety_point_3.y))
-        xs.append((safety_point_4.x, safety_point_4.y))
-        xs.append((safety_point_5.x, safety_point_5.y))
-        xs.append((safety_point_6.x, safety_point_6.y))
-        #xs.append((safety_point_4.x - 1, safety_point_4.y + 1))
-        xs = extrapolate_points(xs)
-        for i in range(len(xs)):
-            ys.append(1)
-        num_unsafe_states = len(xs)
+        elif self.args.pusher_safe_env_dangerous_circle:
+            # Исходные точки (как в вашем коде)
+            safety_point_3 = Point(-0.15, -0.15)
+            safety_point_4 = Point(0.35, -0.15)
 
-        # safe states
-        """
-        xs_safe = []
-        xs_safe.append((safety_point_3.x + 1, (safety_point_4.y + safety_point_3.y) / 2))
-        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_4.y + safety_point_3.y) / 2))
-        xs_safe.append(((safety_point_5.x + safety_point_2.x) / 2, (safety_point_7.y + safety_point_8.y) / 2))
-        xs_safe.append((safety_point_7.x + 1, (safety_point_7.y + safety_point_8.y) / 2))
-        xs_safe = extrapolate_points(xs_safe)
-        xs.extend(xs_safe)
-        for i in range(len(xs_safe)):
-            ys.append(0)
-        dataset = [xs, ys]
-        """
+            # Параметры круга:
+            self.unsafe_radius = 0.3  # Радиус круга (можете изменить по желанию)            
 
-        safety_boundary = [
-                           safety_point_1,
-                           safety_point_2, 
-                           safety_point_3,
-                           safety_point_4,
-                           safety_point_5,
-                           safety_point_6,
-                           safety_point_7,
-                           safety_point_8,
-                           safety_point_1,
-                           ]
+            # Вычисляем центр круга
+            self.unsafe_center_x = (safety_point_3.x + safety_point_4.x) / 2
+            self.unsafe_center_y = (safety_point_3.y + safety_point_4.y) / 2
+
+            # Генерация точек окружности
+            num_points = 36  # Количество точек для плавного круга
+            safety_boundary = []
+            for i in range(num_points + 1):
+                angle = 2 * math.pi * i / num_points
+                x = self.unsafe_center_x + self.unsafe_radius * math.cos(angle)
+                y = self.unsafe_center_y + self.unsafe_radius * math.sin(angle)
+                safety_boundary.append(Point(x, y))
+
+        else:
+            assert 1 == 0
 
         return safety_boundary
 
