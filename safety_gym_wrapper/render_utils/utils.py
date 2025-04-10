@@ -91,11 +91,12 @@ class CustomVideoRendered:
             
         # dubug
         for key_ in debug_info:
-            if key_.startswith("cost_model_achieved_goal_"):
-                cost_val = debug_info[key_]
-                state_key = "_".join(key_.split("_")[2:])
-                x, y = debug_info[state_key]
-                self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
+            pass
+            #if key_.startswith("cost_model_achieved_goal_"):
+            #    cost_val = debug_info[key_]
+            #    state_key = "_".join(key_.split("_")[2:])
+            #    x, y = debug_info[state_key]
+            #    self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
 
         if "wm_img_states" in debug_info:
             x_coords = []
