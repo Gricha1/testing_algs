@@ -8,7 +8,7 @@ cd ../..
 python main.py --seed $seed \
                --env_name SafePusher \
                --domain_name SafetyMaze \
-               --pusher_safe_env \
+               --pusher_safe_env_safe_zone \
                --pusher_random_obj_start_poses \
                --pusher_three_goal_dim \
                --traj_buffer_size 5000 \
