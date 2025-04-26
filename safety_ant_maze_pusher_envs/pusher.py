@@ -189,9 +189,6 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
                 self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
 
-        else:
-            assert 1 == 0
-
 
         # testing
         #self.goal_pos = np.asarray([0, -0.6])
