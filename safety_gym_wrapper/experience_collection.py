@@ -25,39 +25,12 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1, phi=None):
                         if frame_stack_num > 1:
                             assert 1 == 0
 
-                        #if frame_stack_num > 1:
-                        #    frame_stack_states_i = [sc_pair[0] for sc_pair in current_trajectory[i-frame_stack_num+1:i+1]]
-                        #else:
                         _ = current_trajectory[i][0]
                         state_i = current_trajectory[i][1]
                         _ = current_trajectory[i][2]
                         goal_j = current_trajectory[j][0]
                         _ = current_trajectory[j][1]
                         cost_j = current_trajectory[j][2]
-                        #hazards_i = current_trajectory[i][2]
-
-                        #manager_absolute_goal = state_j[:2]
-                        """
-                        part_of_state = []
-                        if frame_stack_num > 1:
-                            agent_poses = [state_i[:2] for state_i in frame_stack_states_i]
-                            obstacle_datas = [state_i[-16:] for state_i in frame_stack_states_i]
-                            # if current i < self.frame_stack_num, fill posses, obstacle_datas with zeros
-                            while len(agent_poses) < frame_stack_num:
-                                agent_poses.append([0 for i in range(2)])
-                                obstacle_datas.append([0 for i in range(16)])
-                            for agent_pose, obstacle_data in zip(agent_poses, obstacle_datas):
-                                part_of_state.extend(agent_pose)
-                                part_of_state.extend(obstacle_data)
-                        else:
-                            agent_pose = state_i[:2]
-                            obstacle_data = state_i[-16:]                        
-                            part_of_state.extend(agent_pose)
-                            part_of_state.extend(obstacle_data)
-                        state = []
-                        state.extend(manager_absolute_goal)
-                        state.extend(part_of_state)
-                        """
                         if cost_j >= 1: # test could be [0, 1, 2]
                             if len(unsafes) < states_count:
                                 unsafes.append((goal_j, state_i))                                
@@ -74,12 +47,6 @@ def get_safetydataset_as_random_experience(env, frame_stack_num=1, phi=None):
         state = next_state
         achieved_goal = next_achieved_goal
         current_trajectory.append((achieved_goal, state, cost))
-        #if cost >= 1:
-        #    if len(unsafe_state) < states_count:
-        #        unsafe_state.append(state)
-        #else:
-        #    if len(safe_state) < states_count:
-        #        safe_state.append(state)
 
     state_goal_pairs.extend(unsafes)
     state_goal_pairs.extend(safes)

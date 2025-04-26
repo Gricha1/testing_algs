@@ -64,14 +64,14 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             elif env_name == "SafeGym" and args.cost_model:
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
-                if not args.domain_name == "BulletSafeGym" and not args.env_name == "SafePusher":
+                if not args.domain_name == "BulletSafeGym":
                     if "SafeAntMaze" in env_name:
                         g = safe_dataset[0]
                         g_np = np.array(g, dtype=np.float32)
                         x = np.zeros((len(g), env.state_dim))
                         x_np = np.array(x, dtype=np.float32)
                         true = safe_dataset[1]
-                    elif env_name == "SafeGym":
+                    elif env_name == "SafeGym" or env_name == "SafePusher":
                         g = safe_dataset[0]
                         g_np = np.array(g, dtype=np.float32)
                         x = safe_dataset[1]
@@ -685,6 +685,21 @@ def run_hrac(args):
                 return state[:, :2]
         env, state_dim, goal_dim, action_dim, renderer = create_env(args, renderer_args=renderer_args)
         controller_goal_dim = goal_dim
+        if args.cost_model and args.env_name == "SafePusher":
+            if args.validate:
+                cost_dataset_seeds = [213]
+            else:
+                cost_dataset_seeds = [34, 943]
+            safe_dataset = []
+            for seed_ in cost_dataset_seeds:
+                env.seed(seed_)
+                print("get safedataset!!!", f"seed={seed_}")
+                start_time = time.time()
+                safe_dataset.extend(get_safetydataset_as_random_experience(env, 
+                                                                        frame_stack_num=args.cm_frame_stack_num))
+                end_time = time.time()
+                print("time for safe dataset:", end_time-start_time)
+                env.safe_dataset = safe_dataset
 
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
