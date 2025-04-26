@@ -261,7 +261,7 @@ class SafeFetch:
     
     def step(self, action):
         next_tup, rew, done, info = self.env.step(action)        
-        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal'][:2]))
+        info["safety_cost"] = self.cost_func(np.array(next_tup['achieved_goal']))
 
         return next_tup, rew, done, info
     

@@ -40,6 +40,10 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         else:
             mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
+        if args.pusher_hard_goal_dist:
+            self.distance_threshold = 0.1
+        else:
+            self.distance_threshold = 0.25
         self.reset_model()
 
     def set_cost_func(self, cost_func):
@@ -114,9 +118,16 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
                 x = random.uniform(x_min, x_max)
                 y = random.uniform(y_min, y_max)
                 return (x, y)
+            
+            def get_start_goal_feasible_poses():
+                goal_pos = np.asarray(generate_random_point())
+                cylinder_pos = np.asarray(generate_random_point())
+                while np.sqrt(np.sum(np.square(goal_pos - cylinder_pos))) <= self.distance_threshold:
+                    goal_pos = np.asarray(generate_random_point())
+                    cylinder_pos = np.asarray(generate_random_point())
+                return goal_pos, cylinder_pos
 
-            self.goal_pos = np.asarray(generate_random_point())
-            self.cylinder_pos = np.asarray(generate_random_point())
+            self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
 
         else:
             self.goal_pos = np.asarray([0, 0])
@@ -159,8 +170,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
                 return True
 
             while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
-                self.goal_pos = np.asarray(generate_random_point())
-                self.cylinder_pos = np.asarray(generate_random_point())
+                self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
         
         elif self.args.pusher_safe_env_dangerous_circle:
             assert self.args.pusher_random_obj_start_poses
@@ -183,8 +193,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
                 return True
 
             while not is_safe_state(self.cylinder_pos) or not is_safe_state(self.goal_pos):
-                self.goal_pos = np.asarray(generate_random_point())
-                self.cylinder_pos = np.asarray(generate_random_point())
+                self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
 
         else:
             assert 1 == 0
