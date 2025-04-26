@@ -147,52 +147,46 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             |                    |               |                 |
             1--------------------2               5-----------------6
         """
-        if self.args.pusher_safe_env_safe_zone:
+        if not self.args.pusher_always_random_obj_start_poses and (self.args.pusher_safe_env_safe_zone or self.args.pusher_safe_env_dangerous_circle):
             assert self.args.pusher_random_obj_start_poses
-            safe_pos_1 = Point(-0.35, -0.8)
-            safe_pos_2 = Point(-0.35, -0.6)
-            safe_pos_3 = Point(-0.1, -0.6)
-            safe_pos_4 = Point(-0.1, -0.1)
-            safe_pos_5 = Point(-0.35, -0.1)
-            safe_pos_6 = Point(-0.35, 0.2)
-            safe_pos_7 = Point(0.1, 0.2)
-            safe_pos_8 = Point(0.1, -0.8)
-            safe_points = [None, safe_pos_1, safe_pos_2, safe_pos_3, 
-                                safe_pos_4, safe_pos_5, safe_pos_6, 
-                                safe_pos_7, safe_pos_8]
-            def is_safe_state(state, safe_points):
-                if state[0] < safe_points[1].x or state[0] > safe_points[8].x:
-                    return False
-                if state[1] < safe_points[1].y or state[1] > safe_points[7].y:
-                    return False
-                if state[0] < safe_points[3].x and state[1] > safe_points[3].y and state[1] < safe_points[4].y:
-                    return False
-                return True
+            if self.args.pusher_safe_env_safe_zone:
+                safe_pos_1 = Point(-0.35, -0.8)
+                safe_pos_2 = Point(-0.35, -0.6)
+                safe_pos_3 = Point(-0.1, -0.6)
+                safe_pos_4 = Point(-0.1, -0.1)
+                safe_pos_5 = Point(-0.35, -0.1)
+                safe_pos_6 = Point(-0.35, 0.2)
+                safe_pos_7 = Point(0.1, 0.2)
+                safe_pos_8 = Point(0.1, -0.8)
+                safe_points = [None, safe_pos_1, safe_pos_2, safe_pos_3, 
+                                    safe_pos_4, safe_pos_5, safe_pos_6, 
+                                    safe_pos_7, safe_pos_8]
+                def is_safe_state(state, safe_points):
+                    if state[0] < safe_points[1].x or state[0] > safe_points[8].x:
+                        return False
+                    if state[1] < safe_points[1].y or state[1] > safe_points[7].y:
+                        return False
+                    if state[0] < safe_points[3].x and state[1] > safe_points[3].y and state[1] < safe_points[4].y:
+                        return False
+                    return True
+        
+            elif self.args.pusher_safe_env_dangerous_circle:
+                safe_pos_3 = Point(-0.1, -0.6)
+                safe_pos_4 = Point(-0.1, -0.1)
+                circle_center_x = (safe_pos_3.x + safe_pos_4.x) / 2
+                circle_center_y = (safe_pos_3.y + safe_pos_4.y) / 2
+                circle_radius = 0.3
+                safe_points = []
+
+                def is_safe_state(state, safe_points):
+                    distance_to_center = math.sqrt((state[0] - circle_center_x)**2 + 
+                                                (state[1] - circle_center_y)**2)
+                    if distance_to_center <= circle_radius:
+                        return False
+                        
+                    return True
 
             while not is_safe_state(self.cylinder_pos, safe_points) or not is_safe_state(self.goal_pos, safe_points):
-                self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
-        
-        elif self.args.pusher_safe_env_dangerous_circle:
-            assert self.args.pusher_random_obj_start_poses
-            safe_pos_3 = Point(-0.1, -0.6)
-            safe_pos_4 = Point(-0.1, -0.1)
-            circle_center_x = (safe_pos_3.x + safe_pos_4.x) / 2
-            circle_center_y = (safe_pos_3.y + safe_pos_4.y) / 2
-            circle_radius = 0.3
-
-            #self.cylinder_pos = np.asarray([-0.3, 0.0])
-            #self.goal_pos = np.array([0.1, -0.8])
-
-            def is_safe_state(state):
-                # Проверка, что точка не внутри круга
-                distance_to_center = math.sqrt((state[0] - circle_center_x)**2 + 
-                                            (state[1] - circle_center_y)**2)
-                if distance_to_center <= circle_radius:
-                    return False
-                    
-                return True
-
-            while not is_safe_state(self.cylinder_pos) or not is_safe_state(self.goal_pos):
                 self.goal_pos, self.cylinder_pos = get_start_goal_feasible_poses()
 
         else:
