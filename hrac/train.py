@@ -60,7 +60,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             if "SafeAntMaze" in env_name:
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafePusher":
-                safety_boundary = env.get_safety_bounds()
+                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                 #safety_boundary = env.get_safety_bounds()
             elif env_name == "SafeGym" and args.cost_model:
                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
             if args.cost_model:
