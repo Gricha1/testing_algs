@@ -49,24 +49,24 @@ class Planner:
         a = torch.cat((goal, a), dim=1)
         return a
 
-    def pairwise_dists(self, states, ag, landmarks):
+    def pairwise_dists(self, states, ag, landmarks, absolute_goal):
         with torch.no_grad():
             dists = []
             for i in landmarks:
                 ld = i[None, :].expand(len(states), *i.shape)
-                dists.append(self.agent.pairwise_value(states, ag, ld))
+                dists.append(self.agent.pairwise_value(states, ag, ld, absolute_goal))
         return torch.stack(dists, dim=1)
 
-    def pairwise_dists_batch(self, states, ag, landmarks):
+    def pairwise_dists_batch(self, states, ag, landmarks, absolute_goal):
         with torch.no_grad():
             states_repeat = states.repeat(len(landmarks), 1)
             ag_repeat = ag.repeat(len(landmarks), 1)
             landmarks_repeat = torch.repeat_interleave(landmarks, len(states), dim=0)
-            dists = self.agent.pairwise_value(states_repeat, ag_repeat, landmarks_repeat)
+            dists = self.agent.pairwise_value(states_repeat, ag_repeat, landmarks_repeat, absolute_goal)
             dists_list = list(torch.split(dists, len(states)))
         return torch.stack(dists_list, dim=1)
 
-    def build_landmark_graph(self, final_goal):
+    def build_landmark_graph(self, final_goal, absolute_goal):
         if isinstance(final_goal, torch.Tensor):
             final_goal = final_goal.detach().cpu().numpy()
 
@@ -121,7 +121,7 @@ class Planner:
         self.landmark_cov_nov = landmarks.clone()
         self.landmarks_cov_nov_fg = torch.cat((landmarks, fg), dim=0)
 
-        dists = self.pairwise_dists_batch(state, achieved_goal, self.landmarks_cov_nov_fg)
+        dists = self.pairwise_dists_batch(state, achieved_goal, self.landmarks_cov_nov_fg, absolute_goal)
         dists = torch.min(dists, dists*0)
         dists = torch.cat((dists, torch.zeros(len(final_goal), dists.shape[1], device=self.agent.device)-100000), dim=0)
         dists = self.clip_dist(dists)
@@ -131,7 +131,7 @@ class Planner:
 
         return self.landmarks_cov_nov_fg, self.dists_ld2goal
 
-    def __call__(self, cur_obs, cur_ag, final_goal, agent, replay_buffer, novelty_pq):
+    def __call__(self, cur_obs, cur_ag, final_goal, agent, replay_buffer, novelty_pq, absolute_goal):
         self.agent = agent
         self.replay_buffer = replay_buffer
         self.novelty_pq = novelty_pq
@@ -143,9 +143,9 @@ class Planner:
         if isinstance(final_goal, np.ndarray):
             final_goal = torch.Tensor(final_goal).to(self.agent.device)
 
-        landmarks_cov_nov_fg, dists_ld2goal = self.build_landmark_graph(final_goal)
+        landmarks_cov_nov_fg, dists_ld2goal = self.build_landmark_graph(final_goal, absolute_goal)
 
-        dists_cur2ld = self.pairwise_dists(cur_obs, cur_ag, landmarks_cov_nov_fg)
+        dists_cur2ld = self.pairwise_dists(cur_obs, cur_ag, landmarks_cov_nov_fg, absolute_goal)
         dists_cur2ld = torch.min(dists_cur2ld, dists_cur2ld * 0)
         dists_cur2ld = self.clip_dist(dists_cur2ld, reserve=False)
 
