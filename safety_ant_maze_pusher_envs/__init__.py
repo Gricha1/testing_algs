@@ -234,6 +234,10 @@ class SafeFetch:
         self.safety_bounds = self.get_safety_bounds()
         self.env.env.set_cost_func(self.cost_func)
 
+    def set_always_random_obj_start_poses(self, always_random):
+        self.env.always_random_obj_start_poses = always_random
+        self.env.reset()
+
     def seed(self, seed):
         self.env.seed(seed)
 

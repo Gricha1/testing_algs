@@ -103,24 +103,50 @@ class ReplayBuffer(object):
 class CostModelTrajectoryBuffer(object):
     """
         cost model trajectory buffer for 
-        solving inbalanced data problem(too much safe states in SafetyGym)
+        solving inbalanced data problem
     """
 
-    def __init__(self, maxsize, state_dim, goal_dim, frame_stack_num=1):
+    def __init__(self, maxsize, frame_stack_num=1, two_buffers=False, batch_size=128):
         self.maxsize = maxsize
         self.frame_stack_num = frame_stack_num
-        self.next_idx = 0
+        self.batch_size = batch_size
         self.trajectory = []
-        self.storage = [[] for _ in range(3)]
+        self.two_buffers = two_buffers
+        if self.two_buffers:
+            self.safe_storage = [[] for _ in range(3)]
+            self.unsafe_storage = [[] for _ in range(3)]
+            self.safe_next_idx = 0
+            self.unsafe_next_idx = 0
+        else:
+            self.storage = [[] for _ in range(3)]
+            self.next_idx = 0
         self.name = "cost_trajectory_buffer"
-        self.goal_dim = goal_dim
 
+    def two_buffer_len(self):
+        return len(self.safe_storage[0]), len(self.unsafe_storage[0])
+    
     def __len__(self):
-        return len(self.storage[0])
+        if self.two_buffers:
+            assert 1 == 0
+        else:
+            return len(self.storage[0])
+    
+    def avaible(self):
+        if self.two_buffers:
+            safe_size, unsafe_size = self.two_buffer_len()
+            return safe_size >= self.batch_size and unsafe_size >= self.batch_size
+        else:
+            return self.__len__() == 0
     
     def clear(self):
-        self.storage = [[] for _ in range(3)]    
-        self.next_idx = 0
+        if self.two_buffers:
+            self.safe_storage = [[] for _ in range(3)]
+            self.unsafe_storage = [[] for _ in range(3)]
+            self.safe_next_idx = 0
+            self.unsafe_next_idx = 0
+        else:
+            self.storage = [[] for _ in range(3)]    
+            self.next_idx = 0
 
     def create_new_trajectory(self):
         del self.trajectory
@@ -147,64 +173,120 @@ class CostModelTrajectoryBuffer(object):
                 goal_j = current_trajectory[j][0]
                 _ = current_trajectory[j][1]
                 cost_j = current_trajectory[j][2]
-                if cost_j >= 1: # test could be [0, 1, 2]                    
-                    unsafes.append((goal_j, state_i))
+                if self.two_buffers:
+                    if cost_j >= 1: # test could be [0, 1, 2]                    
+                        self.add((goal_j, state_i, 1), safe=False)
+                    else:
+                        self.add((goal_j, state_i, 0), safe=True)
                 else:
-                    safes.append((goal_j, state_i))
+                    if cost_j >= 1: # test could be [0, 1, 2]                    
+                        unsafes.append((goal_j, state_i))
+                    else:
+                        safes.append((goal_j, state_i))
 
-        # get equal count of safe & unsafe states
-        # add = trajectory_len samples to buffer
-        min_len = min(len(unsafes), len(safes))        
-        if min_len == 0:
-            safes = []
-            unsafes = []
-            #if len(unsafes) == 0:
-            #    min_len = len(safes) // 4
-            #    unsafes = []
-            #    safes = random.sample(safes, min_len)    
-            #else:
-            #    min_len = len(unsafes) // 4
-            #    unsafes = random.sample(unsafes, min_len)
-            #    safes = []
-        else:
-            samples_to_add = len(current_trajectory)
-            samples_to_add = min(samples_to_add, min_len) // 2
-            unsafes = random.sample(unsafes, samples_to_add)
-            safes = random.sample(safes, samples_to_add)
+        if not self.two_buffers:
+            # get equal count of safe & unsafe states
+            # add = trajectory_len samples to buffer
+            min_len = min(len(unsafes), len(safes))        
+            if min_len == 0:
+                safes = []
+                unsafes = []
+            else:
+                samples_to_add = len(current_trajectory)
+                samples_to_add = min(samples_to_add, min_len) // 2
+                unsafes = random.sample(unsafes, samples_to_add)
+                safes = random.sample(safes, samples_to_add)
 
-        state_goal_pairs.extend(unsafes)
-        state_goal_pairs.extend(safes)
-        costs.extend([1 for i in range(len(unsafes))])
-        costs.extend([0 for i in range(len(safes))])
-        for (goal, state), cost in zip(state_goal_pairs, costs):
-            self.add((goal, state, cost))
+            state_goal_pairs.extend(unsafes)
+            state_goal_pairs.extend(safes)
+            costs.extend([1 for i in range(len(unsafes))])
+            costs.extend([0 for i in range(len(safes))])
+            for (goal, state), cost in zip(state_goal_pairs, costs):
+                self.add((goal, state, cost))
         
+    def add(self, data, safe=True):
+        if self.two_buffers:
+            if safe:
+                self.safe_next_idx = int(self.safe_next_idx)
+                if self.safe_next_idx >= len(self.safe_storage[0]):
+                    [array.append(datapoint) for array, datapoint in zip(self.safe_storage, data)]
+                else:
+                    [array.__setitem__(self.safe_next_idx, datapoint) for array, datapoint in zip(self.safe_storage, data)]
 
-    def add(self, data):
-        self.next_idx = int(self.next_idx)
-        if self.next_idx >= len(self.storage[0]):
-            [array.append(datapoint) for array, datapoint in zip(self.storage, data)]
+                self.safe_next_idx = (self.safe_next_idx + 1) % self.maxsize
+            else:
+                self.unsafe_next_idx = int(self.unsafe_next_idx)
+                if self.unsafe_next_idx >= len(self.unsafe_storage[0]):
+                    [array.append(datapoint) for array, datapoint in zip(self.unsafe_storage, data)]
+                else:
+                    [array.__setitem__(self.unsafe_next_idx, datapoint) for array, datapoint in zip(self.unsafe_storage, data)]
+
+                self.unsafe_next_idx = (self.unsafe_next_idx + 1) % self.maxsize
         else:
-            [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
+            self.next_idx = int(self.next_idx)
+            if self.next_idx >= len(self.storage[0]):
+                [array.append(datapoint) for array, datapoint in zip(self.storage, data)]
+            else:
+                [array.__setitem__(self.next_idx, datapoint) for array, datapoint in zip(self.storage, data)]
 
-        self.next_idx = (self.next_idx + 1) % self.maxsize
-
+            self.next_idx = (self.next_idx + 1) % self.maxsize
 
     def sample(self, batch_size):
-        if len(self.storage[0]) <= batch_size:
-            ind = np.arange(len(self.storage[0]))
-        else:
-            ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
+        if self.two_buffers:
+            if batch_size % 2 == 0:
+                unsafe_sampled = safe_sampled = batch_size // 2
+            else:
+                unsafe_sampled = batch_size // 2
+                safe_sampled = batch_size // 2 + 1
+            # safe states
+            if len(self.safe_storage[0]) <= safe_sampled:
+                ind = np.arange(len(self.safe_storage[0]))
+            else:
+                ind = np.random.randint(0, len(self.safe_storage[0]), size=safe_sampled)
+            gs, xs, cs  = [], [], []
+            for i in ind: 
+                Gs, Xs, Cs  = (array[i] for array in self.safe_storage)
+                gs.append(np.array(Gs, copy=False))
+                xs.append(np.array(Xs, copy=False))
+                cs.append(np.array(Cs, copy=False))
 
-        g, x, c  = [], [], []
+            # unsafe states
+            if len(self.unsafe_storage[0]) <= unsafe_sampled:
+                ind = np.arange(len(self.unsafe_storage[0]))
+            else:
+                ind = np.random.randint(0, len(self.unsafe_storage[0]), size=unsafe_sampled)
+            gus, xus, cus  = [], [], []
+            for i in ind: 
+                Gus, Xus, Cus  = (array[i] for array in self.unsafe_storage)
+                gus.append(np.array(Gus, copy=False))
+                xus.append(np.array(Xus, copy=False))
+                cus.append(np.array(Cus, copy=False))
+            
+            g, x, c = [], [], []
+            g.extend(gs)
+            g.extend(gus)
+            x.extend(xs)
+            x.extend(xus)
+            c.extend(cs)
+            c.extend(cus)
 
-        for i in ind: 
-            G, X, C  = (array[i] for array in self.storage)
-            g.append(np.array(G, copy=False))
-            x.append(np.array(X, copy=False))
-            c.append(np.array(C, copy=False))
+            return np.array(g), np.array(x), np.array(c).reshape(-1, 1)
         
-        return np.array(g), np.array(x), np.array(c).reshape(-1, 1)
+        else:
+            if len(self.storage[0]) <= batch_size:
+                ind = np.arange(len(self.storage[0]))
+            else:
+                ind = np.random.randint(0, len(self.storage[0]), size=batch_size)
+
+            g, x, c  = [], [], []
+
+            for i in ind: 
+                G, X, C  = (array[i] for array in self.storage)
+                g.append(np.array(G, copy=False))
+                x.append(np.array(X, copy=False))
+                c.append(np.array(C, copy=False))
+            
+            return np.array(g), np.array(x), np.array(c).reshape(-1, 1)
 
 class TrajectoryBuffer(object):
 

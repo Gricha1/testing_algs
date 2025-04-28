@@ -140,6 +140,7 @@ if __name__ == "__main__":
     ## Cost Model Parameters
     parser.add_argument("--reward_model", action='store_true', default=False)
     parser.add_argument("--cost_model", action='store_true', default=False)
+    parser.add_argument("--cost_model_two_buffers", action='store_true', default=False)
     parser.add_argument("--regression_cost_model", action='store_true', default=False)
     parser.add_argument("--cm_pretrain", action='store_true', default=False) # to avoid wm explosion in beggining
     parser.add_argument("--cost_model_batch_size", default=128, type=int)

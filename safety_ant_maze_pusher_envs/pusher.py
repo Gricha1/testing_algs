@@ -44,6 +44,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             self.distance_threshold = 0.1
         else:
             self.distance_threshold = 0.25
+        self.always_random_obj_start_poses = self.args.pusher_always_random_obj_start_poses
         self.reset_model()
 
     def set_cost_func(self, cost_func):
@@ -147,7 +148,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
             |                    |               |                 |
             1--------------------2               5-----------------6
         """
-        if not self.args.pusher_always_random_obj_start_poses and (self.args.pusher_safe_env_safe_zone or self.args.pusher_safe_env_dangerous_circle):
+        if not self.always_random_obj_start_poses and (self.args.pusher_safe_env_safe_zone or self.args.pusher_safe_env_dangerous_circle):
             assert self.args.pusher_random_obj_start_poses
             if self.args.pusher_safe_env_safe_zone:
                 safe_pos_1 = Point(-0.35, -0.8)

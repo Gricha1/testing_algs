@@ -60,11 +60,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             if "SafeAntMaze" in env_name:
                 safety_boundary, safe_dataset = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             elif env_name == "SafePusher":
-                 safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
-                 #safety_boundary = env.get_safety_bounds()
-            elif env_name == "SafeGym" and args.cost_model:
-                safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
+                safety_boundary = env.get_safety_bounds(get_safe_unsafe_dataset=True)
             if args.cost_model:
+                if (env_name == "SafePusher" or env_name == "SafeGym"):
+                    safe_dataset = copy.copy(env.safe_dataset[0]), copy.copy(env.safe_dataset[1]), copy.copy(env.safe_dataset[2])
                 if not args.domain_name == "BulletSafeGym":
                     if "SafeAntMaze" in env_name:
                         g = safe_dataset[0]
@@ -338,10 +337,10 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                                                                     torch_subgoal + cost_model.phi(torch_state), 
                                                                     torch_state)
                                 debug_info["cost_model_subgoal"] = cost_model_subgoal.item()
+                    torch_state = torch.from_numpy(state[None, :]).type('torch.FloatTensor').to("cuda")
+                    torch_subgoal = torch.from_numpy(subgoal[None, :]).type('torch.FloatTensor').to("cuda")
                     if args.world_model:
                         with torch.no_grad():
-                            torch_state = torch.from_numpy(state[None, :]).type('torch.FloatTensor').to("cuda")
-                            torch_subgoal = torch.from_numpy(subgoal[None, :]).type('torch.FloatTensor').to("cuda")
                             curr_imagine_subgoal_safety, img_states = controller_policy.state_safety_on_horizon(
                                                                 torch_state, torch_subgoal, 
                                                                 controller_policy, 
@@ -692,6 +691,8 @@ def run_hrac(args):
             else:
                 cost_dataset_seeds = [34, 943]
             safe_dataset = []
+            if not args.pusher_always_random_obj_start_poses: # get experience from all states
+                env.set_always_random_obj_start_poses(True)
             for seed_ in cost_dataset_seeds:
                 env.seed(seed_)
                 print("get safedataset!!!", f"seed={seed_}")
@@ -701,6 +702,8 @@ def run_hrac(args):
                 end_time = time.time()
                 print("time for safe dataset:", end_time-start_time)
                 env.safe_dataset = safe_dataset
+            if not args.pusher_always_random_obj_start_poses: # get experience from all states
+                env.set_always_random_obj_start_poses(False)
 
     elif args.domain_name == "BulletSafeGym":
         env, state_dim, goal_dim, subgoal_dim, action_dim, renderer = create_bullet_safety_gym_env(args)
@@ -1020,9 +1023,9 @@ def run_hrac(args):
                                     phi=phi)
         if args.domain_name == "Safexp" or args.cost_model_trajectory_buffer:
             cost_model_buffer = utils.CostModelTrajectoryBuffer(maxsize=args.cost_model_buffer_size,
-                                                                state_dim=state_dim,
-                                                                goal_dim=goal_dim,
-                                                                frame_stack_num=args.cm_frame_stack_num)
+                                                                frame_stack_num=args.cm_frame_stack_num,
+                                                                two_buffers=args.cost_model_two_buffers,
+                                                                batch_size=args.cost_model_batch_size)
             
         def train_cost_model(replay_buffer,
                              cost_model_iterations=10,
@@ -1030,7 +1033,7 @@ def run_hrac(args):
                              total_timesteps=0,
                              episode_num=0):
             print("train cost model")
-            if len(cost_model_buffer) == 0:
+            if not cost_model_buffer.avaible():
                 print("cost model buffer is empty!!!")
                 return
             debug_info = cost_model.train_cost_model(replay_buffer, 
@@ -1038,13 +1041,20 @@ def run_hrac(args):
                                                      cost_model_batch_size=cost_model_batch_size)
             
             if episode_num % 10 == 0:
-                print("cost model loss: {:.3f},".format(np.mean(debug_info["safe_model_loss"])), 
-                      f"cost buffer len: {len(cost_model_buffer)}")
+                print("cost model loss: {:.3f},".format(np.mean(debug_info["safe_model_loss"])), end=" ")
+                if not cost_model_buffer.two_buffers:
+                    print(f"cost buffer len: {len(cost_model_buffer)}")
+                else:
+                    print(f"safe buffer len: {cost_model_buffer.two_buffer_len()[0]}", f"unsafe buffer len: {cost_model_buffer.two_buffer_len()[1]}")
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
-            writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
+            if not cost_model_buffer.two_buffers:
+                writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
+            else:
+                writer.add_scalar(f"data/cost_model_buffer_size_unsafe", cost_model_buffer.two_buffer_len()[0], total_timesteps)
+                writer.add_scalar(f"data/cost_model_buffer_size_safe", cost_model_buffer.two_buffer_len()[1], total_timesteps)
     else:
         cost_model = None
 
