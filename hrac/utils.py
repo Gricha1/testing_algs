@@ -136,7 +136,7 @@ class CostModelTrajectoryBuffer(object):
             safe_size, unsafe_size = self.two_buffer_len()
             return safe_size >= self.batch_size and unsafe_size >= self.batch_size
         else:
-            return self.__len__() == 0
+            return self.__len__() != 0
     
     def clear(self):
         if self.two_buffers:

@@ -435,7 +435,8 @@ class Manager(object):
                                                      final_goal=g,
                                                      agent=controller_policy,
                                                      replay_buffer=controller_replay_buffer,
-                                                     novelty_pq=novelty_pq)
+                                                     novelty_pq=novelty_pq,
+                                                     absolute_goal=self.absolute_goal)
                     if self.automatic_delta_pseudo:
                         ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
                         self.set_delta(ag2sel)
@@ -1059,10 +1060,10 @@ class Controller(object):
             self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ControllerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
 
-    def pairwise_value(self, obs, ag, goal):
+    def pairwise_value(self, obs, ag, goal, absolute_goal):
         assert ag.shape[0] == goal.shape[0]
         with torch.no_grad():
-            if not self.absolute_goal:
+            if not absolute_goal:
                 relative_goal = goal - ag
                 cleaned_obs = self.clean_obs(obs)
                 actions = self.actor(cleaned_obs, relative_goal)
