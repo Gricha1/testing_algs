@@ -1053,8 +1053,8 @@ def run_hrac(args):
             if not cost_model_buffer.two_buffers:
                 writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
             else:
-                writer.add_scalar(f"data/cost_model_buffer_size_unsafe", cost_model_buffer.two_buffer_len()[0], total_timesteps)
-                writer.add_scalar(f"data/cost_model_buffer_size_safe", cost_model_buffer.two_buffer_len()[1], total_timesteps)
+                writer.add_scalar(f"data/cost_model_buffer_size_safe", cost_model_buffer.two_buffer_len()[0], total_timesteps)
+                writer.add_scalar(f"data/cost_model_buffer_size_unsafe", cost_model_buffer.two_buffer_len()[1], total_timesteps)
     else:
         cost_model = None
 

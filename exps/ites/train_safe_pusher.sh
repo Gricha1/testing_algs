@@ -16,8 +16,8 @@ python main.py --seed $seed \
                --goal_loss_coeff 20.0 \
                --cost_budget 0.0 \
                --validation_without_image --eval_freq 30000 \
-               --wm_pretrain_epoches 100 \
-               --wm_n_initial_exploration_steps 30000 \
+               --wm_pretrain_epoches 200 \
+               --wm_n_initial_exploration_steps 60000 \
                --cost_model \
                --cost_model_trajectory_buffer \
                --world_model \
