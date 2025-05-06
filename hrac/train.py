@@ -108,8 +108,8 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             if eval_ep == eval_image_ep:
                 if not args.validation_without_image:
                     positions_screens = []
-                    if env_name == "SafePusher":
-                        env_screens = []
+                    #if env_name == "SafePusher":
+                    env_screens = []
                 imagined_state_freq = 100
                 prev_imagined_state = None
 
@@ -428,9 +428,9 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                         current_step_info["cm_frame_stack_num"] = args.cm_frame_stack_num
                         current_step_info["prev_agent_full_observations"] = copy.deepcopy(current_trajectory)
                     if not args.validation_without_image:
-                        if env_name == "SafePusher":
-                            env_screen = env.render()
-                            env_screens.append(env_screen.transpose(2, 0, 1))
+                        #if env_name == "SafePusher":
+                        env_screen = env.render()
+                        env_screens.append(env_screen.transpose(2, 0, 1))
                         screen = renderer.custom_render(current_step_info, 
                                                         debug_info=debug_info, 
                                                         plot_goal=True,
@@ -478,13 +478,13 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 total_timesteps,
             )
             del positions_screens
-            if env_name == "SafePusher":
-                writer.add_video(
-                    "eval/env_video",
-                    torch.ByteTensor([env_screens]),
-                    total_timesteps,
-                )
-                del env_screens
+            #if env_name == "SafePusher":
+            writer.add_video(
+                "eval/env_video",
+                torch.ByteTensor([env_screens]),
+                total_timesteps,
+            )
+            del env_screens
             renderer.delete_data()
             
         avg_reward /= eval_episodes

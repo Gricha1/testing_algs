@@ -175,7 +175,7 @@ class EnvWithGoal(object):
         return structure
 
     def render(self):
-        self.base_env.render()
+        return self.base_env.render("rgb_array")
 
     @property
     def action_space(self):
@@ -447,6 +447,9 @@ class SafeMazeAnt:
 
     def seed(self, seed):
         self.env.seed(seed)
+    
+    def render(self):
+        return self.env.render()
 
     @property
     def evaluate(self):

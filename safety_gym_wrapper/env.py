@@ -454,6 +454,9 @@ class SafetyEnvWrapper:
 
         return cost
     
+    def render(self):
+        return self.env.render("rgb_array", camera_id=0)
+    
     def reset(self):
         return self.env.reset()
     
