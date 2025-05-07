@@ -75,4 +75,4 @@ WORKDIR /usr/home/workspace
 
 # install safety gym
 #CMD cd /usr/home/workspace/safety-gym && pip install -e .
-RUN echo "/usr/home/workspace/exps/ites" >> ~/.bashrc
+RUN echo "cd /usr/home/workspace/exps/ites" >> ~/.bashrc

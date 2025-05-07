@@ -1,6 +1,6 @@
 import argparse
 
-from hrac.train import run_hrac
+from ites.train import run_hrac
 
 
 if __name__ == "__main__":
@@ -23,7 +23,6 @@ if __name__ == "__main__":
     parser.add_argument("--no_correction", default=True, action="store_true") # default=False
     parser.add_argument("--inner_dones", action="store_true")
     parser.add_argument("--binary_int_reward", action="store_true")
-    parser.add_argument("--sparce_reward", action="store_true")
     parser.add_argument("--cost_budget", default=25, type=float)
 
     # environment
@@ -51,6 +50,7 @@ if __name__ == "__main__":
     parser.add_argument("--env_name", default="SafeAntMazeC", type=str)
     ## safety gym
     parser.add_argument("--task_name", type=str, default="PointGoal1", help="Name of the task")
+    parser.add_argument("--sparce_reward", action="store_true")
     parser.add_argument("--pseudo_lidar", action="store_true", default=False)
     ## safety bullet
     parser.add_argument("--bullet_env_tan_cost", action="store_true", default=False)
@@ -70,36 +70,8 @@ if __name__ == "__main__":
     parser.add_argument("--r_hidden_dim", default=128, type=int)
     parser.add_argument("--r_embedding_dim", default=32, type=int)
 
-    # HIGL
-    parser.add_argument("--landmark_loss_coeff", default=20., type=float)
-    parser.add_argument("--delta", type=float, default=2)
-    parser.add_argument("--adj_factor", default=0.5, type=float)
-
-    # HIGL: Planner, Coverage
-    #parser.add_argument("--landmark_sampling", type=str, choices=["fps", "none"])
-    parser.add_argument("--landmark_sampling", default="fps", type=str)
-    parser.add_argument('--clip_v', type=float, default=-38., help="clip bound for the planner")
-    parser.add_argument("--n_landmark_coverage", type=int, default=20)
-    parser.add_argument("--initial_sample", type=int, default=1000)
-    parser.add_argument("--goal_thr", type=float, default=-10.)
-    parser.add_argument("--planner_start_step", type=int, default=60000)
-    # HIGL: Novelty
-    #parser.add_argument("--novelty_algo", type=str, default="none", choices=["rnd", "none"])
-    parser.add_argument("--novelty_algo", type=str, default="rnd")
-    parser.add_argument("--use_novelty_landmark", action="store_true")
-    parser.add_argument("--close_thr", type=float, default=0.2)
-    parser.add_argument("--n_landmark_novelty", type=int, default=20)
-    parser.add_argument("--rnd_output_dim", type=int, default=128)
-    parser.add_argument("--rnd_lr", type=float, default=1e-3)
-    parser.add_argument("--rnd_batch_size", default=128, type=int)
-    parser.add_argument("--use_ag_as_input", action="store_true")
-    # HIGL: Ablation
-    parser.add_argument("--no_pseudo_landmark", action="store_true")
-    parser.add_argument("--discard_by_anet", action="store_true")
-    parser.add_argument("--automatic_delta_pseudo", action="store_true")
-
     # Manager Parameters
-    parser.add_argument("--manager_algo", default="td3_adj", type=str) # ["none", "td3_adj", "td3_adj_safe_cls", "td3_adj_safe_cls_high_lag", "td3_adj_safe_cls_low_lag"]
+    parser.add_argument("--manager_algo", default="td3_adj", type=str) # ["td3_adj", "td3_adj_safe_cls", "td3_adj_safe_cls_high_lag", "td3_adj_safe_cls_low_lag"]
     parser.add_argument("--subgoal_grad_clip", default=0, type=float)
     parser.add_argument("--absolute_goal", default=False, action="store_true")
     parser.add_argument("--goal_loss_coeff", default=20., type=float)
@@ -117,7 +89,6 @@ if __name__ == "__main__":
     parser.add_argument("--man_hidden_size", default=300, type=int)
 
     # Controller Parameters
-    parser.add_argument("--ctr_cem", action='store_true', default=False)
     parser.add_argument("--sac_alpha", default=0.2, type=float)
     parser.add_argument("--controller_algo", default="td3", type=str)
     parser.add_argument("--self_td3_reward", action='store_true', default=False)
@@ -138,7 +109,6 @@ if __name__ == "__main__":
     parser.add_argument("--coef_safety_modelbased", default=0.0, type=float)    
     parser.add_argument("--coef_safety_modelfree", default=0.0, type=float)
     ## Cost Model Parameters
-    parser.add_argument("--reward_model", action='store_true', default=False)
     parser.add_argument("--cost_model", action='store_true', default=False)
     parser.add_argument("--cost_model_two_buffers", action='store_true', default=False)
     parser.add_argument("--regression_cost_model", action='store_true', default=False)
@@ -200,8 +170,7 @@ if __name__ == "__main__":
     if args.manager_algo == "td3_adj_safe_cls_high_lag":
         assert not "lag" in args.controller_algo
 
-    assert args.manager_algo in ["none",
-                                 "td3_adj",
+    assert args.manager_algo in ["td3_adj",
                                  "td3_high_lag", 
                                  "td3_adj_safe_cls", 
                                  "td3_adj_safe_cls_high_lag", 
@@ -222,9 +191,6 @@ if __name__ == "__main__":
         assert args.controller_cumul_img_safety
     if "img_safe" in args.controller_algo:
         args.img_horizon <= args.manager_propose_freq
-
-    if args.reward_model:
-        assert args.world_model
 
     if args.env_name in ["AntGather", "AntMazeSparse"]:
         args.man_rew_scale = 1.0

@@ -15,11 +15,10 @@ python main.py --seed $seed \
                --man_rew_scale 0.1 \
                --goal_loss_coeff 20.0 \
                --cost_budget 0.0 \
-               --validation_without_image --eval_freq 30000 \
-               --wm_pretrain_epoches 200 \
+               --validation_without_image --eval_freq 1000 \
+               --wm_pretrain_epoches 1 \
                --wm_n_initial_exploration_steps 60000 \
                --cost_model \
-               --cost_model_trajectory_buffer \
                --world_model \
                --num_networks 6 \
                --pred_hidden_size 50 \

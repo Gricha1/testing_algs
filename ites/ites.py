@@ -7,12 +7,11 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from hrac.models import ControllerActor, ControllerCritic, \
-    ManagerActor, ManagerCritic, ControllerSafeModel, RndPredictor, ControllerRewardModel
+from ites.models import ControllerActor, ControllerCritic, \
+    ManagerActor, ManagerCritic, ControllerSafeModel
 
-from hrac.world_models import EnsembleDynamicsModel, PredictEnv
-from planner.goal_plan import Planner
-import hrac.utils as utils
+from ites.world_models import EnsembleDynamicsModel, PredictEnv
+import ites.utils as utils
 
 """
 HIRO part adapted from
@@ -65,16 +64,6 @@ class Manager(object):
                  coef_safety_modelbased=1.0,
                  coef_safety_modelfree=1.0,
                  lidar_observation=False, algo=None,
-                 planner_start_step=None,
-                 planner_cov_sampling=None,
-                 planner_clip_v=None,
-                 n_landmark_cov=None,
-                 planner_initial_sample=None,
-                 planner_goal_thr=None, 
-                 no_pseudo_landmark=False,
-                 automatic_delta_pseudo=False,
-                 delta=2.0,
-                 landmark_loss_coeff=0.,
                  hidden_size=300,
                  phi=None,
                  args=None
@@ -150,38 +139,7 @@ class Manager(object):
             self._cost_penalty = 0.0
         elif "low_lag" in self.args.manager_algo:
             self._cost_penalty = 0.0
-
-        # HIGL
-        self.landmark_loss_coeff = landmark_loss_coeff
-        self.delta = delta
-        self.no_pseudo_landmark = no_pseudo_landmark
-        self.automatic_delta_pseudo = automatic_delta_pseudo
-        if self.automatic_delta_pseudo:
-            self.delta = 0.
-
-        # HIGL Planner
-        self.planner = None
-        self.planner_start_step = planner_start_step
-        self.planner_cov_sampling = planner_cov_sampling
-        self.planner_clip_v = planner_clip_v
-        self.n_landmark_cov = n_landmark_cov
-        self.planner_initial_sample = planner_initial_sample
-        self.planner_goal_thr = planner_goal_thr
     
-    def init_planner(self):
-        self.planner = Planner(landmark_cov_sampling=self.planner_cov_sampling,
-                               clip_v=self.planner_clip_v,
-                               n_landmark_cov=self.n_landmark_cov,
-                               initial_sample=self.planner_initial_sample,
-                               goal_thr=self.planner_goal_thr)
-
-    def set_delta(self, data, alpha=0.9):
-        assert self.automatic_delta_pseudo
-        if self.delta == 0:
-            self.delta = data
-        else:
-            self.delta = alpha * data + (1 - alpha) * self.delta
-
     def set_eval(self):
         self.actor.set_eval()
         self.actor_target.set_eval()
@@ -202,17 +160,6 @@ class Manager(object):
     def value_estimate(self, state, goal, subgoal):
         return self.critic(state, goal, subgoal)
     
-    def get_pseudo_landmark(self, ag, planned_ld):
-        direction = planned_ld - ag
-        norm_direction = F.normalize(direction)
-        scaled_norm_direction = norm_direction * self.delta
-        pseudo_landmarks = ag.clone()
-        pseudo_landmarks[~torch.isnan(scaled_norm_direction)] = pseudo_landmarks[~torch.isnan(scaled_norm_direction)] +\
-                                                            scaled_norm_direction[~torch.isnan(scaled_norm_direction)]
-        
-        scaled_norm_direction[scaled_norm_direction != scaled_norm_direction] = 0
-        return pseudo_landmarks, scaled_norm_direction.mean(dim=0)
-    
     def pid_update(self, ep_cost_avg):
         delta = float(ep_cost_avg - self.safe_threshold)
         self._pid_i = max(0.0, self._pid_i + delta * self._pid_ki)
@@ -228,8 +175,7 @@ class Manager(object):
         self._cost_ds.append(self._cost_d)
 
     def actor_loss(self, state, achieved_goal, goal, a_net, r_margin, 
-                   cost_model=None, selected_landmark=None, no_pseudo_landmark=False, 
-                   controller_policy=None):
+                   cost_model=None, selected_landmark=None, controller_policy=None):
         actions = self.actor(state, goal)
 
         # HRAC high level reward loss
@@ -247,16 +193,6 @@ class Manager(object):
         if not(a_net is None):
             goal_loss = torch.clamp(F.pairwise_distance(
                 a_net(achieved_goal), a_net(gen_subgoal)) - r_margin, min=0.).mean()
-        
-        ld_loss = None
-        if not selected_landmark is None:
-            # HIGL
-            if no_pseudo_landmark:
-                selected_landmark[selected_landmark == float('inf')] = achieved_goal[selected_landmark == float('inf')]
-                batch_landmarks = selected_landmark.clone()
-            else:
-                batch_landmarks, scaled_norm_direction = self.get_pseudo_landmark(achieved_goal, selected_landmark)
-            ld_loss = torch.clamp(F.pairwise_distance(a_net(batch_landmarks), a_net(gen_subgoal)) - r_margin, min=0.).mean()
             
         # ITES high level cost loss
         safety_losses = {}
@@ -279,7 +215,7 @@ class Manager(object):
         return actor_loss, \
                goal_loss, \
                safety_losses, \
-               ld_loss, scaled_norm_direction
+               None, scaled_norm_direction
 
     def off_policy_corrections(self, controller_policy, batch_size, subgoals, x_seq, a_seq):
         first_x = [x[0] for x in x_seq]
@@ -329,7 +265,7 @@ class Manager(object):
 
     def train(self, controller_policy, replay_buffer, controller_replay_buffer, cost_model, 
               iterations, batch_size=100, discount=0.99,
-              tau=0.005, a_net=None, r_margin=None, total_timesteps=None, novelty_pq=None, ep_cost=None):
+              tau=0.005, a_net=None, r_margin=None, total_timesteps=None, ep_cost=None):
         avg_act_loss, avg_crit_loss, avg_ld_loss = 0., 0., 0.
         avg_scaled_norm_direction = get_tensor(np.array([0.] * self.action_dim)).squeeze()
         debug_maganer_info = {"sum_manager_actor_grad_norm": 0}
@@ -339,9 +275,6 @@ class Manager(object):
             avg_safety_subgoals_loss = 0.
         else:
             avg_safety_subgoals_loss = None
-
-        if self.algo == 'higl' and self.planner is None and total_timesteps >= self.planner_start_step:
-            self.init_planner()
 
         for it in range(iterations):
             if "high_lag" in self.args.manager_algo:        
@@ -418,40 +351,10 @@ class Manager(object):
                 self.cost_critic_optimizer.step()
 
             # Compute actor loss
-            if self.algo == "hrac":
-                assert a_net is not None
-                actor_loss, goal_loss, safety_loss, _, _ = \
-                    self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, 
-                                    selected_landmark=None, controller_policy=controller_policy)
-                
-            elif self.algo == "higl":
-                assert a_net is not None
-                if self.planner is None:  # If planner is not ready
-                    selected_landmark = torch.ones(len(state), self.action_dim).to(device)
-                    selected_landmark *= float("inf")  # Build dummy selected landmark
-                else:  # Select a landmark by a planner
-                    selected_landmark = self.planner(cur_obs=x,
-                                                     cur_ag=x_ag,
-                                                     final_goal=g,
-                                                     agent=controller_policy,
-                                                     replay_buffer=controller_replay_buffer,
-                                                     novelty_pq=novelty_pq,
-                                                     absolute_goal=self.absolute_goal)
-                    if self.automatic_delta_pseudo:
-                        ag2sel = np.linalg.norm(selected_landmark.cpu().numpy() - x_ag, axis=1).mean()
-                        self.set_delta(ag2sel)
-
-                actor_loss, goal_loss, safety_loss, ld_loss, scaled_norm_direction = self.actor_loss(
-                                                                                        state, achieved_goal, goal,
-                                                                                        a_net, r_margin, cost_model,
-                                                                                        selected_landmark,
-                                                                                        self.no_pseudo_landmark,
-                                                                                        controller_policy=controller_policy)
-                actor_loss = actor_loss + self.landmark_loss_coeff * ld_loss
-                avg_ld_loss += ld_loss
-                avg_scaled_norm_direction += scaled_norm_direction
-            else:
-                raise NotImplementedError
+            assert a_net is not None
+            actor_loss, goal_loss, safety_loss, _, _ = \
+                self.actor_loss(state, achieved_goal, goal, a_net, r_margin, cost_model, 
+                                selected_landmark=None, controller_policy=controller_policy)
 
             if not(a_net is None):
                 actor_loss = actor_loss + self.goal_loss_coeff * goal_loss
@@ -525,77 +428,6 @@ class Manager(object):
         self.critic.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCritic.pth".format(dir, exp_num, env_name, algo)))
         self.actor_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerActorTarget.pth".format(dir, exp_num, env_name, algo)))
         self.critic_target.load_state_dict(torch.load("{}/{}/{}_{}_ManagerCriticTarget.pth".format(dir, exp_num, env_name, algo)))
-
-
-class RewardModel(object):
-    """
-        reward_model: G x S -> R
-        phi: S -> G
-    """
-    def __init__(self, state_dim, goal_dim, action_dim, lidar_observation, 
-                       frame_stack_num, 
-                       safe_model_loss_coef, lr, cm_hidden_size,
-                       regression_cost_model=False,
-                       phi=None):
-        self.lidar_observation = lidar_observation
-        self.reward_model_loss_coef = safe_model_loss_coef        
-        self.frame_stack_num = frame_stack_num
-        self.state_dim = state_dim
-        self.goal_dim = goal_dim
-        self.action_dim = action_dim
-        self.reward_model = ControllerRewardModel(self.goal_dim, 
-                                                  self.state_dim * self.frame_stack_num,
-                                                  self.action_dim, 
-                                                  cm_hidden_size).to(device)
-        
-        self.reward_model_criterion = nn.MSELoss()        
-        self.reward_model_optimizer = torch.optim.Adam(self.reward_model.parameters(), lr=lr, weight_decay=0.0001)
-        
-    def predict(self, goal, state, action):
-        return self.reward_model(goal, state, action)
-
-    def train_reward_model(self, replay_buffer, 
-                           reward_model_iterations=10, 
-                           reward_model_batch_size=128):
-        debug_info = {}
-        debug_info["reward_model_loss"] = []
-        debug_info["reward_model_mean_true"] = []
-        debug_info["reward_model_mean_pred"] = []
-        for _ in range(reward_model_iterations):
-            x, y, x_ag, y_ag, g, u, r, d, _, _ = replay_buffer.sample(reward_model_batch_size)
-            goal = get_tensor(g, to_device=False) # cost for the next_state
-            goal_device = goal.to(device)
-            state = get_tensor(x, to_device=False) # cost for the next_state
-            state_device = state.to(device)
-            reward = get_tensor(r, to_device=False)
-            reward_device = reward.to(device)
-            action = get_tensor(u, to_device=False)
-            action_device = action.to(device)
-
-            reward_model_loss, true, pred = self.train_batch_reward_model(goal_device, state_device, 
-                                                                        reward_device, action_device)
-            debug_info["reward_model_loss"].append(reward_model_loss.mean().cpu().detach())
-            debug_info["reward_model_mean_true"].append(true.float().mean().cpu().detach())
-            debug_info["reward_model_mean_pred"].append(pred.float().mean().cpu().detach())
-        return debug_info
-    
-    def train_batch_reward_model(self, goal, state, reward, action):
-        pred = self.reward_model(goal, state, action)
-        true = reward
-        reward_model_loss = self.reward_model_loss_coef * self.reward_model_criterion(pred, true)
-        
-        self.reward_model_optimizer.zero_grad()
-        reward_model_loss.backward()
-        self.reward_model_optimizer.step()
-
-        return reward_model_loss, true, pred
-
-    def save(self, dir, env_name, algo, exp_num):
-        torch.save(self.reward_model.state_dict(), "{}/{}/{}_{}_RewardModel.pth".format(dir, exp_num, env_name, algo))
-        
-    def load(self, dir, env_name, algo, exp_num):
-        self.reward_model.load_state_dict(torch.load("{}/{}/{}_{}_RewardModel.pth".format(dir, exp_num, env_name, algo)))
-
                 
 class CostModel(object):
     """
@@ -1076,42 +908,3 @@ class Controller(object):
                 dist1, dist2 = self.critic(cleaned_obs, goal, actions)
                 dist = torch.min(dist1, dist2)
                 return dist.squeeze(-1)
-
-class RandomNetworkDistillation(object):
-    def __init__(self, input_dim, output_dim, lr, use_ag_as_input=False):
-        self.predictor = RndPredictor(input_dim, output_dim)
-        self.predictor_target = RndPredictor(input_dim, output_dim)
-
-        if torch.cuda.is_available():
-            self.predictor = self.predictor.to(device)
-            self.predictor_target = self.predictor_target.to(device)
-
-        self.optimizer = torch.optim.Adam(self.predictor.parameters(), lr=lr)
-        self.use_ag_as_input = use_ag_as_input
-
-    def get_novelty(self, obs):
-        obs = get_tensor(obs)
-        with torch.no_grad():
-            target_feature = self.predictor_target(obs)
-            feature = self.predictor(obs)
-            novelty = (feature - target_feature).pow(2).sum(1).unsqueeze(1) / 2
-        return novelty
-
-    def train(self, replay_buffer, iterations, batch_size=100):
-        for it in range(iterations):
-            # Sample replay buffer
-            x, _, ag, _, _, _, _, _, _, _, _ = replay_buffer.sample(batch_size)
-
-            input = x if not self.use_ag_as_input else ag
-            input = get_tensor(input)
-
-            with torch.no_grad():
-                target_feature = self.predictor_target(input)
-            feature = self.predictor(input)
-            loss = (feature - target_feature).pow(2).mean()
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-        return loss

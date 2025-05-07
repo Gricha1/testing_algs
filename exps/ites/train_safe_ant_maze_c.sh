@@ -12,9 +12,7 @@ python main.py --seed $seed \
                --man_rew_scale 0.1 \
                --goal_loss_coeff 20.0 \
                --world_model \
-               --cost_model_trajectory_buffer \
                --cost_model \
-               --cm_frame_stack_num 1 \
                --manager_algo td3_adj_safe_cls_high_lag \
                --coef_safety_modelfree 800 \
                --controller_algo "td3_img_safe" \

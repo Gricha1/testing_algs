@@ -21,4 +21,4 @@ echo "start docker name: hrac_$docker_container_idx"
 echo "start docker image: $image_name"
 
 cd ..
-docker run -it --rm --name ggorbov.hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace $image_name "bash"
+docker run -it --rm --name hrac_$docker_container_idx --gpus "device=$device" --runtime=nvidia -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -v $(pwd):/usr/home/workspace $image_name "bash"

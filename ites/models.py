@@ -14,39 +14,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-class PPOAgent(nn.Module):
-    def __init__(self, state_dim, goal_dim, action_dim, hidden_dim=300, scale=1):
-        super().__init__()
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(state_dim + goal_dim, hidden_dim)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_dim, hidden_dim)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
-        )
-        self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(state_dim + goal_dim, hidden_dim)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_dim, hidden_dim)),
-            nn.Tanh(),
-            layer_init(nn.Linear(hidden_dim, action_dim), std=0.01),
-        )
-        self.actor_logstd = nn.Parameter(torch.zeros(1, action_dim))
-
-    def get_value(self, x, g):
-        x = torch.cat([x, g], 1)
-        return self.critic(x)
-
-    def get_action_and_value(self, x, g, action=None):
-        x = torch.cat([x, g], -1)
-        action_mean = self.actor_mean(x)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        probs = Normal(action_mean, action_std)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
-
 class Actor(nn.Module):
     def __init__(self, state_dim, goal_dim, action_dim, max_action, hidden_dim=300):
         super().__init__()
@@ -141,15 +108,6 @@ class SafeCritic(nn.Module):
 
         return torch.sigmoid(x1)
 
-class ControllerRewardModel(nn.Module):
-    def __init__(self, goal_dim, state_dim, action_dim, hidden_dim):
-        super().__init__()
-
-        self.critic = RewardCritic(goal_dim + state_dim + action_dim, hidden_dim=hidden_dim)
-    
-    def forward(self, g, x, u):
-        return self.critic(torch.cat([g, x, u], 1))
-
 class ControllerSafeModel(nn.Module):
     def __init__(self, goal_dim, state_dim, hidden_dim):
         super().__init__()
@@ -241,16 +199,3 @@ class ANet(nn.Module):
         return x
     
 
-class RndPredictor(nn.Module):
-    def __init__(self, state_dim, hidden_dim=300, output_dim=128):
-        super().__init__()
-        self.l1 = nn.Linear(state_dim, hidden_dim)
-        self.l2 = nn.Linear(hidden_dim, hidden_dim)
-        self.l3 = nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        x1 = F.relu(self.l1(x))
-        x1 = F.relu(self.l2(x1))
-        x1 = self.l3(x1)
-
-        return x1

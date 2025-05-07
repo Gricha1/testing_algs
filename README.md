@@ -10,39 +10,45 @@ cd docker
 sh start.sh
 ```
 
-# Train ITES on SafeAntMaze environments
-
-## Cshape
+# Train ITES 
+if not in exps/ites do
 ```
-cd exps/hrac_safety
-sh train_safe_ant_maze_c_hrac_safety.sh
+cd exps/ites
 ```
 
-## Wshape
+## Long Horizon Benchmarks
+
+### SafeAneMazeCshape
 ```
-cd exps/hrac_safety
-sh train_safe_ant_maze_w_hrac_safety.sh
+sh train_safe_ant_maze_c.sh
 ```
 
-# Train ITES on SafetyGym environments
+### SafeAneMazeWshape
+```
+sh train_safe_ant_maze_w.sh
+```
+## SafePusher
+```
+sh train_safe_pusher.sh
+```
+
+## Short Horizon Benchmark
 
 ## PointGoal1
 ```
-cd exps/hrac_safety
-sh train_safety_gym_point_hrac_safety.sh
+sh train_safety_gym_point.sh
 ```
 
 ## CarGoal1
 ```
-cd exps/hrac_safety
-sh train_safety_gym_car_hrac_safety.sh
+sh train_safety_gym_car.sh
 ```
 
 ## PointGoal sparce
 ```
-cd exps/hrac_safety
 sh train_safety_gym_point_sparce_hrac_safety.sh
 ```
+
 
 # Tensorboard logging
 tensorboard --logdir logs --bind_all
