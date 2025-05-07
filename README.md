@@ -49,6 +49,12 @@ sh train_safety_gym_car.sh
 sh train_safety_gym_point_sparce_hrac_safety.sh
 ```
 
+# Validate
+### SafeAneMazeCshape
+setup --loaded_exp_num {exp_num} in validate_ant_maze.sh and do
+```
+sh validate_ant_maze.sh
+```
 
 # Tensorboard logging
 tensorboard --logdir logs --bind_all
