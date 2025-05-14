@@ -86,7 +86,10 @@ RUN echo "pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 --extra-inde
 RUN echo "pip install pytorch-lightning==1.9.4" >> ~/.bashrc
 RUN echo "pip install stable-baselines3==1.7.0" >> ~/.bashrc
 
-WORKDIR /usr/home/workspace
+RUN echo "pip install fsspec==2025.3.0" >> ~/.bashrc
+
+WORKDIR /usr/home/workspace/examples
+RUN echo "cd /usr/home/workspace/examples" >> ~/.bashrc
 
 # install safety gym
 #CMD cd /usr/home/workspace/safety-gym && pip install -e .
