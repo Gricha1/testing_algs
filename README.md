@@ -1,6 +1,20 @@
 <!-- markdownlint-disable first-line-h1 -->
 <!-- markdownlint-disable html -->
 
+
+vim /opt/conda/lib/python3.8/site-packages/safety_gymnasium/assets/geoms/goal.py
+
+python train_policy.py --algo PPOLag --env-id SafetyPointGoal1-v0 --parallel 1 --total-steps 10000000 --device cuda:0 --vector-env-nums 1 --torch-threads 1
+
+python train_policy.py --algo FOCOPS --env-id SafetyPointGoal1-v0 --parallel 1 --total-steps 10000000 --device cuda:0 --vector-env-nums 1 --torch-threads 1
+
+python train_policy.py --algo CUP --env-id SafetyPointGoal1-v0 --parallel 1 --total-steps 10000000 --device cuda:0 --vector-env-nums 1 --torch-threads 1
+
+
+
+
+
+
 <div align="center">
   <img src="https://github.com/PKU-Alignment/omnisafe/raw/HEAD/images/logo.png" width="75%"/>
 </div>
