@@ -85,7 +85,7 @@ class SafeAntMaze(CMDP):
     ) -> tuple[torch.Tensor, dict]:
         if seed is not None:
             self.set_seed(seed)
-        if self.do_eval:
+        if self.do_eval and not self.long_horizon_env_name == "SafePusher":
             obs = self._env.reset(eval_idx=self.eval_episode_index)
             self.eval_episode_index += 1
         else:
@@ -126,15 +126,12 @@ class SafeAntMaze(CMDP):
         truncated = torch.as_tensor(self._count >= self.max_episode_steps, device=self._device)
 
         if self.do_eval:
-            terminated = torch.as_tensor(self._env.success_fn(reward), device=self._device)
+            if self.long_horizon_env_name == "SafePusher":
+                terminated = torch.as_tensor(info["is_success"], device=self._device)
+            else:
+                terminated = torch.as_tensor(self._env.success_fn(reward), device=self._device)
             if torch.logical_or(terminated, truncated):
                 self.successes.append(terminated)
-
-        print("obs:", obs.size())
-        print("reward:", reward.size())
-        print("cost:", cost.size())
-        print("terminated:", terminated.size())
-        print("truncated:", truncated.size())
 
         return obs, reward, cost, terminated, truncated, {'final_observation': obs}
 
@@ -157,7 +154,7 @@ def train():
         'logger_cfgs': {
             'use_wandb': True,
             'use_tensorboard': True,
-            'log_dir': '/logdir/omnisafe',
+            'log_dir': 'logs', # /logdir/omnisafe
             'save_model_freq': 1 
         },
         "lagrange_cfgs": {
@@ -165,19 +162,20 @@ def train():
         }
     }
 
-    agent = omnisafe.Agent('PPOLag', 'SafeAntMazeC-Rand', custom_cfgs=custom_cfgs) 
+    #agent = omnisafe.Agent('PPOLag', 'SafeAntMazeC-Rand', custom_cfgs=custom_cfgs) 
     # SafeAntMazeC-Rand
     # SafeAntMazeW-Rand
     # SafePusher-Rand
     #agent = omnisafe.Agent('FOCOPS', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
     #agent = omnisafe.Agent('CUP', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
+    agent = omnisafe.Agent('PPOLag', 'SafePusher-Rand', custom_cfgs=custom_cfgs) 
     # experiment.log_parameters(agent.cfgs)
     agent.learn()
 
 
-def eval(al_name):
+def eval(log_dir, al_name):
     import tqdm
-    LOG_DIR = 'TD3_results/' + al_name
+    LOG_DIR = log_dir + al_name
     evaluator = omnisafe.Evaluator()
     all_items = []
     for item in os.scandir(os.path.join(LOG_DIR, 'torch_save')):
@@ -197,6 +195,7 @@ def eval(al_name):
         'step': [],
     }
     for i, item in enumerate(tqdm.tqdm(all_items)):
+        print("weights:", item)
         evaluator.load_saved(save_dir=LOG_DIR, model_name=item)
         evaluator._env._env.activate_eval(True)
         # evaluator._env._env._time_limit = 500
@@ -212,6 +211,9 @@ def eval(al_name):
         data['step'].append(i * 30_000)
 
     data = {k: np.array(v) for k, v in data.items()}
+    last_weights_data = {key: val[-1] for key, val in data.items()}
+    print("eval results:", last_weights_data)
+    """
     np.savez(al_name + '.npz', **data)
 
     import matplotlib.pyplot as plt
@@ -226,6 +228,7 @@ def eval(al_name):
     plt.plot(data['step'], data['mean_cost'])
     plt.savefig(al_name + '_costs.png')
     plt.close()
+    """
 
 def plot():
     import matplotlib.pyplot as plt
@@ -264,7 +267,12 @@ def plot():
     plt.close()
 
 if __name__ == "__main__":
-    train()
+    #train()
+    #log_dir = "logs/"
+    log_dir = "/logdir/omnisafe"
+    al_name = "PPOLag-{SafePusher-Rand}/seed-224424-2025-05-17-12-30-33"
+    #al_name = "PPOLag-{SafePusher-Rand}/seed-224424-2025-05-17-12-30-33"
+    eval(log_dir, al_name)
 
 
 
