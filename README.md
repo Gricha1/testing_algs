@@ -5,7 +5,21 @@ vim /opt/conda/lib/python3.8/site-packages/safety_gymnasium/assets/geoms/goal.py
 
 cd examples
 
+# train SafePusher
+change examples/custom_train.py
+to agent = omnisafe.Agent('FOCOPS', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
+\# FOCOPS, PPOLag, CUP
+
 python custom_train.py
+
+# train SafeAntMaze
+change examples/custom_train.py
+to agent = omnisafe.Agent('FOCOPS', 'SafeAntMazeC-Rand', custom_cfgs=custom_cfgs)
+\# FOCOPS, PPOLag, CUP
+
+python custom_train.py
+
+
 
 python train_policy.py --algo PPOLag --env-id SafetyPointGoal1-v0 --parallel 1 --total-steps 10000000 --device cuda:0 --vector-env-nums 1 --torch-threads 1
 

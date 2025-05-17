@@ -68,7 +68,11 @@ RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1
     && pip install tensorflow \
     && pip install wandb moviepy opencv-python
 RUN pip install pytorch-lightning==1.9.4
+RUN python -m pip install --upgrade pip==24.0
 RUN pip install stable-baselines3==1.7.0
+#RUN python --version
+#RUN pip --version
+#RUN pip install gym==0.21.0
 
 # mb rce deps
 #RUN apt-get install libopenmpi-dev

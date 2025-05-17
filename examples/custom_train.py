@@ -129,6 +129,13 @@ class SafeAntMaze(CMDP):
             terminated = torch.as_tensor(self._env.success_fn(reward), device=self._device)
             if torch.logical_or(terminated, truncated):
                 self.successes.append(terminated)
+
+        print("obs:", obs.size())
+        print("reward:", reward.size())
+        print("cost:", cost.size())
+        print("terminated:", terminated.size())
+        print("truncated:", truncated.size())
+
         return obs, reward, cost, terminated, truncated, {'final_observation': obs}
 
 
@@ -158,11 +165,12 @@ def train():
         }
     }
 
-    #agent = omnisafe.Agent('PPOLag', 'SafeAntMazeC-Rand', custom_cfgs=custom_cfgs) 
+    agent = omnisafe.Agent('PPOLag', 'SafeAntMazeC-Rand', custom_cfgs=custom_cfgs) 
     # SafeAntMazeC-Rand
     # SafeAntMazeW-Rand
     # SafePusher-Rand
-    agent = omnisafe.Agent('PPOLag', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
+    #agent = omnisafe.Agent('FOCOPS', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
+    #agent = omnisafe.Agent('CUP', 'SafePusher-Rand', custom_cfgs=custom_cfgs)
     # experiment.log_parameters(agent.cfgs)
     agent.learn()
 
