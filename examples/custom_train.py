@@ -194,7 +194,7 @@ def eval(log_dir, al_name):
         'std_success': [],
         'step': [],
     }
-    for i, item in enumerate(tqdm.tqdm(all_items)):
+    for i, item in enumerate(tqdm.tqdm(all_items[-3:])):
         print("weights:", item)
         evaluator.load_saved(save_dir=LOG_DIR, model_name=item)
         evaluator._env._env.activate_eval(True)
@@ -211,8 +211,12 @@ def eval(log_dir, al_name):
         data['step'].append(i * 30_000)
 
     data = {k: np.array(v) for k, v in data.items()}
-    last_weights_data = {key: val[-1] for key, val in data.items()}
-    print("eval results:", last_weights_data)
+    print("last 3 weights:")
+    print("##########################")
+    for key, val in data.items():
+        print(key, "--------", f"mean: {np.mean(val)}, std: {np.std(val)}")
+    print("##########################")
+    print()
     """
     np.savez(al_name + '.npz', **data)
 
@@ -269,8 +273,17 @@ def plot():
 if __name__ == "__main__":
     #train()
     #log_dir = "logs/"
-    log_dir = "/logdir/omnisafe"
-    al_name = "PPOLag-{SafePusher-Rand}/seed-224424-2025-05-17-12-30-33"
+    #log_dir = "/logdir/omnisafe/"
+    #al_name = "PPOLag-{SafePusher-Rand}/seed-224424-2025-05-17-12-30-33"
+
+    ### Pusher
+    # FOCOPS
+    log_dir = "/logdir/omnisafe/"
+    al_name = "FOCOPS-{SafePusher-Rand}/seed-224424-2025-05-14-14-32-19"
+    # CUP
+    #log_dir = "/logdir/omnisafe/"
+    #al_name = "CUP-{SafePusher-Rand}/seed-224424-2025-05-14-14-36-48"
+
     #al_name = "PPOLag-{SafePusher-Rand}/seed-224424-2025-05-17-12-30-33"
     eval(log_dir, al_name)
 
