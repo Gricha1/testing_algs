@@ -28,6 +28,8 @@ from hrac.world_models import EnsembleDynamicsModel, PredictEnv, TensorWrapper
 
 from sklearn.metrics import f1_score, roc_auc_score
 
+import comet_ml
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 """
@@ -39,7 +41,7 @@ https://github.com/bhairavmehta95/data-efficient-hrl/blob/master/hiro/train_hiro
 def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model,
                     predict_env, calculate_controller_reward, ctrl_rew_scale,
                     manager_propose_frequency=10, eval_idx=0, eval_episodes=40, 
-                    renderer=None, writer=None, total_timesteps=0, a_net=None, args=None):
+                    renderer=None, writer=None, total_timesteps=0, a_net=None, args=None, experiment_comet=None):
     print("Starting evaluation number {}...".format(eval_idx))
     if args.test_train_dataset:
         env.evaluate = False
@@ -93,6 +95,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                     validation_date["safe_model_f1"] = val_safe_model_f1
                     validation_date["safe_model_roc"] = val_safe_model_roc
 
+        per_traj_action_generation_times = []
         for eval_ep in range(eval_episodes):
             if env_name == "AntMazeMultiMap":
                 obs = env.reset(validate=True)
@@ -123,11 +126,17 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
             episode_safety_subgoal_rate = 0
             episode_imagine_subgoal_safety = 0
             episode_subgoals_count = 0
+            diff_time_high_policy_action = 0 # zero for td3
+            diff_time_controller_action = 0
+            per_step_action_generation_times = []
+            
             while not done:
                 if args.manager_algo == "none":
                     subgoal = goal - achieved_goal
                 elif step_count % manager_propose_frequency == 0:
+                    start_time_high_policy_action = time.time()
                     subgoal = manager_policy.sample_goal(state, goal)
+                    diff_time_high_policy_action = time.time() - start_time_high_policy_action
                     # Get Safety Subgoal Metric
                     if manager_policy.absolute_goal:
                         if "Safe" in env_name and not args.domain_name == "BulletSafeGym":
@@ -165,12 +174,15 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 step_count += 1
                 global_steps += 1
 
+                start_time_controller_action = time.time()
                 action = controller_policy.select_action(state, subgoal, evaluation=True)
+                diff_time_controller_action = time.time() - start_time_controller_action
                 new_obs, reward, done, info = env.step(action)
                 new_goal = new_obs["desired_goal"]
                 new_state = new_obs["observation"]
                 new_achieved_goal = new_obs["achieved_goal"]
 
+                per_step_action_generation_times.append(diff_time_controller_action + diff_time_high_policy_action)
                 if "Safe" in env_name:
                     cost = info["safety_cost"]
                 if env_name == "SafeGym":
@@ -464,6 +476,7 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
 
                 current_trajectory.append(state)
 
+            per_traj_action_generation_times.append(np.mean(per_step_action_generation_times))
             if "Safe" in env_name:
                 if not args.manager_algo == "none":
                     avg_episode_safety_subgoal_rate += episode_safety_subgoal_rate / episode_subgoals_count
@@ -477,16 +490,32 @@ def evaluate_policy(env, env_name, manager_policy, controller_policy, cost_model
                 torch.ByteTensor([positions_screens]),
                 total_timesteps,
             )
+            if args.use_comet:
+                experiment_comet.log_video(
+                    torch.ByteTensor([positions_screens]),
+                    name="pos_video",
+                    step=total_timesteps,
+                    fps=4
+                )
             del positions_screens
-            #if env_name == "SafePusher":
+            
             writer.add_video(
                 "eval/env_video",
                 torch.ByteTensor([env_screens]),
                 total_timesteps,
             )
+            if args.use_comet:
+                experiment_comet.log_video(
+                    torch.ByteTensor([env_screens]),
+                    name="env_video", 
+                    step=total_timesteps,
+                    fps=4
+                )
             del env_screens
             renderer.delete_data()
-            
+        
+        validation_date["action_generation_time"] = np.mean([per_traj_action_generation_times])
+        
         avg_reward /= eval_episodes
         if "Safe" in env_name:
             avg_episode_safety_subgoal_rate /= eval_episodes
@@ -791,6 +820,10 @@ def run_hrac(args):
     assert controller_goal_dim == len(man_scale), f"controll: {controller_goal_dim}, man_scale: {len(man_scale)}, "
 
     # Set logger(Wandb logger, SummaryWriter logger) and seeds
+    if args.use_comet:
+        comet_ml.login()
+        experiment_comet = comet_ml.start(project_name="ites")
+        experiment_comet.log_parameters(args)
     if not args.not_use_wandb:
         wandb_run_name = f"HRAC_{args.env_name}"
         wandb_run_name = wandb_run_name + "_" + args.wandb_postfix
@@ -949,15 +982,17 @@ def run_hrac(args):
         if episode_num % 10 == 0:
             print("Controller actor loss: {:.3f}".format(debug_info_controller["controller_actor_loss"]))
             print("Controller critic loss: {:.3f}".format(debug_info_controller["controller_critic_loss"]))
+        debug_info_controller["controller_buffer_size"] = len(controller_buffer)
+        debug_info_controller["controller_ep_cost"] = episode_cost
+        debug_info_controller["controller_ep_rew"] = ep_controller_reward
+        debug_info_controller["manager_ep_rew"] = ep_manager_reward
+        debug_info_controller["manager_ep_cost"] = man_episode_cost
+        debug_info_controller["manager_ep_safety_subgoal_rate"] = episode_safety_subgoal_rate
         for key_ in debug_info_controller:
             writer.add_scalar(f"data/{key_}", debug_info_controller[key_], total_timesteps)
-        writer.add_scalar(f"data/controller_buffer_size", len(controller_buffer), total_timesteps)
-        writer.add_scalar("data/controller_ep_cost", episode_cost, total_timesteps)
-        writer.add_scalar("data/controller_ep_rew", ep_controller_reward, total_timesteps)
-        writer.add_scalar("data/manager_ep_rew", ep_manager_reward, total_timesteps)
-        writer.add_scalar("data/manager_ep_cost", man_episode_cost, total_timesteps)
-        writer.add_scalar("data/manager_ep_safety_subgoal_rate", episode_safety_subgoal_rate, total_timesteps)
-
+            if args.use_comet:
+                experiment_comet.log_metric(f"data/{key_}", debug_info_controller[key_], step=total_timesteps)
+        
     ## Initialize adjacency matrix and adjacency network
     n_states = 0
     state_list = []
@@ -1009,6 +1044,8 @@ def run_hrac(args):
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
+                if args.use_comet:
+                    experiment_comet.log_metric(f"data/{key_}", debug_info[key_], step=total_timesteps)
     else:
         reward_model = None
 
@@ -1046,15 +1083,17 @@ def run_hrac(args):
                     print(f"cost buffer len: {len(cost_model_buffer)}")
                 else:
                     print(f"safe buffer len: {cost_model_buffer.two_buffer_len()[0]}", f"unsafe buffer len: {cost_model_buffer.two_buffer_len()[1]}")
+            if not cost_model_buffer.two_buffers:
+                debug_info["cost_model_buffer_size"] = len(cost_model_buffer)
+            else:
+                debug_info["cost_model_buffer_size_safe"] = cost_model_buffer.two_buffer_len()[0]
+                debug_info["cost_model_buffer_size_unsafe"] = cost_model_buffer.two_buffer_len()[1]
             for key_ in debug_info:
                 if type(debug_info[key_]) == list:
                     debug_info[key_] = np.mean(debug_info[key_])
                 writer.add_scalar(f"data/{key_}", debug_info[key_], total_timesteps)
-            if not cost_model_buffer.two_buffers:
-                writer.add_scalar(f"data/cost_model_buffer_size", len(cost_model_buffer), total_timesteps)
-            else:
-                writer.add_scalar(f"data/cost_model_buffer_size_safe", cost_model_buffer.two_buffer_len()[0], total_timesteps)
-                writer.add_scalar(f"data/cost_model_buffer_size_unsafe", cost_model_buffer.two_buffer_len()[1], total_timesteps)
+                if args.use_comet:
+                    experiment_comet.log_metric(f"data/{key_}", debug_info[key_], step=total_timesteps)
     else:
         cost_model = None
 
@@ -1135,18 +1174,20 @@ def run_hrac(args):
             env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, 0, 
             renderer=renderer, writer=writer, total_timesteps=0,
-            a_net=a_net, args=args)
+            a_net=a_net, args=args, experiment_comet=experiment_comet)
         
-        writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, 0)
-        writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, 0)
-        writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, 0)
+        validation_date["avg_ep_rew"] = avg_ep_rew
+        validation_date["avg_ep_cost"] = avg_ep_cost
+        validation_date["avg_controller_rew"] = avg_controller_rew
+        if args.env_name != "AntGather":
+            validation_date["avg_steps_to_finish"] = avg_steps
+            validation_date["perc_env_goal_achieved"] = avg_env_finish
         for key_ in validation_date:
             if type(validation_date[key_]) == list:
                 validation_date[key_] = np.mean(validation_date[key_])
             writer.add_scalar(f"eval/{key_}", validation_date[key_], 0)
-        if args.env_name != "AntGather":
-            writer.add_scalar("eval/avg_steps_to_finish", avg_steps, 0)
-            writer.add_scalar("eval/perc_env_goal_achieved", avg_env_finish, 0)
+            if args.use_comet:
+                experiment_comet.log_metric(f"eval/{key_}", validation_date[key_], step=total_timesteps)
 
         writer.close()
 
@@ -1336,6 +1377,8 @@ def run_hrac(args):
                             if type(debug_maganer_info[key_]) == list:
                                 debug_maganer_info[key_] = np.mean(debug_maganer_info[key_])
                             writer.add_scalar(f"data/{key_}", debug_maganer_info[key_], total_timesteps)
+                            if args.use_comet:
+                                experiment_comet.log_metric(f"data/{key_}", debug_maganer_info[key_], step=total_timesteps)
                         if not(man_safety_loss is None):
                             writer.add_scalar("data/manager_safety_loss", man_safety_loss, total_timesteps)
                         if episode_num % 10 == 0:
@@ -1347,6 +1390,8 @@ def run_hrac(args):
 
                     FPS = total_timesteps / (time.time() - start_training_time)
                     writer.add_scalar("data/FPS", FPS, total_timesteps)
+                    if args.use_comet:
+                        experiment_comet.log_metric("data/FPS", FPS, step=total_timesteps)
                     print("TB dir:", output_dir)
                     print("Training FPS:", FPS)
                     print("*************")
@@ -1360,15 +1405,20 @@ def run_hrac(args):
                                 predict_env, calculate_controller_reward, args.ctrl_rew_scale, 
                                 args.manager_propose_freq, len(evaluations), 
                                 renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-                                a_net=a_net, args=args)
-
-                        writer.add_scalar("eval/avg_ep_rew", avg_ep_rew, total_timesteps)
-                        writer.add_scalar("eval/avg_ep_cost", avg_ep_cost, total_timesteps)
-                        writer.add_scalar("eval/avg_controller_rew", avg_controller_rew, total_timesteps)
+                                a_net=a_net, args=args, experiment_comet=experiment_comet)
+                            
+                        validation_date["avg_ep_rew"] = avg_ep_rew
+                        validation_date["avg_ep_cost"] = avg_ep_cost
+                        validation_date["avg_controller_rew"] = avg_controller_rew
+                        if args.env_name != "AntGather":
+                            validation_date["avg_steps_to_finish"] = avg_steps
+                            validation_date["perc_env_goal_achieved"] = avg_env_finish
                         for key_ in validation_date:
                             if type(validation_date[key_]) == list:
                                 validation_date[key_] = np.mean(validation_date[key_])
                             writer.add_scalar(f"eval/{key_}", validation_date[key_], total_timesteps)
+                            if args.use_comet:
+                                experiment_comet.log_metric(f"eval/{key_}", validation_date[key_], step=total_timesteps)
 
                         evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
                         output_data["frames"].append(total_timesteps)
@@ -1376,8 +1426,6 @@ def run_hrac(args):
                             output_data["reward"].append(avg_ep_rew)
                         else:
                             output_data["reward"].append(avg_env_finish)
-                            writer.add_scalar("eval/avg_steps_to_finish", avg_steps, total_timesteps)
-                            writer.add_scalar("eval/perc_env_goal_achieved", avg_env_finish, total_timesteps)
                         output_data["dist"].append(-avg_controller_rew)
 
                         if args.save_models:
@@ -1585,7 +1633,7 @@ def run_hrac(args):
             env, args.env_name, manager_policy, controller_policy, cost_model, predict_env, calculate_controller_reward,
             args.ctrl_rew_scale, args.manager_propose_freq, len(evaluations), 
             renderer=renderer, writer=writer, total_timesteps=total_timesteps,
-            a_net=a_net, args=args)
+            a_net=a_net, args=args, experiment_comet=experiment_comet)
         evaluations.append([avg_ep_rew, avg_controller_rew, avg_steps])
         output_data["frames"].append(total_timesteps)
         if args.env_name == 'AntGather':

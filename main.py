@@ -193,6 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--not_use_wandb", action='store_true', default=False)
     parser.add_argument("--wandb_postfix", default="", type=str)
     parser.add_argument("--tensorboard_descript", default="", type=str)
+    parser.add_argument("--use_comet", default=True)
 
     # Run the algorithm
     args = parser.parse_args()
