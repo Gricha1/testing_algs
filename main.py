@@ -222,7 +222,7 @@ if __name__ == "__main__":
     if "td3_img_safe_lag" == args.controller_algo:
         assert args.controller_cumul_img_safety
     if "img_safe" in args.controller_algo:
-        args.img_horizon <= args.manager_propose_freq
+        assert args.img_horizon <= args.manager_propose_freq
 
     if args.reward_model:
         assert args.world_model
