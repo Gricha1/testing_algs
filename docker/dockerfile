@@ -1,7 +1,8 @@
-FROM continuumio/miniconda3
+# Pin older Miniconda so python 3.8 resolves.
+FROM continuumio/miniconda3:4.12.0
 
-# install python 3.8.5
-RUN conda install python=3.8.5
+# ensure python 3.8 for omnisafe/mujoco stack
+RUN conda install -y python=3.8.13 && conda clean -afy
 
 RUN echo '\
    Acquire::Retries "100";\
@@ -66,7 +67,7 @@ RUN pip install numpy==1.23.4
 # fix installation for omnisafe
 RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113 \
     && pip install tensorflow \
-    && pip install wandb moviepy opencv-python
+    && pip install wandb moviepy opencv-python comet_ml>=3.40.0
 RUN pip install pytorch-lightning==1.9.4
 RUN python -m pip install --upgrade pip==24.0
 RUN pip install stable-baselines3==1.7.0
@@ -84,16 +85,14 @@ RUN pip install stable-baselines3==1.7.0
 #RUN echo "cd /usr/home/workspace" >> ~/.bashrc
 
 
+# Keep bashrc light: editable install must NOT resolve deps (otherwise pip
+# upgrades torch 1.12.1+cu113 -> 2.4.x and breaks CUDA).
 RUN echo "cd /usr/home/workspace" >> ~/.bashrc
-RUN echo "pip install -e ." >> ~/.bashrc
-RUN echo "pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113" >> ~/.bashrc
-RUN echo "pip install pytorch-lightning==1.9.4" >> ~/.bashrc
-RUN echo "pip install stable-baselines3==1.7.0" >> ~/.bashrc
+RUN echo "pip install -e . --no-deps" >> ~/.bashrc
+RUN echo "python -c \"import comet_ml\" 2>/dev/null || pip install -q \"comet_ml>=3.40.0\"" >> ~/.bashrc
+RUN echo "cd /usr/home/workspace" >> ~/.bashrc
 
-RUN echo "pip install fsspec==2025.3.0" >> ~/.bashrc
-
-WORKDIR /usr/home/workspace/examples
-RUN echo "cd /usr/home/workspace/examples" >> ~/.bashrc
+WORKDIR /usr/home/workspace
 
 # install safety gym
 #CMD cd /usr/home/workspace/safety-gym && pip install -e .

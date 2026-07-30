@@ -88,6 +88,7 @@ class Logger:  # pylint: disable=too-many-instance-attributes
         seed: int = 0,
         use_tensorboard: bool = True,
         use_wandb: bool = False,
+        use_comet: bool = False,
         config: Config | None = None,
         models: list[torch.nn.Module] | None = None,
     ) -> None:
@@ -129,6 +130,11 @@ class Logger:  # pylint: disable=too-many-instance-attributes
 
         self._use_tensorboard: bool = use_tensorboard
         self._use_wandb: bool = use_wandb
+        # Prefer explicit arg; also allow enabling via logger_cfgs.use_comet
+        if config is not None and hasattr(config, 'logger_cfgs'):
+            use_comet = use_comet or bool(config.logger_cfgs.get('use_comet', False))
+        self._use_comet: bool = use_comet
+        self._comet = None
 
         if self._use_tensorboard and self._maste_proc:
             self._tensorboard_writer = SummaryWriter(log_dir=os.path.join(self._log_dir, 'tb'))
@@ -148,6 +154,34 @@ class Logger:  # pylint: disable=too-many-instance-attributes
             if models is not None:
                 for model in models:
                     wandb.watch(model)  # type: ignore
+
+        if self._use_comet and self._maste_proc:  # pragma: no cover
+            import comet_ml
+
+            lc = self._config.logger_cfgs if config is not None else {}
+            workspace = lc.get('comet_workspace', 'gregory-gorbov')
+            project = lc.get('comet_project', 'ites')
+            comet_name = lc.get('comet_experiment_name', f'{exp_name}-{relpath}')
+            print('comet', workspace, project, 'name', comet_name)
+            self._comet = comet_ml.Experiment(
+                api_key=os.environ.get('COMET_API_KEY'),
+                project_name=project,
+                workspace=workspace,
+                log_code=False,
+                log_graph=False,
+                auto_param_logging=False,
+                auto_metric_logging=False,
+                auto_output_logging=False,
+            )
+            try:
+                self._comet.set_name(str(comet_name))
+            except Exception:
+                pass
+            if config is not None:
+                try:
+                    self._comet.log_parameters({'exp_name': exp_name, 'seed': seed})
+                except Exception:
+                    pass
 
     def log(self, msg: str, color: str = 'green', bold: bool = False) -> None:
         """Log the message to the console and the file.
@@ -316,6 +350,23 @@ class Logger:  # pylint: disable=too-many-instance-attributes
 
             if self._use_wandb:
                 wandb.log(self._current_row, step=self._epoch)
+
+            if self._use_comet and self._comet is not None:
+                metrics = dict(self._current_row)
+                # ITES-friendly aliases (eval cost / reward / success)
+                if 'Metrics/EpCost' in metrics:
+                    metrics['eval/avg_ep_cost'] = metrics['Metrics/EpCost']
+                if 'Metrics/EpRet' in metrics:
+                    metrics['eval/avg_ep_rew'] = metrics['Metrics/EpRet']
+                if 'Eval/SuccessRate' in metrics:
+                    metrics['eval/perc_env_goal_achieved'] = metrics['Eval/SuccessRate']
+                step = metrics.get('TotalEnvSteps', self._epoch)
+                try:
+                    step = int(step)
+                except Exception:
+                    step = self._epoch
+                self._comet.log_metrics(metrics, step=step)
+
             self._console.print(table)
 
     def _update_current_row(self) -> None:

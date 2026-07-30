@@ -417,3 +417,6 @@ Sessionx.vim
 tags
 # Persistent undo
 [._]*.un~
+examples/logs/
+logs/
+*.bak.*

@@ -177,6 +177,7 @@ class PolicyGradient(BaseAlgo):
             seed=self._cfgs.seed,
             use_tensorboard=self._cfgs.logger_cfgs.use_tensorboard,
             use_wandb=self._cfgs.logger_cfgs.use_wandb,
+            use_comet=bool(self._cfgs.logger_cfgs.get('use_comet', False)),
             config=self._cfgs,
         )
 

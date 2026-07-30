@@ -61,6 +61,8 @@ class SafeAntMaze(CMDP):
         self.do_eval = False
         self.eval_episode_index = 0
         self.successes = []
+        # epoch success rate for OmniSafe logger / Comet
+        self.env_spec_log = {'Eval/SuccessRate': []}
 
     def activate_eval(self, activate):
         if activate:
@@ -100,7 +102,7 @@ class SafeAntMaze(CMDP):
         """The max steps per episode."""
         if self.long_horizon_env_name == "SafePusher":
             return 100
-        elif self.long_horizon_env_name == "SafeAntMazeC" or self.long_horizon_env_name == "SafeAntMazew":
+        elif self.long_horizon_env_name == "SafeAntMazeC" or self.long_horizon_env_name == "SafeAntMazeW":
             return 500
         else:
             assert 1 == 0
@@ -125,15 +127,32 @@ class SafeAntMaze(CMDP):
         terminated = torch.as_tensor(done if self._count < self.max_episode_steps else False, device=self._device)
         truncated = torch.as_tensor(self._count >= self.max_episode_steps, device=self._device)
 
+        if self.long_horizon_env_name == "SafePusher":
+            success = float(info.get("is_success", False))
+        else:
+            # reward is torch scalar; success_fn expects numpy/python float
+            success = float(self._env.success_fn(float(reward.detach().cpu().item())))
+
         if self.do_eval:
             if self.long_horizon_env_name == "SafePusher":
-                terminated = torch.as_tensor(info["is_success"], device=self._device)
+                terminated = torch.as_tensor(bool(success), device=self._device)
             else:
-                terminated = torch.as_tensor(self._env.success_fn(reward), device=self._device)
+                terminated = torch.as_tensor(bool(success), device=self._device)
             if torch.logical_or(terminated, truncated):
                 self.successes.append(terminated)
 
+        if bool(terminated) or bool(truncated):
+            self.env_spec_log['Eval/SuccessRate'].append(success)
+
         return obs, reward, cost, terminated, truncated, {'final_observation': obs}
+
+
+    def spec_log(self, logger) -> None:
+        """Log mean episode success rate for the finished epoch."""
+        vals = self.env_spec_log.get('Eval/SuccessRate', [])
+        mean_sr = float(np.mean(vals)) if vals else 0.0
+        logger.store({'Eval/SuccessRate': mean_sr})
+        self.env_spec_log['Eval/SuccessRate'] = []
 
 
 def train():

@@ -402,6 +402,8 @@ def __check_logger_configs(configs: Config) -> None:
         configs.wandb_project,
         str,
     ), 'use_wandb and wandb_project must be bool and string'
+    if configs.get('use_comet') is not None:
+        assert isinstance(configs.use_comet, bool), 'use_comet must be bool'
     assert isinstance(configs.use_tensorboard, bool), 'use_tensorboard must be bool'
     assert isinstance(configs.save_model_freq, int), 'save_model_freq must be int'
     if window_lens := configs.get('window_lens'):
