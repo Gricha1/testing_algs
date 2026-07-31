@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Train FOCOPS on SafeAntMazeC-Rand
+# Train FOCOPS on SafeAntMazeC-Rand (flat OmniSafe baseline)
 # Comet: workspace=gregory-gorbov project=ites
-# Experiment name: "FOCOPS {SafeAntMazeC|SafeAntMazeW|SafePusher}"
+# Experiment name: "FOCOPS SafeAntMazeC"
 # Usage (from repo root inside container):
 #   bash exps/train_focops_safe_ant_maze_c.sh [seed] [device]
-# Defaults: seed=224424, device=cuda:0, comet=on, wandb=off
+# Defaults: seed=224424, device=cuda:0, cost_limit=25, comet=on, wandb=off
 
 SEED="${1:-224424}"
 DEVICE="${2:-cuda:0}"
@@ -16,7 +16,6 @@ export COMET_API_KEY="${COMET_API_KEY:-3OfuYHwcRgIwG7DzgzJ190igY}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/examples"
-
 export PYTHONPATH="$ROOT/examples:${PYTHONPATH:-}"
 
 python train_long_horizon.py \
@@ -24,4 +23,5 @@ python train_long_horizon.py \
   --env c \
   --seed "$SEED" \
   --device "$DEVICE" \
+  --cost-limit 25 \
   "$@"

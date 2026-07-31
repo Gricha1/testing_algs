@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Evaluate FOCOPS on SafeAntMazeW
+# Evaluate FOCOPS on SafeAntMazeW (5 env seeds by default)
 # Usage (from repo root inside container):
 #   bash exps/eval_focops_safe_ant_maze_w.sh [num_seeds] [log_dir] [checkpoint]
 # Defaults:
-#   num_seeds = 5          # env seeds 0..num_seeds-1
-#   log_dir   = latest FOCOPS SafeAntMazeW run under examples/logs
+#   num_seeds = 5
+#   log_dir   = latest FOCOPS SafeAntMazeW-Rand run under examples/logs
 #   checkpoint= latest
 #
 # Prints per-trajectory: success, final cost, final reward
@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/examples"
 export PYTHONPATH="$ROOT/examples:${PYTHONPATH:-}"
 
-ARGS=(--env w --checkpoint "$CKPT" --num-seeds "$NUM_SEEDS" --algo FOCOPS)
+ARGS=(--env w --checkpoint "$CKPT" --num-seeds "$NUM_SEEDS" --algo FOCOPS --device cpu)
 if [[ -n "$LOG_DIR" ]]; then
   ARGS+=(--log-dir "$LOG_DIR")
 fi

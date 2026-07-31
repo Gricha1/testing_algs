@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train FOCOPS / CUP / TD3Lag / PPOLag on long-horizon ITES envs with Comet ML."""
+"""Train FOCOPS / CUP / TD3Lag / TD3PID / PPOLag on long-horizon ITES envs with Comet ML."""
 from __future__ import annotations
 
 import argparse
@@ -30,7 +30,7 @@ ENV_COMET_NAMES = {
     "SafePusher-Rand": "SafePusher",
 }
 
-ALGOS = ("FOCOPS", "CUP", "TD3Lag", "PPOLag")
+ALGOS = ("FOCOPS", "CUP", "TD3Lag", "TD3PID", "PPOLag")
 
 COMET_WORKSPACE = "gregory-gorbov"
 COMET_PROJECT = "ites"
@@ -85,7 +85,7 @@ def main() -> None:
     steps_per_epoch = args.steps_per_epoch
     if steps_per_epoch is None:
         # Off-policy defaults are smaller; keep on-policy aligned with custom_train.
-        steps_per_epoch = 2000 if args.algo == "TD3Lag" else 30000
+        steps_per_epoch = 2000 if args.algo in ("TD3Lag", "TD3PID") else 30000
 
     custom_cfgs = {
         "seed": args.seed,

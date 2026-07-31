@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Evaluate FOCOPS on SafePusher (5 env seeds by default)
+# Evaluate PPOLag on SafeAntMazeC (5 env seeds by default)
 # Usage (from repo root inside container):
-#   bash exps/eval_focops_safe_pusher.sh [num_seeds] [log_dir] [checkpoint]
+#   bash exps/eval_ppolag_safe_ant_maze_c.sh [num_seeds] [log_dir] [checkpoint]
 # Defaults:
 #   num_seeds = 5
-#   log_dir   = latest FOCOPS SafePusher-Rand run under examples/logs
+#   log_dir   = latest PPOLag SafeAntMazeC-Rand run under examples/logs
 #   checkpoint= latest
 #
 # Prints per-trajectory: success, final cost, final reward
@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/examples"
 export PYTHONPATH="$ROOT/examples:${PYTHONPATH:-}"
 
-ARGS=(--env pusher --checkpoint "$CKPT" --num-seeds "$NUM_SEEDS" --algo FOCOPS --device cpu)
+ARGS=(--env c --checkpoint "$CKPT" --num-seeds "$NUM_SEEDS" --algo PPOLag --device cpu)
 if [[ -n "$LOG_DIR" ]]; then
   ARGS+=(--log-dir "$LOG_DIR")
 fi

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Train FOCOPS on SafePusher-Rand (flat OmniSafe baseline)
+# Train TD3PID on SafeAntMazeC-Rand (flat OmniSafe baseline)
 # Comet: workspace=gregory-gorbov project=ites
-# Experiment name: "FOCOPS SafePusher"
+# Experiment name: "TD3PID SafeAntMazeC"
 # Usage (from repo root inside container):
-#   bash exps/train_focops_safe_pusher.sh [seed] [device]
+#   bash exps/train_td3pid_safe_ant_maze_c.sh [seed] [device]
 # Defaults: seed=224424, device=cuda:0, cost_limit=25, comet=on, wandb=off
 
 SEED="${1:-224424}"
@@ -19,9 +19,10 @@ cd "$ROOT/examples"
 export PYTHONPATH="$ROOT/examples:${PYTHONPATH:-}"
 
 python train_long_horizon.py \
-  --algo FOCOPS \
-  --env pusher \
+  --algo TD3PID \
+  --env c \
   --seed "$SEED" \
   --device "$DEVICE" \
   --cost-limit 25 \
+  --steps-per-epoch 30000 \
   "$@"
