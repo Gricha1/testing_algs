@@ -1,0 +1,310 @@
+from safety_ant_maze_pusher_envs.plots import plot_values
+import matplotlib.pylab as plt
+import numpy as np
+
+
+class CustomVideoRendered:
+    def __init__(self, env, env_name, cost_model_heatmap=False, 
+                 world_model_comparsion=False, plot_subgoal=True, 
+                 plot_safety_boundary=True):
+        # config
+        self.add_subgoal_values = False
+        self.add_mesurements = True
+        self.plot_safe_dataset = False    
+        self.plot_subgoal = plot_subgoal  
+        self.plot_safety_boundary = plot_safety_boundary  
+
+        self.render_info = {}
+        self.render_info["fig"] = None
+        self.render_info["ax_states"] = None
+        self.env = env
+        self.world_model_comparsion = world_model_comparsion
+        self.cost_model_heatmap = cost_model_heatmap
+        self.shift_x = env.render_info["shift_x"]
+        self.shift_y = env.render_info["shift_y"]
+        if env_name == "SafePusher":
+            self.render_info["env_min_x"], self.render_info["env_max_x"] = -2, 2
+            self.render_info["env_min_y"], self.render_info["env_max_y"] = -2, 2
+        else:
+            self.render_info["env_min_x"], self.render_info["env_max_x"] = -20, 20
+            self.render_info["env_min_y"], self.render_info["env_max_y"] = -20, 20
+        self.render_info["grid_resolution_x"] = 20
+        self.render_info["grid_resolution_y"] = 20
+        self.render_info["state_dim"] = env.state_dim
+        if self.world_model_comparsion:
+            self.robot_poses = None
+            self.world_model_poses = None
+        if self.add_subgoal_values:
+            assert 1 == 0, "didnt implement"
+    
+    def setup_renderer(self):
+        if self.world_model_comparsion:
+            self.robot_poses = []
+            self.world_model_poses = []
+    
+    def delete_data(self):
+        if self.world_model_comparsion:
+            del self.robot_poses
+            del self.world_model_poses
+
+    def custom_render(self, current_step_info, positions_render=False, 
+                      plot_goal=True, debug_info={}, shape=(600, 600), 
+                      env_name="", safe_model=None):    
+        assert "robot_pos" in current_step_info and \
+               "goal_pos" in current_step_info and \
+               "robot_radius" in current_step_info
+        if self.plot_subgoal:
+            assert "subgoal_pos" in current_step_info
+
+        if "SafeAntMaze" in env_name:
+            safety_boundary, safe_dataset = self.env.get_safety_bounds(get_safe_unsafe_dataset=True)
+            debug_info["safety_boundary"] = safety_boundary
+            debug_info["safe_dataset"] = safe_dataset
+
+        shift_x, shift_y = self.shift_x, self.shift_y
+        env_min_x, env_max_x = self.render_info["env_min_x"], self.render_info["env_max_x"]
+        env_min_y, env_max_y = self.render_info["env_min_y"], self.render_info["env_max_y"]
+        if self.render_info["fig"] is None:
+            if self.add_subgoal_values:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_subgoal_values"] = self.render_info["fig"].add_subplot(122)
+            elif self.cost_model_heatmap:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_cost_model_heatmap"] = self.render_info["fig"].add_subplot(122)
+            elif self.world_model_comparsion:
+                self.render_info["fig"] = plt.figure(figsize=[6.4*2, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(121)
+                self.render_info["ax_world_model_robot_trajectories"] = self.render_info["fig"].add_subplot(122)
+            else:
+                self.render_info["fig"] = plt.figure(figsize=[6.4, 4.8])
+                self.render_info["ax_states"] = self.render_info["fig"].add_subplot(111)
+        self.render_info["ax_states"].set_ylim(bottom=env_min_y, top=env_max_y)
+        self.render_info["ax_states"].set_xlim(left=env_min_x, right=env_max_x)
+        if self.world_model_comparsion:
+            self.render_info["ax_world_model_robot_trajectories"].set_ylim(bottom=env_min_y, top=env_max_y)
+            self.render_info["ax_world_model_robot_trajectories"].set_xlim(left=env_min_x, right=env_max_x)
+
+        # robot pose
+        x = current_step_info["robot_pos"][0] + shift_x
+        y = current_step_info["robot_pos"][1] + shift_y
+        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="g", alpha=0.5)
+        self.render_info["ax_states"].add_patch(circle_robot) 
+        self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s")
+        if "cost_model_state" in debug_info:
+            cost_model_state = debug_info["cost_model_state"]
+            if env_name == "SafePusher":
+                self.render_info["ax_states"].text(x + 0.05, y - 0.1, f"{int(cost_model_state*100)/100}")
+            else:
+                self.render_info["ax_states"].text(x + 0.05, y - 2.0, f"{int(cost_model_state*100)/100}")
+
+        # dubug
+        for key_ in debug_info:
+            if key_.startswith("cost_model_achieved_goal_"):
+                pass
+                #cost_val = debug_info[key_]
+                #state_key = "_".join(key_.split("_")[2:])
+                #x, y, z = debug_info[state_key]
+                #self.render_info["ax_states"].text(x, y, f"{int(cost_val*100)/100}")
+
+        # Pusher - render imagination object pose
+        #if "wm_img_achieveds" in debug_info:
+        #    x_coords = []
+        #    y_coords = []
+        #    for img_state in debug_info["wm_img_achieveds"]:
+        #        x = img_state[0] + shift_x
+        #        y = img_state[1] + shift_y
+        #        x_coords.append(x)
+        #        y_coords.append(y)
+        #        circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 3, color="r", alpha=0.5)
+        #        self.render_info["ax_states"].add_patch(circle_robot) 
+        #    self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
+        #    wm_img_states_safety = debug_info["wm_img_states_safety"]
+        #    self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+        #                                       f"{int(wm_img_states_safety*100)/100}")
+        
+        # Pusher - render imagination actor pose
+        if "wm_img_states" in debug_info:
+            x_coords = []
+            y_coords = []
+            for img_state in debug_info["wm_img_states"]:
+                x = img_state[0] + shift_x
+                y = img_state[1] + shift_y
+                x_coords.append(x)
+                y_coords.append(y)
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"] / 3, color="r", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].plot(x_coords, y_coords, color="r", linestyle="-", linewidth=1, alpha=0.5)
+            wm_img_states_safety = debug_info["wm_img_states_safety"]
+            self.render_info["ax_states"].text(x_coords[-1] + 0.05, y_coords[-1] + 0.05, 
+                                               f"{int(wm_img_states_safety*100)/100}")
+        # world model comparsion
+        if self.world_model_comparsion:
+            self.robot_poses.append((x - shift_x, y - shift_y))   
+
+        if self.cost_model_heatmap:
+            cb = plot_values(current_step_info, self.render_info["fig"], 
+                            self.render_info["ax_cost_model_heatmap"], 
+                            safe_model, render_info=self.render_info, return_cb=True)
+
+        if env_name == "SafePusher":
+            x = current_step_info["obj_pos"][0] + shift_x
+            y = current_step_info["obj_pos"][1] + shift_y
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="r", alpha=0.5)
+            self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj") 
+            
+        # subgoal
+        if self.plot_subgoal:
+            if env_name == "SafePusher":
+                x = current_step_info["subgoal_pos"][0] + shift_x
+                y = current_step_info["subgoal_pos"][1] + shift_y
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot)
+                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "obj_g")
+                if "cost_model_subgoal" in debug_info:
+                    cost_model_subgoal = debug_info["cost_model_subgoal"]
+                    self.render_info["ax_states"].text(x + 0.05, y - 0.1, f"{int(cost_model_subgoal*100)/100}")
+                if not(current_step_info["second_goal_pos"] is None):
+                    x = current_step_info["second_goal_pos"][0] + shift_x
+                    y = current_step_info["second_goal_pos"][1] + shift_y
+                    circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                    self.render_info["ax_states"].add_patch(circle_robot)
+                    self.render_info["ax_states"].text(x + 0.05, y + 0.05, "hand_g")
+            else:
+                x = current_step_info["subgoal_pos"][0] + shift_x
+                y = current_step_info["subgoal_pos"][1] + shift_y
+                circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="orange", alpha=0.5)
+                self.render_info["ax_states"].add_patch(circle_robot)
+                self.render_info["ax_states"].text(x + 0.05, y + 0.05, "s_g")
+                if "cost_model_subgoal" in debug_info:
+                    cost_model_subgoal = debug_info["cost_model_subgoal"]
+                    self.render_info["ax_states"].text(x + 0.05, y - 2.0, f"{int(cost_model_subgoal*100)/100}")
+                if self.add_subgoal_values:
+                    self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_s_sg"])), debug_info["v_s_sg"])
+                    self.render_info["ax_subgoal_values"].plot(range(len(debug_info["v_sg_g"])), debug_info["v_sg_g"])
+
+        # goal
+        if env_name != "AntGather" and env_name != "AntMazeSparse" and plot_goal:
+            x = current_step_info["goal_pos"][0] + shift_x
+            y = current_step_info["goal_pos"][1] + shift_y
+            circle_robot = plt.Circle((x, y), radius=current_step_info["robot_radius"], color="y", alpha=0.5)
+            self.render_info["ax_states"].add_patch(circle_robot) 
+            self.render_info["ax_states"].text(x + 0.05, y + 0.05, "g")  
+
+        # safety boundary
+        if self.plot_safety_boundary:
+            safety_boundary = debug_info["safety_boundary"]
+            xs = [point.x + shift_x for point in safety_boundary]
+            ys = [point.y + shift_y for point in safety_boundary]
+            self.render_info["ax_states"].plot(xs, ys, 'b')
+            if self.cost_model_heatmap:
+                xs = [point.x for point in safety_boundary]
+                ys = [point.y for point in safety_boundary]
+                self.render_info["ax_cost_model_heatmap"].plot(xs, ys, 'b')
+            if self.world_model_comparsion:
+                xs = [point.x for point in safety_boundary]
+                ys = [point.y for point in safety_boundary]
+                self.render_info["ax_world_model_robot_trajectories"].plot(xs, ys, 'b')
+            # safe dataset check
+            if self.cost_model_heatmap and self.plot_safe_dataset:
+                safe_dataset = debug_info["safe_dataset"]
+                xs_dataset = safe_dataset[0]
+                ys_dataset = safe_dataset[1]
+                x1s_unsafe = []
+                x2s_unsafe = []
+                x1s_safe = []
+                x2s_safe = []
+                for i in range(len(ys_dataset)):
+                    if ys_dataset[i] == 1:
+                        x1s_unsafe.append(xs_dataset[i][0])
+                        x2s_unsafe.append(xs_dataset[i][1])
+                    else:
+                        x1s_safe.append(xs_dataset[i][0])
+                        x2s_safe.append(xs_dataset[i][1])
+                self.render_info["ax_cost_model_heatmap"].plot(x1s_unsafe, x2s_unsafe, 'r')
+                self.render_info["ax_cost_model_heatmap"].plot(x1s_safe, x2s_safe, 'g')
+
+            
+        # print maze
+        if env_name == "SafePusher":
+            #self.render_info["ax_states"].add_patch(item_)
+            pass
+        elif env_name != "AntGather":
+            env_map = self.env.get_maze()
+            for i in env_map:
+                for indx, val in enumerate(i):
+                    if val == 'r':
+                        i[indx] = 2
+
+            self.render_info["ax_states"].imshow(env_map, cmap='viridis', 
+                                                 interpolation='nearest', 
+                                                 extent=[env_min_x, env_max_x, env_min_y, env_max_y])
+        else:
+            # add apples & bombs
+            apples_and_bombs = current_step_info["apples_and_bombs"]
+
+            apples = [(x, y) for (x, y, type_) in apples_and_bombs if type_ == 0]
+            apples = [plt.Circle([obs[0] + shift_x, obs[1] + shift_y], radius=current_step_info["apple_bomb_radius"],  # noqa
+                        color="y", alpha=0.5) for obs in apples]
+            
+            bombs = [(x, y) for (x, y, type_) in apples_and_bombs if type_ == 1]
+            bombs = [plt.Circle([obs[0] + shift_x, obs[1] + shift_y], radius=current_step_info["apple_bomb_radius"],  # noqa
+                        color="r", alpha=0.5) for obs in bombs]
+            
+            for item_ in apples:
+                self.render_info["ax_states"].add_patch(item_)
+            for item_ in bombs:
+                self.render_info["ax_states"].add_patch(item_)
+                
+        
+        if self.add_mesurements: 
+            assert "acc_reward" in debug_info 
+            assert "acc_cost" in debug_info
+            assert "t" in debug_info
+            if len(debug_info) != 0:
+                # main
+                acc_reward = debug_info["acc_reward"]
+                acc_cost = debug_info["acc_cost"]
+                t = debug_info["t"]
+                # option
+                if "acc_controller_reward" in debug_info:
+                    acc_controller_reward = debug_info["acc_controller_reward"]
+                    self.render_info["ax_states"].text(env_max_x - 18.5, env_max_y - 2, f"Rc:{int(acc_controller_reward*100)/100}")
+                if "dist_a_net_s_sg" in debug_info:
+                    dist_a_net_s_sg = debug_info["dist_a_net_s_sg"]
+                if "dist_a_net_s_g" in debug_info:
+                    dist_a_net_s_g = debug_info["dist_a_net_s_g"]
+                if "imagine_subgoal_safety" in debug_info:
+                    imagine_subgoal_safety = debug_info["imagine_subgoal_safety"]
+                    self.render_info["ax_states"].text(env_max_x - 34.5, env_max_y - 2, f"Is:{int(imagine_subgoal_safety*100)/100}")
+                if env_name == "SafePusher":
+                    reward = debug_info["reward_t"]
+                    self.render_info["ax_states"].text(env_max_x - 0.8, env_max_y - 0.2, f"r:{int(reward*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 1.5, env_max_y - 0.5, f"Cm:{int(acc_cost*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 1.0, env_max_y - 0.5, f"Rm:{int(acc_reward*10)/10}")
+                else:
+                    self.render_info["ax_states"].text(env_max_x - 26.5, env_max_y - 2, f"Cm:{int(acc_cost*100)/100}")
+                    self.render_info["ax_states"].text(env_max_x - 8.5, env_max_y - 2, f"Rm:{int(acc_reward*10)/10}")
+
+        # render img
+        self.render_info["fig"].canvas.draw()
+        data = np.frombuffer(self.render_info["fig"].canvas.tostring_rgb(), dtype=np.uint8)
+        data = data.reshape(self.render_info["fig"].canvas.get_width_height()[::-1] + (3,))
+        self.render_info["ax_states"].clear()
+        if self.cost_model_heatmap:
+            cb.remove()
+        if self.world_model_comparsion:
+            self.render_info["ax_world_model_robot_trajectories"].clear()
+        if self.add_subgoal_values:
+            self.render_info["ax_subgoal_values"].clear()
+        return data
+    
+
+def get_renderer(env, args, renderer_args):
+    renderer = CustomVideoRendered(env,  
+                                   args,
+                                   **renderer_args)
+    
+    return renderer

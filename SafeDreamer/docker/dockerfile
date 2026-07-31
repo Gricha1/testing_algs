@@ -1,0 +1,110 @@
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/San_Francisco
+ENV PYTHONUNBUFFERED 1
+ENV PIP_DISABLE_PIP_VERSION_CHECK 1
+ENV PIP_NO_CACHE_DIR 1
+RUN apt-get update && apt-get install -y \
+  ffmpeg git python3-pip vim libglew-dev \
+  x11-xserver-utils xvfb curl pkg-config \
+  libhdf5-dev libfreetype6-dev zip \
+  libsdl1.2-dev libsdl-image1.2-dev libsdl-ttf2.0-dev \
+  libsdl-mixer1.2-dev libportmidi-dev \
+  && apt-get clean
+
+RUN apt install -y python3-dev libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+
+# Install conda (PINNED) & create env via conda-forge.
+# Miniconda3-latest + defaults channel now fails on Anaconda TOS during docker build.
+RUN curl -fsSL -o /tmp/miniconda.sh       https://repo.anaconda.com/miniconda/Miniconda3-py39_23.11.0-2-Linux-x86_64.sh \
+ && bash /tmp/miniconda.sh -b -p /opt/conda \
+ && rm -f /tmp/miniconda.sh \
+ && /opt/conda/bin/conda config --set always_yes yes \
+ && /opt/conda/bin/conda config --set channel_priority flexible \
+ && (/opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true) \
+ && (/opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true) \
+ && (/opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2 || true) \
+ && /opt/conda/bin/conda create -y -n safe_dynalang python=3.8 -c conda-forge --override-channels \
+ && /opt/conda/bin/conda clean -afy
+ENV PATH=/opt/conda/bin:$PATH
+
+SHELL ["conda", "run", "-n", "safe_dynalang", "/bin/bash", "-c"]
+RUN echo "Current conda environment:" && conda info --envs && python --version
+
+# Install jax
+RUN pip install --upgrade pip
+RUN pip install jax-jumpy==1.0.0
+RUN pip install --upgrade "jax[cuda11_pip]==0.4.11" "jaxlib==0.4.11+cuda11.cudnn86" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Additional deps
+RUN pip install pandas
+RUN pip install flax
+RUN pip install gym
+RUN pip install transformers
+RUN pip install torch
+
+# Install Safe Dreamer deps
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+
+RUN pip install comet_ml
+
+RUN pip install absl-py==2.3.1
+RUN pip install huggingface-hub==0.33.2
+RUN pip install opencv-python==4.12.0.88
+RUN apt-get update
+RUN apt-get install -y libgl1-mesa-glx libglib2.0-0
+RUN pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113
+RUN pip install wandb==0.21.0
+
+
+# Activate conda when start docker
+SHELL ["/bin/bash", "--login", "-c"]
+RUN echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate safe_dynalang" >> ~/.bashrc
+
+# install Safety gymnasium
+RUN echo "cd /usr/home/workspace/safety-gymnasium && pip install -e ." >> ~/.bashrc
+RUN echo "cd /usr/home/workspace" >> ~/.bashrc
+
+# install mujoco
+RUN apt-get update
+RUN apt-get install build-essential --yes
+RUN apt-get install wget
+RUN cd /root \
+    && mkdir .mujoco \
+    && wget https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz \
+    && tar -xf mujoco210-linux-x86_64.tar.gz -C .mujoco \
+    && export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/.mujoco/mujoco210/bin
+
+RUN echo "export MUJOCO_GL=osmesa" >> ~/.bashrc
+RUN apt-get install -y libosmesa6-dev
+RUN apt-get install -y python3-opengl
+
+# Install Craftax
+RUN echo "cd /usr/home/workspace/SafeDreamer/embodied/envs/Craftax && pip install -e . --no-deps && pip install gymnax --no-deps " >> ~/.bashrc
+# Install CrafText
+RUN echo "cd /usr/home/workspace/SafeDreamer/embodied/envs/CrafText && pip install -e . --no-deps " >> ~/.bashrc
+
+RUN echo "cd /usr/home/workspace/exps" >> ~/.bashrc
+
+
+#pip install absl-py==2.3.1
+#pip install huggingface-hub==0.33.2
+#pip install opencv-python==4.12.0.88
+#apt-get update
+#apt-get install -y libgl1-mesa-glx libglib2.0-0
+#pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113
+#pip install wandb==0.21.0
+
+WORKDIR /usr/home/workspace
+
+
+
+# REPIN_JAX_AFTER_DEPS: later pip installs (flax/requirements) can drift jax vs jaxlib
+SHELL ["conda", "run", "-n", "safe_dynalang", "/bin/bash", "-c"]
+RUN pip install --upgrade "jax[cuda11_pip]==0.4.11" "jaxlib==0.4.11+cuda11.cudnn86" \
+    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
+ && python -c "import jax,jaxlib; assert jax.__version__.startswith('0.4.11'), jax.__version__; assert jaxlib.__version__.startswith('0.4.11'), jaxlib.__version__; print('jax ok', jax.__version__, jaxlib.__version__)"
+SHELL ["/bin/bash", "--login", "-c"]

@@ -1,0 +1,83 @@
+# 1. Test setup:
+# docker run -it --rm --gpus all nvidia/cuda:11.4.2-cudnn8-runtime-ubuntu20.04 nvidia-smi
+#
+# If the above does not work, try adding the --privileged flag
+# and changing the command to `sh -c 'ldconfig -v && nvidia-smi'`.
+#
+# 2. Start training:
+# docker build -f Dockerfile -t img . && \
+# docker run -it --rm --gpus all -v ~/logdir:/logdir img \
+#   sh scripts/run_messenger_s1.sh EXP_NAME GPU_IDS SEED
+
+# System
+FROM nvidia/cuda:11.4.3-cudnn8-devel-ubuntu20.04
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/San_Francisco
+ENV PYTHONUNBUFFERED 1
+ENV PIP_DISABLE_PIP_VERSION_CHECK 1
+ENV PIP_NO_CACHE_DIR 1
+RUN apt-get update && apt-get install -y \
+  ffmpeg git python3-pip vim libglew-dev \
+  x11-xserver-utils xvfb curl pkg-config \
+  libhdf5-dev libfreetype6-dev zip \
+  libsdl1.2-dev libsdl-image1.2-dev libsdl-ttf2.0-dev \
+  libsdl-mixer1.2-dev libportmidi-dev \
+  && apt-get clean
+
+# Install conda
+RUN curl -L -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  &&\
+    chmod +x ~/miniconda.sh &&\
+    ~/miniconda.sh -b -p /opt/conda &&\
+    rm ~/miniconda.sh &&\
+    /opt/conda/bin/conda install numpy pyyaml scipy ipython mkl mkl-include &&\
+    /opt/conda/bin/conda clean -ya
+ENV PATH /opt/conda/bin:$PATH
+#RUN conda create -n dynalang python=3.8
+# Automatically use the conda env for any RUN commands
+
+#RUN pip3 install --upgrade jax[cuda11_pip] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+#ENV XLA_PYTHON_CLIENT_MEM_FRACTION 0.8
+
+# HomeGrid
+# COPY homegrid /homegrid
+# RUN cd /homegrid; pip install -e .
+#RUN pip install homegrid
+
+# Messenger: Change `messenger-emma` to your local messenger-emma repo path (must be in the Docker build context).
+# COPY messenger-emma /messenger-emma
+# RUN pip install vgdl@git+https://github.com/ahjwang/py-vgdl
+# RUN cd /messenger-emma; pip install -e .
+
+# Crafter
+#RUN pip install crafter
+#RUN pip install gymnasium
+
+
+#FROM continuumio/miniconda3
+ADD environment.yaml /tmp/
+RUN conda env create -f /tmp/environment.yaml
+
+
+#RUN pip3 install "jax[cuda11_cudnn82]==0.4.7" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Make RUN commands use the new environment:
+SHELL ["conda", "run", "-n", "dynalang", "/bin/bash", "-c"]
+
+# Ensure the conda environment is activated:
+RUN echo "!!Make sure conda is activated:" && which python && python --version
+
+# Install JAX with CUDA support
+RUN pip install "jax[cuda11_cudnn82]==0.4.7" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Install Flax for hagging face jax models
+RUN pip install flax --no-deps 
+RUN pip install msgpack
+
+SHELL ["/bin/bash", "--login", "-c"]
+RUN echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate dynalang" >> ~/.bashrc
+
+WORKDIR dynalang
+
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate dynalang && exec \"$@\"", "--"]
+
